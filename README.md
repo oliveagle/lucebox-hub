@@ -110,7 +110,7 @@ As more models go hybrid (and they will, because linear attention scales better)
 git clone https://github.com/Luce-Org/luce-megakernel
 cd luce-megakernel
 pip install -e .
-python bench_pp_tg.py    # runs pp520 tg128, prints tok/s and tok/J
+python final_bench.py    # runs pp520 tg128 (properly warmed), prints tok/s
 ```
 
 **Requirements:**
@@ -133,7 +133,8 @@ sudo nvidia-smi -pl 220    # or whatever your target wattage
 | `torch_bindings.cpp` | PyTorch C++ bindings |
 | `model.py` | Weight loading + decoder |
 | `setup.py` | Build configuration |
-| `bench_pp_tg.py` | Benchmark (prefill + decode) |
+| `final_bench.py` | Benchmark (prefill + decode, 10 warmup + 20 timed runs averaged — use this for published numbers) |
+| `bench_pp_tg.py` | Quick single-run benchmark with correctness check (not warmed, under-reports prefill) |
 | `RESULTS.md` | Full benchmark results and DVFS sweep |
 
 ## Scope and limitations
@@ -145,7 +146,7 @@ This is a **research proof-of-concept**, not a production inference server.
 - **BF16 only.** No quantization support (GGUF/GPTQ/AWQ). We benchmark at BF16 to isolate kernel-level efficiency from quantization tradeoffs.
 - **0.8B parameters.** This is a small model. Megakernel fusion benefits shrink as model size grows and compute begins to dominate over launch overhead. We chose 0.8B because it's the first hybrid DeltaNet model available, not because it's representative of all workloads.
 - **Power methodology.** Efficiency numbers measure accelerator power only (NVML for NVIDIA, `powermetrics` for Apple), following [Hazy Research's Intelligence Per Watt](https://hazyresearch.stanford.edu/blog/2025-05-27-no-bubbles) methodology. Total system draw is higher for both platforms.
-- **Correctness.** The benchmark includes an end-to-end correctness check comparing megakernel output against a reference decode path. See `bench_pp_tg.py`.
+- **Correctness.** `bench_pp_tg.py` includes an end-to-end correctness check comparing megakernel output against a reference decode path. Use `final_bench.py` for performance numbers (properly warmed, 10 warmup + 20 timed runs averaged).
 
 The goal is to demonstrate that architecture-specific kernel fusion eliminates a real efficiency gap on consumer hardware, and to do it in the open so others can reproduce, critique, and extend the work.
 
