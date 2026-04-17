@@ -6,6 +6,10 @@
   <img src="hero.png" width="600" />
 </p>
 
+<p align="center">
+  <img src="demo.gif" width="600" />
+</p>
+
 <h1 align="center">Luce DFlash</h1>
 
 <p align="center">
