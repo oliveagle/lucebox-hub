@@ -1,54 +1,55 @@
-<svg viewBox="0 0 560 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DFlash 27B — hybrid DeltaNet quantization for RTX 3090">
+<svg viewBox="0 0 560 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DFlash — up to 210 tok/s Qwen3.5-27B on a single RTX 3090">
   <defs>
     <linearGradient id="df-bg" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0" stop-color="#0f0f0f"/>
       <stop offset="1" stop-color="#090909"/>
     </linearGradient>
     <linearGradient id="df-glow" x1="0" x2="0" y1="0" y2="1">
-      <stop offset="0" stop-color="#f5c842" stop-opacity="0.14"/>
-      <stop offset="1" stop-color="#f5c842" stop-opacity="0"/>
+      <stop offset="0" stop-color="#f0d040" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#f0d040" stop-opacity="0"/>
     </linearGradient>
-    <pattern id="df-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-      <line x1="0" y1="0" x2="0" y2="6" stroke="#f5c842" stroke-width="0.4" opacity="0.25"/>
-    </pattern>
   </defs>
 
   <rect width="560" height="320" rx="12" fill="url(#df-bg)" stroke="#222222" stroke-width="1"/>
   <rect x="1" y="1" width="558" height="140" rx="12" fill="url(#df-glow)"/>
 
-  <g font-family="'SF Mono', ui-monospace, monospace" fill="#f5c842" font-size="10" letter-spacing="2">
-    <text x="28" y="42">PROJECT · 02  ·  COMING SOON</text>
+  <g font-family="'Inter', ui-sans-serif, system-ui, sans-serif" fill="#f0d040" font-size="10" font-weight="600" letter-spacing="2">
+    <text x="28" y="42">PROJECT · 02</text>
   </g>
 
-  <g font-family="'SF Mono', ui-monospace, monospace">
-    <text x="28" y="88" font-size="34" font-weight="800" fill="#e8e8ed" letter-spacing="1">DFlash 27B</text>
-    <text x="28" y="118" font-size="13" fill="#8888a0">Hybrid DeltaNet quantization. Qwen 3.5-27B, one RTX 3090.</text>
+  <g>
+    <text x="28" y="92" font-family="'Instrument Serif', Georgia, serif" font-size="44" fill="#e8e8ed" letter-spacing="-0.5">Luce DFlash</text>
+    <text x="28" y="118" font-family="'Inter', ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#8888a0">First open-source DFlash speculative decoding on consumer GPUs.</text>
   </g>
 
   <g stroke="#222222" stroke-width="1">
     <line x1="28" y1="152" x2="532" y2="152"/>
   </g>
 
-  <g font-family="'SF Mono', ui-monospace, monospace" font-size="12">
-    <text x="28" y="184" fill="#55556a">target</text>
-    <text x="28" y="208" font-weight="700" font-size="20" fill="#e8e8ed">27B · 24GB VRAM</text>
-    <text x="28" y="228" font-size="11" fill="#8888a0">was: multi-GPU or CPU offload only</text>
+  <g font-family="'Inter', ui-sans-serif, system-ui, sans-serif">
+    <text x="28" y="178" font-size="11" fill="#55556a" letter-spacing="1">DECODE</text>
+    <text x="28" y="212" font-size="28" font-weight="700" fill="#e8e8ed">up to 210 tok/s</text>
+    <text x="28" y="232" font-size="11" fill="#8888a0">Qwen3.5-27B Q4_K_M · RTX 3090</text>
 
-    <text x="28" y="260" fill="#55556a">approach</text>
-    <text x="28" y="282" font-weight="700" font-size="18" fill="#f5c842">mixed-precision DeltaNet</text>
+    <text x="250" y="178" font-size="11" fill="#55556a" letter-spacing="1">SPEEDUP</text>
+    <text x="250" y="212" font-size="28" font-weight="700" fill="#f0d040">3.54×</text>
+    <text x="250" y="232" font-size="11" fill="#8888a0">vs autoregressive · 2.9× SGLang</text>
+
+    <text x="410" y="178" font-size="11" fill="#55556a" letter-spacing="1">CONTEXT</text>
+    <text x="410" y="212" font-size="28" font-weight="700" fill="#e8e8ed">128K</text>
+    <text x="410" y="232" font-size="11" fill="#8888a0">on a single 24 GB card</text>
   </g>
 
-  <g>
-    <rect x="320" y="172" width="200" height="100" rx="4" fill="url(#df-hatch)" stroke="#f5c842" stroke-width="0.6" stroke-opacity="0.45"/>
-    <g font-family="'SF Mono', ui-monospace, monospace" font-size="10" fill="#55556a" letter-spacing="2">
-      <text x="420" y="200" text-anchor="middle">[ BENCHMARKS ]</text>
-      <text x="420" y="218" text-anchor="middle">PENDING</text>
-      <text x="420" y="252" text-anchor="middle" fill="#8888a0">arrival: Q2 2026</text>
-    </g>
+  <g stroke="#f0d040" stroke-width="1" fill="none" opacity="0.35">
+    <line x1="28" y1="260" x2="532" y2="260"/>
   </g>
 
-  <g fill="#55556a" font-family="'SF Mono', ui-monospace, monospace" font-size="9" letter-spacing="2">
-    <text x="28" y="300">QUANT · W4A16 · ASYM · DELTANET AWARE</text>
-    <text x="532" y="300" text-anchor="end" fill="#f5c842">WATCH →</text>
+  <g font-family="'Inter', ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#8888a0">
+    <text x="28" y="282">ggml only · DDtree verifier · Q4_0 KV cache · 400-500 LOC around ggml_gated_delta_net</text>
+  </g>
+
+  <g fill="#55556a" font-family="'Inter', ui-sans-serif, system-ui, sans-serif" font-size="9" font-weight="600" letter-spacing="2">
+    <text x="28" y="304">MIT · OPEN SOURCE</text>
+    <text x="532" y="304" text-anchor="end" fill="#f0d040">READ →</text>
   </g>
 </svg>

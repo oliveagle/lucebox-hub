@@ -22,17 +22,6 @@
 
 ---
 
-> The efficiency gap between consumer and datacenter silicon isn't inherent.
-> It's an artifact of running generic software on capable hardware.
-
-Local AI is becoming the default for developers shipping agents, researchers reproducing results, teams tired of per-token bills, and anyone whose data shouldn't leave the room. The hardware to run a 20B+ hybrid model at home mostly exists already, a second-hand RTX 3090, a Ryzen AI MAX+ 395, an Apple M-series chip. The kernels to run one *well* don't.
-
-Lucebox is where we build them. One model, one hardware target, one optimization problem at a time. Open weights, open kernels, open benchmarks.
-
-[Read the first writeup →](https://lucebox.com/blog/megakernel)
-
----
-
 ## Inside the box
 
 Two projects today, more coming. Each one is a self-contained release with its own benchmarks and paper-style writeup.
@@ -70,13 +59,13 @@ python final_bench.py
 
 ## 02 · DFlash 27B
 
-**First open-source port of DFlash speculative decoding to consumer GPUs.** Qwen3.5-27B at 130 tok/s on a single RTX 3090 (Q4_K_M target + BF16 draft). 128K context in 24 GB. 3.5× faster than chain speculative decoding, 2.9× faster than SGLang AWQ on the same hardware.
+**First GGUF port of DFlash speculative decoding.** Qwen3.5-27B at 130 tok/s on a single RTX 3090 (Q4_K_M target + BF16 draft). 128K context in 24 GB. 3.5× faster than chain speculative decoding, 2.9× faster than SGLang AWQ on the same hardware.
 
 ```
-                     AR (tok/s)   DFlash (tok/s)   Speedup
-  HumanEval              37.4         130.7         3.49×
-  Math500                37.4         111.2         2.97×
-  GSM8K                  37.6          97.0         2.58×
+                     AR (tok/s)   DFlash+DDTree (tok/s)   Speedup
+  HumanEval              37.4           130.7                3.49×
+  Math500                37.4           111.2                2.97×
+  GSM8K                  37.6            97.0                2.58×
 ```
 
 **The constraint that shaped the project.** AWQ INT4 of Qwen3.5-27B plus the BF16 draft doesn't leave room for the DDTree verify state on a 24 GB card. Q4_K_M GGUF (14.9 GB target) is the largest format that fits target + 3.46 GB draft + budget=22 tree state + KV cache in 24 GB on the RTX 3090. Picking it forced a new port on top of ggml, since no public DFlash runtime supports a GGUF target.
@@ -139,7 +128,7 @@ lucebox-hub/
 ```
   Q1 2026    ▮▮▮▮▮▮▮▮▮▮    RTX 3090 kernels & optimizations
   Q2 2026    ▮▮▮▮▮▯▯▯▯▯    Ryzen AI MAX+ 395 optimizations
-  Q3 2026    ▮▮▯▯▯▯▯▯▯▯    heterogeneous CPU + GPU with unified memory
+  Q2 2026    ▮▮▯▯▯▯▯▯▯▯    Heterogeneous CPU + GPU latency optimizations
 ```
 
 ---
