@@ -20,7 +20,7 @@ namespace dflash27b {
 // All loaders / graph builders push into this via set_last_error(...).
 void set_last_error(std::string msg);
 
-// ─── Target weights (Qwen3.5-27B, qwen35 hybrid, Q4_K_S in ggml context) ──
+// ─── Target weights (Qwen3.5-27B, qwen35 hybrid, Q4_K_M in ggml context) ──
 //
 // Qwen3.5 uses two kinds of blocks interleaved:
 //   - FULL ATTENTION block  (every `full_attention_interval`-th layer, =4):
@@ -114,7 +114,7 @@ struct TargetWeights {
     int ssm_n_group             = 16;
 };
 
-// Load a Q4_K_S target model from a GGUF file on disk.
+// Load a Q4_K_M target model from a GGUF file on disk.
 // Returns false and sets last_error on failure.
 bool load_target_gguf(const std::string & path,
                       ggml_backend_t backend,

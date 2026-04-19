@@ -59,20 +59,19 @@ python final_bench.py
 
 ## 02 · DFlash 27B
 
-**First GGUF port of DFlash speculative decoding.** Qwen3.5-27B at 130 tok/s on a single RTX 3090 (Q4_K_M target + BF16 draft). 128K context in 24 GB. 3.5× faster than chain speculative decoding, 2.9× faster than SGLang AWQ on the same hardware.
+**First GGUF port of DFlash speculative decoding.** Qwen3.5-27B at up to 135.8 tok/s on a single RTX 3090 (peak config: DDTree budget=22 + f16 intermediate, HE bench mean 130.2) (Q4_K_M target + BF16 draft). 128K context in 24 GB. 3.5× faster than chain speculative decoding, 2.9× faster than SGLang AWQ on the same hardware.
 
-```
-                     AR (tok/s)   DFlash+DDTree (tok/s)   Speedup
-  HumanEval              37.4           130.7                3.49×
-  Math500                37.4           111.2                2.97×
-  GSM8K                  37.6            97.0                2.58×
-```
+| Benchmark | AR (tok/s) | DFlash+DDTree (tok/s) | Speedup |
+|-----------|:----------:|:---------------------:|:-------:|
+| **HumanEval** | 37.4 | **130.7** | **3.49×** |
+| Math500 | 37.4 | 111.2 | 2.97× |
+| GSM8K | 37.6 | 97.0 | 2.58× |
 
-**The constraint that shaped the project.** AWQ INT4 of Qwen3.5-27B plus the BF16 draft doesn't leave room for the DDTree verify state on a 24 GB card. Q4_K_M GGUF (14.9 GB target) is the largest format that fits target + 3.46 GB draft + budget=22 tree state + KV cache in 24 GB on the RTX 3090. Picking it forced a new port on top of ggml, since no public DFlash runtime supports a GGUF target.
+**The constraint that shaped the project.** AWQ INT4 of Qwen3.5-27B plus the BF16 draft doesn't leave room for the DDTree verify state on a 24 GB card. Q4_K_M GGUF (~16 GB target) is the largest format that fits target + 3.46 GB draft + budget=22 tree state + KV cache in 24 GB on the RTX 3090. Picking it forced a new port on top of ggml, since no public DFlash runtime supports a GGUF target.
 
 **What we built vs what we didn't.** The algorithms are not ours:
 - [**DFlash**](https://arxiv.org/abs/2502.20762) (z-lab, 2025): block-diffusion draft conditioned on target hidden states.
-- [**DDTree**](https://arxiv.org/abs/2502.20762) (Ringel et al., 2025): tree-structured verify that beats chain verify at the same compute budget.
+- [**DDTree**](https://arxiv.org/abs/2604.12989) (Ringel et al., 2025): tree-structured verify that beats chain verify at the same compute budget.
 
 What we ported and tuned:
 - C++/CUDA decode engine on top of ggml (no libllama, no Python runtime, Q4_K_M target path).

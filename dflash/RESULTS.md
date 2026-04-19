@@ -1,7 +1,7 @@
 # Luce DFlash benchmark results
 
 Single RTX 3090 24 GB, CUDA 12, driver 535.
-Target: `unsloth/Qwen3.5-27B-GGUF` (Q4_K_M, 14.9 GB).
+Target: `unsloth/Qwen3.5-27B-GGUF` (Q4_K_M, ~16 GB).
 Draft:  `z-lab/Qwen3.5-27B-DFlash` (BF16, 3.46 GB).
 Concurrency = 1, greedy decoding, `n_gen=256`.
 Reproduce with `python3 scripts/bench_llm.py` (samples 10 prompts/dataset, seed=42).

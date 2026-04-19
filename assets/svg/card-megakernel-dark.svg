@@ -1,4 +1,4 @@
-<svg viewBox="0 0 560 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Megakernel — 411 tok/s Qwen3.5-0.8B on a single RTX 3090">
+<svg viewBox="0 0 560 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Megakernel — 413 tok/s Qwen3.5-0.8B on a single RTX 3090">
   <defs>
     <linearGradient id="mk-bg" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0" stop-color="#0f0f0f"/>
@@ -28,7 +28,7 @@
 
   <g font-family="'Inter', ui-sans-serif, system-ui, sans-serif">
     <text x="28" y="178" font-size="11" fill="#55556a" letter-spacing="1">DECODE</text>
-    <text x="28" y="212" font-size="30" font-weight="700" fill="#e8e8ed">411 tok/s</text>
+    <text x="28" y="212" font-size="30" font-weight="700" fill="#e8e8ed">413 tok/s</text>
     <text x="28" y="232" font-size="11" fill="#8888a0">@ 220 W · RTX 3090</text>
 
     <text x="200" y="178" font-size="11" fill="#55556a" letter-spacing="1">ENERGY</text>

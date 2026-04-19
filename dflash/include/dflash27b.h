@@ -19,6 +19,12 @@ extern "C" {
 
 #define DFLASH27B_TARGET_HIDDEN        5120
 #define DFLASH27B_TARGET_LAYERS        64
+// NOTE: the `DFLASH27B_TARGET_N_*` / `_HEAD_DIM` macros below are DRAFT
+// dimensions (z-lab draft: 32 Q heads, 8 KV heads, 128 head_dim). The TARGET
+// Qwen3.5-27B qwen35 hybrid uses 24 Q heads, 4 KV heads, 256 head_dim, which
+// live in `src/internal.h` (n_embd_head_k/v, N_HEAD, N_HEAD_KV). Naming is
+// historical — do not change without updating safetensors_draft.cpp +
+// qwen3_dflash_graph.cpp which consume these as draft-side constants.
 #define DFLASH27B_TARGET_N_HEADS       32
 #define DFLASH27B_TARGET_N_KV_HEADS    8
 #define DFLASH27B_TARGET_HEAD_DIM      128
