@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>The first GGUF port of DFlash speculative decoding.</strong><br/>
-  Qwen3.5-27B at up to 210 tok/s<sup>*</sup> on a single RTX 3090 (HumanEval 10-prompt bench mean 129.5 tok/s at DDTree budget=22). 128K context on 24 GB.<br/>
+  Qwen3.5-27B at up to 207 tok/s<sup>*</sup> on a single RTX 3090 (HumanEval 10-prompt bench mean 129.5 tok/s at DDTree budget=22). 128K context on 24 GB.<br/>
   3.43× faster than autoregressive (+15% over chain spec decoding), 2.8× faster than SGLang AWQ.<br/>
   <sub><sup>*</sup>Demo run: 207.6 tok/s DFlash vs 38.0 tok/s AR (5.46×).</sub><br/><br/>
   <a href="https://lucebox.com/blog/dflash">Blog post</a> · <a href="RESULTS.md">Benchmarks</a> · <a href="https://discord.gg/yHfswqZmJQ">Discord</a> · <a href="https://lucebox.com">lucebox.com</a>
@@ -138,7 +138,7 @@ The DeltaNet primitive is already a first-class ggml op (`ggml_gated_delta_net`)
 
 - **llama.cpp**: runs Qwen3.5-27B via GGUF but has no DFlash integration. Chain EAGLE isn't enough; block diffusion + DDTree needs a custom decode loop that bypasses `llama_decode`.
 - **vLLM / SGLang**: Qwen3.5-27B in BF16 is 54 GB, so a single 24 GB card forces a quantized path. GGUF for this arch is broken on SGLang as of 2026-04 and vLLM is dropping GGUF support. AWQ runs on SGLang as plain autoregressive at 46.6 tok/s but can't host the BF16 draft + DDTree tree state alongside it on 24 GB. Q4_K_M GGUF is the only format that fits the full spec-decode stack, this repo runs it at 129.5 tok/s mean on HumanEval, **2.8× faster** than SGLang AWQ autoregressive on the same hardware.
-- **z-lab reference**: HuggingFace transformers, B200-only, 60+ GB VRAM.
+- **z-lab reference**: vLLM / SGLang integrations ship DFlash as a speculative-decoding method, but only on BF16 weights benchmarked on NVIDIA B200 (54+ GB VRAM). No GGUF path.
 
 ## Scope and limits
 

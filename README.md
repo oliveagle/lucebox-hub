@@ -65,7 +65,7 @@ python final_bench.py
 
 **First GGUF port of DFlash speculative decoding.** Qwen3.5-27B on a single RTX 3090, Q4_K_M target + BF16 draft, DDTree budget=22.
 
-- **Up to 210 tok/s** in the demo (207.6 tok/s DFlash vs 38.0 tok/s AR, 5.46×)
+- **Up to 207 tok/s** in the demo (207.6 tok/s DFlash vs 38.0 tok/s AR, 5.46×)
 - **129.5 tok/s mean** on the HumanEval 10-prompt bench
 - **3.43× faster than autoregressive** (+15% over chain speculative decoding)
 - **2.8× faster than SGLang AWQ** on the same hardware
