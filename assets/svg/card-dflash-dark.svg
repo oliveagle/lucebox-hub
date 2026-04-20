@@ -45,7 +45,7 @@
   </g>
 
   <g font-family="'Inter', ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#8888a0">
-    <text x="28" y="282">ggml only · DDtree verifier · Q4_0 KV cache · 400-500 LOC around ggml_gated_delta_net</text>
+    <text x="28" y="282">ggml only · DDTree verifier · Q4_0 KV cache · ~2000 LOC around ggml_gated_delta_net</text>
   </g>
 
   <g fill="#55556a" font-family="'Inter', ui-sans-serif, system-ui, sans-serif" font-size="9" font-weight="600" letter-spacing="2">
