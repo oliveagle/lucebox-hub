@@ -61,6 +61,16 @@ python final_bench.py
 
 **First GGUF port of DFlash speculative decoding.** Qwen3.5-27B at up to 210 tok/s on a single RTX 3090 (demo peak 207.6 tok/s DFlash vs 38.0 tok/s AR, 5.46×; HumanEval 10-prompt bench: 129.5 tok/s mean, 158.4 tok/s peak at DDTree budget=22) (Q4_K_M target + BF16 draft). 128K context in 24 GB (HE bench 134.78 tok/s at ctx=131072). 3.43× faster than autoregressive (+15% over chain spec decoding), 2.8× faster than SGLang AWQ on the same hardware.
 
+```bash
+git clone --recurse-submodules https://github.com/Luce-Org/lucebox-hub
+cd lucebox-hub/dflash
+cmake -B build -S . -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target test_dflash -j
+huggingface-cli download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-Q4_K_M.gguf --local-dir models/
+huggingface-cli download z-lab/Qwen3.5-27B-DFlash model.safetensors --local-dir models/draft/
+python3 scripts/bench_llm.py
+```
+
 | Benchmark | AR (tok/s) | DFlash+DDTree (tok/s) | Speedup |
 |-----------|:----------:|:---------------------:|:-------:|
 | **HumanEval** | 37.8 | **129.5** | **3.43×** |
