@@ -61,10 +61,12 @@ AR = autoregressive (`test_generate`). DFlash+DDTree = tree verify at budget=22 
 
 | Prompt length | Prefill time | Decode tok/s |
 |:-------------:|:------------:|:------------:|
-| 520 (HE)      | 0.06 s       | 134.78       |
+| 520 (HE)      | 0.06 s       | 130          |
 | 13K           | 15 s         | 99           |
 | 32K           | 106 s        | 35           |
 | 128K          | ~10 min      | ~15-20 (est) |
+
+HE 10-prompt bench mean in 128K mode (ctx=131072, ddtree-budget=16): **134.78 tok/s** at AL 8.33.
 
 Set `DFLASH27B_KV_Q4=1` to enable. Full sweep in [RESULTS.md](RESULTS.md).
 
