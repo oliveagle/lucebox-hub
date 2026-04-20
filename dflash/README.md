@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>The first GGUF port of DFlash speculative decoding.</strong><br/>
-  Qwen3.5-27B at up to 210 tok/s<sup>*</sup> on a single RTX 3090 (HumanEval 10-prompt bench: 129.5 tok/s mean, 158.4 tok/s peak at DDTree budget=22). 128K context on 24 GB.<br/>
+  Qwen3.5-27B at up to 210 tok/s<sup>*</sup> on a single RTX 3090 (HumanEval 10-prompt bench mean 129.5 tok/s at DDTree budget=22). 128K context on 24 GB.<br/>
   3.43× faster than autoregressive (+15% over chain spec decoding), 2.8× faster than SGLang AWQ.<br/>
   <sub><sup>*</sup>Demo run: 207.6 tok/s DFlash vs 38.0 tok/s AR (5.46×).</sub><br/><br/>
   <a href="https://lucebox.com/blog/dflash">Blog post</a> · <a href="RESULTS.md">Benchmarks</a> · <a href="https://discord.gg/yHfswqZmJQ">Discord</a> · <a href="https://lucebox.com">lucebox.com</a>
@@ -35,15 +35,15 @@ GSM8K                 37.65         96.15          2.55x
 
 On a 24 GB RTX 3090 with Q4_K_M weights, autoregressive decode of Qwen3.5-27B hits ~37.7 tok/s regardless of framework. Every token reads the full model from VRAM.
 
-Speculative decoding breaks that ceiling: a tiny draft proposes multiple tokens per step, the target verifies them in one forward. [DFlash (z-lab, 2025)](https://arxiv.org/abs/2502.20762) takes this further with **block-diffusion drafting**: a 5-layer non-causal denoising draft conditioned on captured target hidden states. Accepts ~8 tokens/step vs ~3 for chain EAGLE. The official draft is [`z-lab/Qwen3.5-27B-DFlash`](https://huggingface.co/z-lab/Qwen3.5-27B-DFlash). [DDTree (Ringel & Romano, 2025)](https://arxiv.org/abs/2604.12989) adds tree-structured verify on top, recovering the last 30% of the speedup.
+Speculative decoding breaks that ceiling: a tiny draft proposes multiple tokens per step, the target verifies them in one forward. [DFlash (z-lab, 2025)](https://arxiv.org/abs/2602.06036) takes this further with **block-diffusion drafting**: a 5-layer non-causal denoising draft conditioned on captured target hidden states. Accepts ~8 tokens/step vs ~3 for chain EAGLE. The official draft is [`z-lab/Qwen3.5-27B-DFlash`](https://huggingface.co/z-lab/Qwen3.5-27B-DFlash). [DDTree (Ringel & Romano, 2025)](https://arxiv.org/abs/2604.12989) adds tree-structured verify on top, recovering the last 30% of the speedup.
 
-**What was missing:** no public implementation ran either on consumer hardware. z-lab targets BF16 on H100 (60+ GB VRAM). No GGUF path. No DDTree port. AWQ INT4 of the target + BF16 draft doesn't leave room for the verify tree on 24 GB.
+**What was missing:** no public implementation ran either on consumer hardware. z-lab targets BF16 on B200 (60+ GB VRAM). No GGUF path. No DDTree port. AWQ INT4 of the target + BF16 draft doesn't leave room for the verify tree on 24 GB.
 
 Q4_K_M GGUF (~16 GB) is the largest quantization that fits target + 3.46 GB draft + budget=22 tree state + KV cache on one RTX 3090. Picking it forced the port onto ggml, the only runtime with first-class Gated DeltaNet CUDA kernels and a GGUF Q4_K_M loader. This repo is that port:
 
 - ~2000 lines of C++/CUDA on top of ggml (no libllama, no Python runtime)
 - a pinned fork of llama.cpp at [`Luce-Org/llama.cpp@luce-dflash`](https://github.com/Luce-Org/llama.cpp/tree/luce-dflash) that adds three tree-mode ggml ops: `ggml_ssm_conv_tree`, `ggml_gated_delta_net_tree`, `ggml_gated_delta_net_tree_persist`
-- hardcoded for the one model pair, decoding at 129.52 tok/s mean (158.40 peak)
+- hardcoded for the one model pair, decoding at 129.52 tok/s mean on HumanEval
 
 ## Results
 
@@ -137,8 +137,8 @@ The DeltaNet primitive is already a first-class ggml op (`ggml_gated_delta_net`)
 ## Why not llama.cpp / vLLM / z-lab?
 
 - **llama.cpp**: runs Qwen3.5-27B via GGUF but has no DFlash integration. Chain EAGLE isn't enough; block diffusion + DDTree needs a custom decode loop that bypasses `llama_decode`.
-- **vLLM / SGLang**: Qwen3.5-27B in BF16 is 54 GB, so a single 24 GB card forces a quantized path. GGUF for this arch is broken on SGLang as of 2026-04 and vLLM is dropping GGUF support. AWQ runs on SGLang as plain autoregressive at 46.6 tok/s but can't host the BF16 draft + DDTree tree state alongside it on 24 GB. Q4_K_M GGUF is the only format that fits the full spec-decode stack, this repo runs it at 129.5 tok/s mean (158.4 peak) on HumanEval, **2.8× faster** than SGLang AWQ autoregressive on the same hardware.
-- **z-lab reference**: HuggingFace transformers, H100-only, 60+ GB VRAM.
+- **vLLM / SGLang**: Qwen3.5-27B in BF16 is 54 GB, so a single 24 GB card forces a quantized path. GGUF for this arch is broken on SGLang as of 2026-04 and vLLM is dropping GGUF support. AWQ runs on SGLang as plain autoregressive at 46.6 tok/s but can't host the BF16 draft + DDTree tree state alongside it on 24 GB. Q4_K_M GGUF is the only format that fits the full spec-decode stack, this repo runs it at 129.5 tok/s mean on HumanEval, **2.8× faster** than SGLang AWQ autoregressive on the same hardware.
+- **z-lab reference**: HuggingFace transformers, B200-only, 60+ GB VRAM.
 
 ## Scope and limits
 
@@ -146,8 +146,8 @@ Research proof-of-concept, not production.
 
 - **Batch size 1**, single-user local inference target (Ollama / LM Studio use case)
 - **One model pair**: Qwen3.5-27B Q4_K_M target + z-lab DFlash BF16 draft. Does not generalize without rewriting the graph builders.
-- **Greedy only**: `temperature`/`top_p` on the OpenAI server accepted but ignored. Rejection sampling is a weekend-sized task ([CONTRIBUTING.md](CONTRIBUTING.md) #3).
-- **Model reload per turn**: chat + server respawn `test_dflash` per request (~10 s first-token latency, streaming after). A persistent daemon is the next usability win ([CONTRIBUTING.md](CONTRIBUTING.md) #2).
+- **Greedy only**: `temperature`/`top_p` on the OpenAI server accepted but ignored. Rejection sampling in the verify path is a weekend-sized addition.
+- **Model reload per turn**: chat + server respawn `test_dflash` per request (~10 s first-token latency, streaming after). A persistent daemon is the next usability win.
 - **CUDA sm_86+** only. No Metal, ROCm, multi-GPU.
 - **Q4_K_M target** costs ~30 points of per-position accept vs the paper's BF16. Q5_K_M / Q6_K would recover most of it, if they fit.
 
@@ -155,7 +155,7 @@ Correctness: `test_vs_oracle` validates the draft graph at cos sim 0.999812 vs t
 
 ## Contributing
 
-Good first picks (see [CONTRIBUTING.md](CONTRIBUTING.md) for the sorted task list):
+Open an issue or PR against `Luce-Org/lucebox-hub`. Good first picks:
 
 - **Daemon mode**: keep the model resident across turns (first-token latency 10 s → ms)
 - **Temperature / top-k sampling** in the verify path
@@ -175,7 +175,7 @@ Good first picks (see [CONTRIBUTING.md](CONTRIBUTING.md) for the sorted task lis
 @article{dflash2025,
   title   = {DFlash: Block-Diffusion Speculative Decoding},
   author  = {z-lab},
-  journal = {arXiv:2502.20762},
+  journal = {arXiv:2602.06036},
   year    = {2025}
 }
 
@@ -191,4 +191,4 @@ Good first picks (see [CONTRIBUTING.md](CONTRIBUTING.md) for the sorted task lis
 
 MIT · [Lucebox](https://lucebox.com) · [Discord](https://discord.gg/yHfswqZmJQ)
 
-Inspired by [z-lab/DFlash](https://arxiv.org/abs/2502.20762), [liranringel/ddtree](https://github.com/liranringel/ddtree), [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
+Inspired by [z-lab/DFlash](https://arxiv.org/abs/2602.06036), [liranringel/ddtree](https://github.com/liranringel/ddtree), [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).

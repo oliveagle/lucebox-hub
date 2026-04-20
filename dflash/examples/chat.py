@@ -3,8 +3,8 @@ Multi-turn chat REPL with streaming output.
 
     python3 examples/chat.py
 
-Tokens print as they are committed. Model reloads once per turn (see
-CONTRIBUTING.md task #2 for the daemon-mode upgrade that removes it).
+Tokens print as they are committed. Model reloads once per turn;
+a daemon-mode binary that keeps the model resident is a planned follow-up.
 """
 import os
 import struct

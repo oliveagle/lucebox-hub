@@ -104,6 +104,8 @@ Q4_0 KV costs ~3% mean tok/s vs F16 at short contexts and is the only thing that
 
 ## DDTree budget sweep (HumanEval, n_gen=256, f16 intermediate)
 
+Historical tuning run from commit `f1cb9bf` (2026-04-16). Used to pick the default budget=22. Fresh run at budget=22 on commit `5bb7f8c` is the 129.5 tok/s / AL 8.31 reported in the headline above; the ~5 tok/s delta vs the 135.8 row here comes from sample variance across the 10 prompts and from minor build-flag drift between the two commits.
+
 | Budget | Mean AL | Mean tok/s |
 |:------:|:-------:|:----------:|
 | 15     | 7.64    | 125.3      |
@@ -145,6 +147,6 @@ Starting point: Chain DFlash at 112.8 tok/s mean on HumanEval, AL 7.67.
 
 ## Hardware ceiling notes
 
-- Published DFlash paper on Qwen3-4B/8B/30B-MoE (pure attention, BF16, H100) reports 4-5× over AR on HumanEval/Math500 at concurrency 1. Ours: 3.43× on 27B hybrid Q4_K_M on RTX 3090.
+- Published DFlash paper on Qwen3-4B/8B/30B-MoE (pure attention, BF16, B200) reports 4-5× over AR on HumanEval/Math500 at concurrency 1. Ours: 3.43× on 27B hybrid Q4_K_M on RTX 3090.
 - Memory ceiling: per-token SSM intermediate cache (hybrid-only cost) caps tree budget at ~26 on 24 GB. The paper uses budgets up to 1024 on pure-attention models with zero per-node memory tax.
 - Per-token verify cost drops from 25 ms at N=1 to 0.97 ms at N=128 (ggml-cuda Q4_K matmul amortises well with batch size).

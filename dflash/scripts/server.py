@@ -12,8 +12,8 @@ Drop-in for Open WebUI / LM Studio / Cline by setting
   OPENAI_API_BASE=http://localhost:8000/v1  OPENAI_API_KEY=sk-any
 
 Streams tokens as Server-Sent Events using the OpenAI delta format.
-Model reloads per request (~10 s first-token latency) — swap in the
-daemon-mode binary from CONTRIBUTING.md task #2 to eliminate this.
+Model reloads per request (~10 s first-token latency). A daemon-mode
+binary that keeps the model resident is a planned follow-up.
 """
 import argparse
 import json
@@ -56,7 +56,7 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     stream: bool = False
     max_tokens: int = 512
-    temperature: float | None = None  # noted + ignored (greedy-only; see CONTRIBUTING.md #3)
+    temperature: float | None = None  # noted + ignored (greedy-only)
     top_p: float | None = None
 
 

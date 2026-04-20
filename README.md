@@ -63,7 +63,13 @@ python final_bench.py
 
 ## 02 · DFlash DDtree Qwen3.5 27B GGUF on RTX 3090
 
-**First GGUF port of DFlash speculative decoding.** Qwen3.5-27B at up to 210 tok/s on a single RTX 3090 (demo peak 207.6 tok/s DFlash vs 38.0 tok/s AR, 5.46×; HumanEval 10-prompt bench: 129.5 tok/s mean, 158.4 tok/s peak at DDTree budget=22) (Q4_K_M target + BF16 draft). 128K context in 24 GB (HE bench 134.78 tok/s at ctx=131072). 3.43× faster than autoregressive (+15% over chain spec decoding), 2.8× faster than SGLang AWQ on the same hardware.
+**First GGUF port of DFlash speculative decoding.** Qwen3.5-27B on a single RTX 3090, Q4_K_M target + BF16 draft, DDTree budget=22.
+
+- **Up to 210 tok/s** in the demo (207.6 tok/s DFlash vs 38.0 tok/s AR, 5.46×)
+- **129.5 tok/s mean** on the HumanEval 10-prompt bench
+- **3.43× faster than autoregressive** (+15% over chain speculative decoding)
+- **2.8× faster than SGLang AWQ** on the same hardware
+- **128K context in 24 GB** (134.78 tok/s at ctx=131072)
 
 ```bash
 # 1. clone with submodules (pulls the pinned Luce-Org/llama.cpp@luce-dflash fork)
@@ -93,7 +99,7 @@ python3 scripts/bench_llm.py
 **The constraint that shaped the project.** AWQ INT4 of Qwen3.5-27B plus the BF16 draft doesn't leave room for the DDTree verify state on a 24 GB card. Q4_K_M GGUF (~16 GB target) is the largest format that fits target + 3.46 GB draft + budget=22 tree state + KV cache in 24 GB on the RTX 3090. Picking it forced a new port on top of ggml, since no public DFlash runtime supports a GGUF target.
 
 **What we built vs what we didn't.** The algorithms are not ours:
-- [**DFlash**](https://arxiv.org/abs/2502.20762) (z-lab, 2025): block-diffusion draft conditioned on target hidden states.
+- [**DFlash**](https://arxiv.org/abs/2602.06036) (z-lab, 2025): block-diffusion draft conditioned on target hidden states.
 - [**DDTree**](https://arxiv.org/abs/2604.12989) (Ringel et al., 2025): tree-structured verify that beats chain verify at the same compute budget.
 
 What we ported and tuned:
@@ -164,7 +170,7 @@ Per-project citations live in each subproject's README.
 ## Inspired by
 
 - [Hazy Research](https://hazyresearch.stanford.edu/blog/2025-05-27-no-bubbles): megakernel idea and the intelligence-per-watt methodology.
-- [z-lab/DFlash](https://arxiv.org/abs/2502.20762) (Wang et al., 2025): block-diffusion speculative decoding algorithm. We use their published Qwen3.5-27B-DFlash draft weights as-is.
+- [z-lab/DFlash](https://arxiv.org/abs/2602.06036) (Wang et al., 2025): block-diffusion speculative decoding algorithm. We use their published Qwen3.5-27B-DFlash draft weights as-is.
 - [DDTree](https://arxiv.org/abs/2604.12989) (Ringel & Romano, 2025): tree-structured verify that DFlash 27B uses for its 3.5× speedup over chain spec decoding. [liranringel/ddtree](https://github.com/liranringel/ddtree).
 - [AlpinDale/qwen_megakernel](https://github.com/AlpinDale/qwen_megakernel), [Infatoshi/MegaQwen](https://github.com/Infatoshi/MegaQwen): prior art on fused Qwen kernels.
 

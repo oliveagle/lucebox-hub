@@ -3,7 +3,7 @@
 //
 // Model constants (hardcoded for this pair) + the last-error helper.
 // The real driver is test/test_dflash.cpp. A clean public API with chat /
-// streaming / KV persistence is a planned contributor task (see CONTRIBUTING.md).
+// streaming / KV persistence is a planned follow-up.
 
 #ifndef DFLASH27B_H
 #define DFLASH27B_H
