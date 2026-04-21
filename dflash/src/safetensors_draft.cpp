@@ -29,16 +29,28 @@
 
 #include "internal.h"
 
-#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <string>
+
+#if defined(_WIN32)
+#if !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+#if !defined(WIN32_LEAN_AND_MEAN)
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <cerrno>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
+
 #include <unordered_map>
 #include <vector>
 
@@ -159,11 +171,40 @@ ggml_type st_dtype_to_ggml(const std::string & dt) {
 }
 
 struct Mmap {
-    void *  addr = nullptr;
-    size_t  len  = 0;
-    int     fd   = -1;
+    void *  addr    = nullptr;
+    size_t  len     = 0;
+#if defined(_WIN32)
+    HANDLE  hFile   = INVALID_HANDLE_VALUE;
+    HANDLE  hMap    = nullptr;
+#else
+    int     fd      = -1;
+#endif
 
     bool open_ro(const std::string & path, std::string & err) {
+#if defined(_WIN32)
+        hFile = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            err = "CreateFileA: " + path + ": error " + std::to_string(GetLastError());
+            return false;
+        }
+        LARGE_INTEGER sz;
+        if (!GetFileSizeEx(hFile, &sz)) {
+            err = "GetFileSizeEx: error " + std::to_string(GetLastError());
+            return false;
+        }
+        len = (size_t)sz.QuadPart;
+        hMap = CreateFileMappingA(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
+        if (!hMap) {
+            err = "CreateFileMappingA: error " + std::to_string(GetLastError());
+            return false;
+        }
+        addr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+        if (!addr) {
+            err = "MapViewOfFile: error " + std::to_string(GetLastError());
+            return false;
+        }
+#else
         fd = ::open(path.c_str(), O_RDONLY);
         if (fd < 0) {
             err = "open: " + path + ": " + std::strerror(errno);
@@ -181,12 +222,19 @@ struct Mmap {
             addr = nullptr;
             return false;
         }
+#endif
         return true;
     }
 
     ~Mmap() {
+#if defined(_WIN32)
+        if (addr)                        UnmapViewOfFile(addr);
+        if (hMap)                        CloseHandle(hMap);
+        if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
+#else
         if (addr) ::munmap(addr, len);
         if (fd >= 0) ::close(fd);
+#endif
     }
 };
 

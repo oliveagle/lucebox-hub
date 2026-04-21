@@ -8,6 +8,16 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#if !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+#if !defined(WIN32_LEAN_AND_MEAN)
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 #include "ggml.h"
 #include "ggml-backend.h"
 #include "gguf.h"
@@ -71,7 +81,12 @@ struct TargetLayer {
 struct CpuEmbedder {
     void *           mmap_addr = nullptr;
     size_t           mmap_len  = 0;
+#if defined(_WIN32)
+    HANDLE           mmap_hfile = INVALID_HANDLE_VALUE;
+    HANDLE           mmap_hmap  = nullptr;
+#else
     int              mmap_fd   = -1;
+#endif
     const uint8_t *  tok_embd_bytes = nullptr;  // into the mmap region
     ggml_type        tok_embd_type  = GGML_TYPE_COUNT;
     int64_t          n_embd = 0;

@@ -48,7 +48,21 @@ extern "C" void dflash27b_launch_bf16_to_f32(const void * src,
 #include <cinttypes>
 #include <cmath>
 #include <cstdint>
+
+#if defined(_WIN32)
+#if !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+#include <io.h>
+#ifdef _WIN64
+#define ssize_t __int64
+#else
+#define ssize_t long
+#endif
+#else
 #include <unistd.h>
+#endif
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -762,11 +776,17 @@ int main(int argc, char ** argv) {
 
     // Helper: write a committed token to the stream fd immediately (int32 LE).
     // Caller invokes after every out_all.push_back(tok) when stream_fd >= 0.
+    // On Windows stream_fd holds a Win32 HANDLE value (passed via msvcrt.get_osfhandle).
     auto stream_emit = [&](int32_t tok) {
         if (stream_fd < 0) return;
         int32_t v = tok;
+#if defined(_WIN32)
+        DWORD written;
+        WriteFile((HANDLE)(intptr_t)stream_fd, &v, sizeof(v), &written, nullptr);
+#else
         ssize_t n = ::write(stream_fd, &v, sizeof(v));
         (void)n;
+#endif
     };
     if (fast_rollback && seq_verify && !ddtree_mode) {
         std::fprintf(stderr, "--fast-rollback and --seq-verify are mutually exclusive\n");
