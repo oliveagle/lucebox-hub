@@ -34,7 +34,7 @@ from transformers import AutoTokenizer
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TARGET = ROOT / "models" / "Qwen3.5-27B-Q4_K_M.gguf"
-DEFAULT_DRAFT_ROOT = Path.home() / ".cache/huggingface/hub/models--z-lab--Qwen3.5-27B-DFlash/snapshots"
+DEFAULT_DRAFT_ROOT = ROOT / "models" / "draft"
 DEFAULT_BIN = ROOT / "build" / "test_dflash"
 DEFAULT_BUDGET = 22
 MODEL_NAME = "luce-dflash"
@@ -60,9 +60,20 @@ class ChatRequest(BaseModel):
     top_p: float | None = None
 
 
-def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
+def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: int,
               tokenizer: AutoTokenizer, stop_ids: set[int]) -> FastAPI:
+    import asyncio
     app = FastAPI(title="Luce DFlash OpenAI server")
+    daemon_lock = asyncio.Lock()
+
+    r_pipe, w_pipe = os.pipe()
+    cmd = [str(bin_path), str(target), str(draft), "--daemon",
+           "--fast-rollback", "--ddtree", f"--ddtree-budget={budget}",
+           f"--max-ctx={max_ctx}",
+           f"--stream-fd={w_pipe}"]
+    daemon_proc = subprocess.Popen(cmd, pass_fds=(w_pipe,),
+                                   stdin=subprocess.PIPE)
+    os.close(w_pipe)
 
     @app.get("/v1/models")
     def list_models():
@@ -72,7 +83,7 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
         }
 
     def _tokenize_prompt(req: ChatRequest) -> Path:
-        msgs = [m.dict() for m in req.messages]
+        msgs = [m.model_dump() for m in req.messages]
         prompt = tokenizer.apply_chat_template(
             msgs, tokenize=False, add_generation_prompt=True)
         ids = tokenizer.encode(prompt, add_special_tokens=False)
@@ -82,42 +93,48 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
                 f.write(struct.pack("<i", int(t)))
         return tmp
 
-    def _spawn(prompt_bin: Path, n_gen: int):
-        out_bin = Path(tempfile.mkstemp(suffix=".bin")[1])
-        r, w = os.pipe()
-        cmd = [str(bin_path), str(target), str(draft), str(prompt_bin),
-               str(n_gen), str(out_bin),
-               "--fast-rollback", "--ddtree", f"--ddtree-budget={budget}",
-               f"--stream-fd={w}"]
-        proc = subprocess.Popen(cmd, pass_fds=(w,),
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE)
-        os.close(w)
-        return proc, r, out_bin
-
-    def _token_stream(proc, r, n_gen):
+    def _token_stream(r, n_gen):
         generated = 0
-        while generated < n_gen:
+        hit_stop = False
+        while True:
             b = os.read(r, 4)
             if not b or len(b) < 4:
                 break
             tok_id = struct.unpack("<i", b)[0]
-            generated += 1
-            if tok_id in stop_ids:
+            if tok_id == -1:
                 break
+            if hit_stop:
+                continue
+            if tok_id in stop_ids:
+                hit_stop = True
+                continue
+            generated += 1
             yield tok_id
-        proc.wait()
+            if generated >= n_gen:
+                hit_stop = True
 
     @app.post("/v1/chat/completions")
     async def chat_completions(req: ChatRequest):
         prompt_bin = _tokenize_prompt(req)
+        
+        # Clamp max_tokens to available headroom
+        prompt_len = prompt_bin.stat().st_size // 4
+        # Safety buffer for the dflash block_size (16)
+        available_gen = max_ctx - prompt_len - 20
+        gen_len = min(req.max_tokens, available_gen)
+        if gen_len <= 0:
+            return JSONResponse({"detail": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"}, status_code=400)
+
         completion_id = "chatcmpl-" + uuid.uuid4().hex[:24]
         created = int(time.time())
 
         if req.stream:
             async def sse() -> AsyncIterator[str]:
-                proc, r, _ = _spawn(prompt_bin, req.max_tokens)
-                # opening role delta
+                async with daemon_lock:
+                    cmd_line = f"{prompt_bin} {gen_len}\n"
+                    daemon_proc.stdin.write(cmd_line.encode("utf-8"))
+                    daemon_proc.stdin.flush()
+                    # opening role delta
                 head = {
                     "id": completion_id, "object": "chat.completion.chunk",
                     "created": created, "model": MODEL_NAME,
@@ -127,7 +144,7 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
                 }
                 yield f"data: {json.dumps(head)}\n\n"
                 try:
-                    for tok_id in _token_stream(proc, r, req.max_tokens):
+                    for tok_id in _token_stream(r_pipe, req.max_tokens):
                         chunk = {
                             "id": completion_id,
                             "object": "chat.completion.chunk",
@@ -152,8 +169,12 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
             return StreamingResponse(sse(), media_type="text/event-stream")
 
         # Non-streaming: collect all tokens, return one response
-        proc, r, _ = _spawn(prompt_bin, req.max_tokens)
-        tokens = list(_token_stream(proc, r, req.max_tokens))
+        async with daemon_lock:
+            cmd_line = f"{prompt_bin} {gen_len}\n"
+            daemon_proc.stdin.write(cmd_line.encode("utf-8"))
+            daemon_proc.stdin.flush()
+            tokens = list(_token_stream(r_pipe, gen_len))
+            
         try: prompt_bin.unlink()
         except Exception: pass
         text = tokenizer.decode(tokens, skip_special_tokens=True)
@@ -183,6 +204,9 @@ def main():
     ap.add_argument("--draft",  type=Path, default=DEFAULT_DRAFT_ROOT)
     ap.add_argument("--bin",    type=Path, default=DEFAULT_BIN)
     ap.add_argument("--budget", type=int,  default=DEFAULT_BUDGET)
+    default_ctx = 131072 if os.environ.get("DFLASH27B_KV_Q4") == "1" else 6144
+    ap.add_argument("--max-ctx", type=int, default=default_ctx, help="Maximum context length")
+    ap.add_argument("--daemon", action="store_true", help="Run with persistent model daemon (now default)")
     args = ap.parse_args()
 
     if not args.bin.is_file():
@@ -200,7 +224,7 @@ def main():
         ids = tokenizer.encode(s, add_special_tokens=False)
         if ids: stop_ids.add(ids[0])
 
-    app = build_app(args.target, draft, args.bin, args.budget,
+    app = build_app(args.target, draft, args.bin, args.budget, args.max_ctx,
                     tokenizer, stop_ids)
 
     import uvicorn
@@ -209,6 +233,7 @@ def main():
     print(f"  draft  = {draft}")
     print(f"  bin    = {args.bin}")
     print(f"  budget = {args.budget}")
+    print(f"  max_ctx= {args.max_ctx}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
