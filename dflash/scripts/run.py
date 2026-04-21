@@ -20,7 +20,7 @@ def default_paths():
     return {
         "target": "models/Qwen3.5-27B-Q4_K_M.gguf",
         "draft":  str(Path.home() / ".cache/huggingface/hub/models--z-lab--Qwen3.5-27B-DFlash/snapshots"),
-        "bin":    "build/test_dflash",
+        "bin":    "build/test_dflash" + (".exe" if sys.platform == "win32" else ""),
     }
 
 
@@ -96,9 +96,15 @@ def main():
                str(args.n_gen), out_bin,
                "--fast-rollback", "--ddtree", f"--ddtree-budget={args.budget}",
                f"--stream-fd={w}"]
-        proc = subprocess.Popen(cmd, pass_fds=(w,), env=env,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE)
+        if sys.platform == "win32":
+            os.set_inheritable(w, True)
+            proc = subprocess.Popen(cmd, env=env, close_fds=False,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE)
+        else:
+            proc = subprocess.Popen(cmd, pass_fds=(w,), env=env,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE)
         os.close(w)
 
         generated = 0

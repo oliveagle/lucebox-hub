@@ -48,7 +48,21 @@ extern "C" void dflash27b_launch_bf16_to_f32(const void * src,
 #include <cinttypes>
 #include <cmath>
 #include <cstdint>
+
+#if defined(_WIN32)
+#if !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+#include <io.h>
+#ifdef _WIN64
+#define ssize_t __int64
+#else
+#define ssize_t long
+#endif
+#else
 #include <unistd.h>
+#endif
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

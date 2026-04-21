@@ -45,23 +45,32 @@
 
 #include "internal.h"
 
-#include <cerrno>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <fcntl.h>
 #include <string>
+
+#if !defined(_WIN32)
+#include <cerrno>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 namespace dflash27b {
 
 // CpuEmbedder destructor + embed() method
 CpuEmbedder::~CpuEmbedder() {
+#if defined(_WIN32)
+    if (mmap_addr)                         UnmapViewOfFile(mmap_addr);
+    if (mmap_hmap)                         CloseHandle(mmap_hmap);
+    if (mmap_hfile != INVALID_HANDLE_VALUE) CloseHandle(mmap_hfile);
+#else
     if (mmap_addr) ::munmap(mmap_addr, mmap_len);
     if (mmap_fd >= 0) ::close(mmap_fd);
+#endif
 }
 
 bool CpuEmbedder::embed(const int32_t * ids, int n, float * out_f32) const {
@@ -85,9 +94,38 @@ namespace {
 struct Mmap {
     void *  addr = nullptr;
     size_t  len  = 0;
+#if defined(_WIN32)
+    HANDLE  hFile = INVALID_HANDLE_VALUE;
+    HANDLE  hMap  = nullptr;
+#else
     int     fd   = -1;
+#endif
 
     bool open_ro(const std::string & path, std::string & err) {
+#if defined(_WIN32)
+        hFile = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            err = "CreateFileA: " + path + ": error " + std::to_string(GetLastError());
+            return false;
+        }
+        LARGE_INTEGER sz;
+        if (!GetFileSizeEx(hFile, &sz)) {
+            err = "GetFileSizeEx: error " + std::to_string(GetLastError());
+            return false;
+        }
+        len = (size_t)sz.QuadPart;
+        hMap = CreateFileMappingA(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
+        if (!hMap) {
+            err = "CreateFileMappingA: error " + std::to_string(GetLastError());
+            return false;
+        }
+        addr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+        if (!addr) {
+            err = "MapViewOfFile: error " + std::to_string(GetLastError());
+            return false;
+        }
+#else
         fd = ::open(path.c_str(), O_RDONLY);
         if (fd < 0) { err = "open: " + path + ": " + std::strerror(errno); return false; }
         struct stat st;
@@ -95,13 +133,29 @@ struct Mmap {
         len = (size_t)st.st_size;
         addr = ::mmap(nullptr, len, PROT_READ, MAP_PRIVATE, fd, 0);
         if (addr == MAP_FAILED) { err = "mmap: " + std::string(std::strerror(errno)); addr = nullptr; return false; }
+#endif
         return true;
     }
-    // Ownership transfer: release the mmap handle without unmapping.
-    void release() { addr = nullptr; fd = -1; len = 0; }
+    // Ownership transfer: release handles without unmapping.
+    void release() {
+        addr = nullptr;
+        len  = 0;
+#if defined(_WIN32)
+        hFile = INVALID_HANDLE_VALUE;
+        hMap  = nullptr;
+#else
+        fd = -1;
+#endif
+    }
     ~Mmap() {
+#if defined(_WIN32)
+        if (addr)                        UnmapViewOfFile(addr);
+        if (hMap)                        CloseHandle(hMap);
+        if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
+#else
         if (addr) ::munmap(addr, len);
         if (fd >= 0) ::close(fd);
+#endif
     }
 };
 
@@ -354,7 +408,12 @@ bool load_target_gguf(const std::string & path,
     //       rows on demand without uploading the full embedding table to GPU.
     out.embedder.mmap_addr      = mm.addr;
     out.embedder.mmap_len       = mm.len;
+#if defined(_WIN32)
+    out.embedder.mmap_hfile     = mm.hFile;
+    out.embedder.mmap_hmap      = mm.hMap;
+#else
     out.embedder.mmap_fd        = mm.fd;
+#endif
     out.embedder.tok_embd_bytes = (const uint8_t *)mm.addr + tok_embd_off;
     out.embedder.tok_embd_type  = tok_embd_type;
     out.embedder.n_embd         = out.n_embd;

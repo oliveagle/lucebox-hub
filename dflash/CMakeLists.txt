@@ -63,9 +63,15 @@ target_link_libraries(dflash27b
         ggml-base
 )
 
-target_compile_options(dflash27b PRIVATE
-    -Wall -Wextra -Wno-unused-parameter -Wno-unused-function
-)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+     target_compile_options(dflash27b PRIVATE
+         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wno-unused-parameter -Wno-unused-function>
+     )
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+     target_compile_options(dflash27b PRIVATE
+         $<$<COMPILE_LANGUAGE:CXX>:/W4 /permissive->
+     )
+endif()
 
 # ─── Tests (numerics vs oracle) ────────────────────────────────────
 
