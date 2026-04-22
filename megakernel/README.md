@@ -65,9 +65,9 @@ Sweet spot at 220W: 95% of the speed, 30% less power. The curve is nonlinear, ti
 | tok/s | 267 | 229 | **411** |
 | Power | 350W | ~130W | 220W |
 | tok/J | 0.76 | 1.76 | **1.87** |
-| GPU price | ~$700 | $2,499+ (system) | ~$700 |
+| GPU price | ~$900 | $2,499+ (system) | ~$900 |
 
-A $700 GPU from 2020, power-limited to 220W, matches Apple's latest chip on efficiency while delivering 1.8x the throughput.
+A $900 GPU from 2020, power-limited to 220W, matches Apple's latest chip on efficiency while delivering 1.8x the throughput.
 
 ## How it works
 
@@ -114,7 +114,7 @@ python final_bench.py    # runs pp520 tg128 (properly warmed), prints tok/s
 ```
 
 **Requirements:**
-- NVIDIA GPU (Ampere+), tested on RTX 3090
+- Built and benchmarked on NVIDIA RTX 3090 (2020); portable to other Ampere+ (sm_86+) NVIDIA GPUs with minor tuning
 - CUDA 12+
 - PyTorch 2.0+
 - ~1.5 GB VRAM for BF16 weights
@@ -173,7 +173,7 @@ llama.cpp is the most widely used local inference engine. It's what most people 
 
 ## Why an RTX 3090?
 
-Deliberately chosen as the "worst case" for NVIDIA: a 2020 GPU, widely dismissed as power-hungry, available for ~$900-1,000 used. If the software gap is real on old hardware, it's even larger on newer cards.
+Deliberately chosen as the "worst case" for NVIDIA: a 2020 GPU, widely dismissed as power-hungry, available for ~$900 used. If the software gap is real on old hardware, it's even larger on newer cards.
 ## Community
 
 Questions, ideas, or want to see what others are building? Join the [Luce Discord](https://discord.gg/yHfswqZmJQ).
