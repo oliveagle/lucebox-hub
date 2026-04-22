@@ -114,7 +114,7 @@ python final_bench.py    # runs pp520 tg128 (properly warmed), prints tok/s
 ```
 
 **Requirements:**
-- NVIDIA RTX 3090 (sm_86) only
+- Built and benchmarked on NVIDIA RTX 3090 (2020); portable to other Ampere+ (sm_86+) NVIDIA GPUs with minor tuning
 - CUDA 12+
 - PyTorch 2.0+
 - ~1.5 GB VRAM for BF16 weights

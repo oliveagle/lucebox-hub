@@ -124,7 +124,7 @@ AI-assisted development flips that calculus. Rewrites that took a quarter now fi
 
 ## Requirements
 
-NVIDIA RTX 3090 (sm_86) only, CUDA 12+, PyTorch 2.0+.
+Built and benchmarked on NVIDIA RTX 3090 (2020); portable to other Ampere+ (sm_86+) NVIDIA GPUs with minor tuning. CUDA 12+, PyTorch 2.0+.
 dflash needs CMake 3.18+ and `--recurse-submodules` for the pinned `Luce-Org/llama.cpp@luce-dflash` fork (three tree-mode ggml ops).
 
 **Optional, find your GPU's sweet spot:** `sudo nvidia-smi -pl 220` (megakernel hits best tok/J at 220 W).
@@ -148,7 +148,7 @@ lucebox-hub/
   Q1 2026    ▮▮▮▮▮▮▮▮▮▮    RTX 3090 kernels & optimizations
   Q2 2026    ▮▮▮▮▮▯▯▯▯▯    Ryzen AI MAX+ 395 optimizations
   Q2 2026    ▮▮▯▯▯▯▯▯▯▯    Heterogeneous CPU + GPU latency optimizations
-  Q2 2026    ▮▯▯▯▯▯▯▯▯▯    CLI for local AI
+  Q2 2026    ▮▯▯▯▯▯▯▯▯▯    Lucebox OS for local AI machines
   Q3 2026    ▯▯▯▯▯▯▯▯▯▯    Lucebox official launch
 ```
 
