@@ -8,7 +8,7 @@
   <strong>The first megakernel for hybrid DeltaNet/Attention LLMs.</strong><br/>
   All 24 layers of Qwen 3.5-0.8B in a single CUDA dispatch.<br/>
   1.87 tok/J on a 2020 GPU, matching Apple's latest silicon at 2x the throughput.<br/><br/>
-  <a href="https://www.lucebox.com/blog/megakernel">Blog post</a> · <a href="RESULTS.md">Benchmarks</a> · <a href="https://discord.gg/yHfswqZmJQ">Discord</a> · <a href="https://www.lucebox.com">lucebox.com</a>
+  <a href="https://lucebox.com/blog/megakernel">Blog post</a> · <a href="RESULTS.md">Benchmarks</a> · <a href="https://discord.gg/yHfswqZmJQ">Discord</a> · <a href="https://lucebox.com">lucebox.com</a>
 </p>
 
 ---
@@ -180,7 +180,7 @@ Questions, ideas, or want to see what others are building? Join the [Luce Discor
 
 ---
 
-MIT · [Lucebox](https://www.lucebox.com)
+MIT · [Lucebox](https://lucebox.com)
 
 Built with [Claude](https://claude.ai)
 
