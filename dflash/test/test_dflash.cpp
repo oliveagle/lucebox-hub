@@ -67,6 +67,7 @@ extern "C" void dflash27b_launch_bf16_to_f32(const void * src,
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <queue>
 #include <string>
 #include <unordered_map>
@@ -710,10 +711,9 @@ static bool build_draft_step(
 // ─── Main ─────────────────────────────────────────────────────────
 
 int main(int argc, char ** argv) {
-    if (argc < 6) {
+    if (argc < 3) {
         std::fprintf(stderr,
-            "usage: %s <target.gguf> <draft.safetensors> <prompt_ids.bin>"
-            " <n_gen> <out_ids.bin> [--seq-verify]\n", argv[0]);
+            "usage: %s <target.gguf> <draft.safetensors> [<prompt_ids.bin> <n_gen> <out_ids.bin>] [--daemon] ...\n", argv[0]);
         return 2;
     }
     // TurboQuant FA kernel requires kv_len aligned to FATTN_KQ_STRIDE=256.
@@ -723,9 +723,9 @@ int main(int argc, char ** argv) {
     }
     const char * target_path = argv[1];
     const char * draft_path  = argv[2];
-    const char * prompt_path = argv[3];
-    const int    n_gen       = std::atoi(argv[4]);
-    const char * out_path    = argv[5];
+    const char * prompt_path = (argc >= 6 && argv[3][0] != '-') ? argv[3] : nullptr;
+    int          n_gen       = (argc >= 6 && argv[3][0] != '-') ? std::atoi(argv[4]) : 0;
+    const char * out_path    = (argc >= 6 && argv[3][0] != '-') ? argv[5] : nullptr;
     // --seq-verify: run the target verify as q_len independent single-token
     // decodes instead of one batched forward with a causal mask. Isolates
     // the correctness-of-batched-verify hypothesis from z-lab issue #57.
@@ -748,8 +748,10 @@ int main(int argc, char ** argv) {
     bool  ddtree_chain_seed = true;  // pre-seed full chain (vs paper's pure best-first)
     bool  profile_scaling = false;  // microbench: time target forward at varying N
     int   stream_fd     = -1;     // write each committed token to this fd (int32 LE) as they land
-    for (int i = 6; i < argc; i++) {
-        if      (std::strcmp(argv[i], "--seq-verify") == 0)    seq_verify = true;
+    bool  daemon_mode   = false;
+    for (int i = 3; i < argc; i++) {
+        if      (std::strcmp(argv[i], "--daemon") == 0)        daemon_mode = true;
+        else if (std::strcmp(argv[i], "--seq-verify") == 0)    seq_verify = true;
         else if (std::strcmp(argv[i], "--fast-rollback") == 0) fast_rollback = true;
         else if (std::strcmp(argv[i], "--ddtree") == 0)        { ddtree_mode = true; fast_rollback = true; }
         else if (std::strncmp(argv[i], "--ddtree-budget=", 16) == 0) {
@@ -772,6 +774,11 @@ int main(int argc, char ** argv) {
         else if (std::strncmp(argv[i], "--max-ctx=", 10) == 0) {
             g_max_ctx_override = std::atoi(argv[i] + 10);
         }
+    }
+
+    if (!daemon_mode && (!prompt_path || !out_path)) {
+        std::fprintf(stderr, "Missing positional arguments for non-daemon mode.\n");
+        return 2;
     }
 
     // Helper: write a committed token to the stream fd immediately (int32 LE).
@@ -887,27 +894,61 @@ int main(int argc, char ** argv) {
         return 0;
     }
 
-    auto prompt = read_int32_file(prompt_path);
-    if (prompt.empty()) { std::fprintf(stderr, "empty prompt\n"); return 1; }
-    std::printf("[prompt] %zu tokens: ", prompt.size());
-    for (auto t : prompt) std::printf("%d ", t);
-    std::printf("\n");
-
     const int q_len  = DFLASH27B_DRAFT_BLOCK_SIZE;
     const int hidden = DFLASH27B_TARGET_HIDDEN;
     const int vocab  = DFLASH27B_TARGET_VOCAB;
     const int mask_tok = DFLASH27B_DRAFT_MASK_TOKEN_ID;
 
-    if ((int)prompt.size() + n_gen + q_len > max_ctx) {
-        std::fprintf(stderr, "prompt+gen+block exceeds max_ctx\n");
-        return 1;
+    if (daemon_mode) {
+        std::printf("[daemon] ready\n");
+        std::fflush(stdout);
     }
 
     StepGraph sg;
-    std::vector<float>   embed_buf(hidden);
-    std::vector<int32_t> out_all = prompt;
-    int committed = 0;
-    int32_t last_tok = -1;
+    bool daemon_first_iter = true;
+
+    while (true) {
+        std::string prompt_file_str;
+        if (daemon_mode) {
+            std::string line;
+            if (!std::getline(std::cin, line)) break;
+            char ppath[1024];
+            if (std::sscanf(line.c_str(), "%1023s %d", ppath, &n_gen) != 2) continue;
+            prompt_file_str = ppath;
+            prompt_path = prompt_file_str.c_str();
+
+            // Rebuild cache + step graph between requests so KV / SSM / conv /
+            // target_feat ring start fresh. Weights stay resident.
+            if (!daemon_first_iter) {
+                step_graph_free(sg);
+                sg = StepGraph{};
+                free_target_cache(cache);
+                if (!create_target_cache(w, max_ctx, max_verify_tokens, backend, cache)) {
+                    std::fprintf(stderr, "cache realloc: %s\n", dflash27b_last_error());
+                    stream_emit(-1);
+                    continue;
+                }
+            }
+            daemon_first_iter = false;
+        }
+
+        auto prompt = read_int32_file(prompt_path);
+        if (prompt.empty()) {
+            std::fprintf(stderr, "empty prompt\n");
+            if (daemon_mode) { stream_emit(-1); continue; } else return 1;
+        }
+        std::printf("[prompt] %zu tokens\n", prompt.size());
+
+        if ((int)prompt.size() + n_gen + q_len > max_ctx) {
+            std::fprintf(stderr, "prompt (%zu) + gen (%d) + block (%d) = %d exceeds max_ctx (%d)\n",
+                         prompt.size(), n_gen, q_len, (int)prompt.size() + n_gen + q_len, max_ctx);
+            if (daemon_mode) { stream_emit(-1); continue; } else return 1;
+        }
+
+        std::vector<float>   embed_buf(hidden);
+        std::vector<int32_t> out_all = prompt;
+        int committed = 0;
+        int32_t last_tok = -1;
 
     // ── Prefill: batched decode over prompt. Chunks of up to PREFILL_UBATCH
     // tokens are pushed through a single forward pass with a causal mask,
@@ -1295,17 +1336,21 @@ int main(int argc, char ** argv) {
             // subsequent accepted node contributes its own tree.token_ids
             // entry (dfs_idx - 1 because flat slot 0 = root, slot 1..N-1 =
             // tree.token_ids[0..n_nodes-1]).
+            bool hit_eos = false;
             for (int i = 0; i < commit_n; i++) {
                 const int dfs_idx = accepted[i];
                 const int32_t tok = (dfs_idx == 0)
                     ? last_tok
                     : tree.token_ids[dfs_idx - 1];
                 out_all.push_back(tok); stream_emit(tok);
+                if (tok == 248045) hit_eos = true;
             }
             last_tok = next_token;
 
             auto T_accept = sync_us();
             tt_accept += std::chrono::duration<double, std::micro>(T_accept - T_verify_compute).count();
+
+            if (hit_eos) break;
 
             // Rollback: per-layer DeltaNet SSM and conv state + KV compaction
             // for full-attention layers.
@@ -1712,7 +1757,12 @@ int main(int argc, char ** argv) {
 
             // Commit: push accepted draft tokens to out_all. No bonus — next iter
             // picks it up as last_tok.
-            for (int i = 0; i < commit_n; i++) { out_all.push_back(draft_tok[i]); stream_emit(draft_tok[i]); }
+            bool hit_eos = false;
+            for (int i = 0; i < commit_n; i++) {
+                out_all.push_back(draft_tok[i]); stream_emit(draft_tok[i]);
+                if (draft_tok[i] == 248045) hit_eos = true;
+            }
+            if (hit_eos) break;
         } else {
             // ── Legacy replay path ──
             restore_ssm_state(cache);
@@ -1768,7 +1818,12 @@ int main(int argc, char ** argv) {
             auto T_replay_logits = sync_us();
             tt_replay_logits += std::chrono::duration<double, std::micro>(T_replay_logits - T_replay_compute).count();
 
-            for (int i = 0; i < commit_n; i++) { out_all.push_back(replay_tok[i]); stream_emit(replay_tok[i]); }
+            bool hit_eos = false;
+            for (int i = 0; i < commit_n; i++) {
+                out_all.push_back(replay_tok[i]); stream_emit(replay_tok[i]);
+                if (replay_tok[i] == 248045) hit_eos = true;
+            }
+            if (hit_eos) break;
         }
 
         committed    += commit_n;
@@ -1816,9 +1871,16 @@ int main(int argc, char ** argv) {
     for (int i = tail_start; i < (int)out_all.size(); i++) std::printf("%d ", out_all[i]);
     std::printf("\n");
 
-    write_int32_file(out_path, out_all);
+    if (daemon_mode) {
+        stream_emit(-1);
+    } else {
+        if (out_path) write_int32_file(out_path, out_all);
+        break;
+    }
 
-    step_graph_free(sg);
+    } // end while(true)
+
+    step_graph_destroy(sg);
     free_target_cache(cache);
     free_draft_weights(dw);
     free_target_weights(w);

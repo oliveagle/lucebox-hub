@@ -91,8 +91,9 @@ python3 scripts/run.py --prompt "def fibonacci(n):"
 python3 examples/chat.py
 
 # OpenAI-compatible HTTP server (drop-in for Open WebUI / LM Studio / Cline)
-pip install fastapi uvicorn
-python3 scripts/server.py --port 8000
+python3 -m venv .venv
+.venv/bin/pip install fastapi uvicorn transformers jinja2
+.venv/bin/python scripts/server.py --port 8000 --daemon
 
 # Reproduce paper numbers
 python3 scripts/bench_llm.py                                 # HE + GSM8K + Math500
@@ -159,7 +160,6 @@ Correctness: `test_vs_oracle` validates the draft graph at cos sim 0.999812 vs t
 
 Open an issue or PR against `Luce-Org/lucebox-hub`. Good first picks:
 
-- **Daemon mode**: keep the model resident across turns (first-token latency 10 s → ms)
 - **Temperature / top-k sampling** in the verify path
 - **Q5_K_M / Q6_K target** support
 - **Full llama.cpp integration**: new arch, `llama-speculative-dflash.cpp`, `llama-cli` / `llama-server` wiring
@@ -194,3 +194,4 @@ Open an issue or PR against `Luce-Org/lucebox-hub`. Good first picks:
 MIT · [Lucebox](https://lucebox.com) · [Discord](https://discord.gg/yHfswqZmJQ)
 
 Inspired by [z-lab/DFlash](https://arxiv.org/abs/2602.06036), [liranringel/ddtree](https://github.com/liranringel/ddtree), [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
+l-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
