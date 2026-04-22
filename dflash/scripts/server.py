@@ -29,6 +29,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from starlette.concurrency import iterate_in_threadpool
 from transformers import AutoTokenizer
 
 
@@ -143,7 +144,9 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
                     }
                     yield f"data: {json.dumps(head)}\n\n"
                     try:
-                        for tok_id in _token_stream(r_pipe, gen_len):
+                        # Offload blocking os.read in _token_stream to a thread so
+                        # SSE chunks flush progressively instead of after generation ends.
+                        async for tok_id in iterate_in_threadpool(_token_stream(r_pipe, gen_len)):
                             chunk = {
                                 "id": completion_id,
                                 "object": "chat.completion.chunk",
