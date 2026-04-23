@@ -358,8 +358,9 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
         # start in reasoning mode.
         started_in_thinking = bool(re.search(r"<think>\s*$", prompt))
         ids = tokenizer.encode(prompt, add_special_tokens=False)
-        tmp = Path(tempfile.mkstemp(suffix=".bin")[1])
-        with open(tmp, "wb") as f:
+        fd, path = tempfile.mkstemp(suffix=".bin")
+        tmp = Path(path)
+        with os.fdopen(fd, "wb") as f:
             for t in ids:
                 f.write(struct.pack("<i", int(t)))
         return tmp, started_in_thinking
