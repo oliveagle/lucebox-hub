@@ -243,6 +243,28 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
                 f.write(struct.pack("<i", int(t)))
         return tmp, len(ids)
 
+    async def _astream_tokens(r, n_gen):
+        """Yields one token at a time without blocking the event loop.
+        Each 4-byte pipe read is dispatched to a worker thread."""
+        generated = 0
+        hit_stop = False
+        while True:
+            b = await asyncio.to_thread(os.read, r, 4)
+            if not b or len(b) < 4:
+                break
+            tok_id = struct.unpack("<i", b)[0]
+            if tok_id == -1:
+                break
+            if hit_stop:
+                continue
+            if tok_id in stop_ids:
+                hit_stop = True
+                continue
+            generated += 1
+            yield tok_id
+            if generated >= n_gen:
+                hit_stop = True
+
     @app.post("/v1/messages")
     async def anthropic_messages(req: AnthropicMessagesRequest):
         prompt_bin, prompt_len = _tokenize_anthropic(req)
@@ -250,6 +272,8 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
         available_gen = max_ctx - prompt_len - 20
         gen_len = min(req.max_tokens, available_gen)
         if gen_len <= 0:
+            try: prompt_bin.unlink()
+            except Exception: pass
             return JSONResponse(
                 {"type": "error",
                  "error": {"type": "invalid_request_error",
@@ -260,51 +284,53 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
 
         if req.stream:
             async def sse() -> AsyncIterator[str]:
+                # Hold the lock across the ENTIRE read cycle so concurrent
+                # requests don't interleave tokens through the shared pipe.
                 async with daemon_lock:
+                    message_start = {
+                        "type": "message_start",
+                        "message": {
+                            "id": msg_id, "type": "message", "role": "assistant",
+                            "model": req.model or MODEL_NAME,
+                            "content": [], "stop_reason": None, "stop_sequence": None,
+                            "usage": {"input_tokens": prompt_len, "output_tokens": 0},
+                        },
+                    }
+                    yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
+
+                    cb_start = {
+                        "type": "content_block_start", "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    }
+                    yield f"event: content_block_start\ndata: {json.dumps(cb_start)}\n\n"
+
                     cmd_line = f"{prompt_bin} {gen_len}\n"
                     daemon_proc.stdin.write(cmd_line.encode("utf-8"))
                     daemon_proc.stdin.flush()
 
-                message_start = {
-                    "type": "message_start",
-                    "message": {
-                        "id": msg_id, "type": "message", "role": "assistant",
-                        "model": req.model or MODEL_NAME,
-                        "content": [], "stop_reason": None, "stop_sequence": None,
-                        "usage": {"input_tokens": prompt_len, "output_tokens": 0},
-                    },
-                }
-                yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
+                    out_tokens = 0
+                    try:
+                        async for tok_id in _astream_tokens(r_pipe, gen_len):
+                            out_tokens += 1
+                            delta = {
+                                "type": "content_block_delta", "index": 0,
+                                "delta": {"type": "text_delta",
+                                          "text": tokenizer.decode([tok_id])},
+                            }
+                            yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
+                    finally:
+                        try: prompt_bin.unlink()
+                        except Exception: pass
 
-                cb_start = {
-                    "type": "content_block_start", "index": 0,
-                    "content_block": {"type": "text", "text": ""},
-                }
-                yield f"event: content_block_start\ndata: {json.dumps(cb_start)}\n\n"
+                    yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
 
-                out_tokens = 0
-                try:
-                    for tok_id in _token_stream(r_pipe, req.max_tokens):
-                        out_tokens += 1
-                        delta = {
-                            "type": "content_block_delta", "index": 0,
-                            "delta": {"type": "text_delta",
-                                      "text": tokenizer.decode([tok_id])},
-                        }
-                        yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
-                finally:
-                    try: prompt_bin.unlink()
-                    except Exception: pass
-
-                yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
-
-                msg_delta = {
-                    "type": "message_delta",
-                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                    "usage": {"output_tokens": out_tokens},
-                }
-                yield f"event: message_delta\ndata: {json.dumps(msg_delta)}\n\n"
-                yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
+                    msg_delta = {
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                        "usage": {"output_tokens": out_tokens},
+                    }
+                    yield f"event: message_delta\ndata: {json.dumps(msg_delta)}\n\n"
+                    yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
 
             return StreamingResponse(sse(), media_type="text/event-stream")
 
@@ -313,7 +339,7 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
             cmd_line = f"{prompt_bin} {gen_len}\n"
             daemon_proc.stdin.write(cmd_line.encode("utf-8"))
             daemon_proc.stdin.flush()
-            tokens = list(_token_stream(r_pipe, gen_len))
+            tokens = [t async for t in _astream_tokens(r_pipe, gen_len)]
 
         try: prompt_bin.unlink()
         except Exception: pass
