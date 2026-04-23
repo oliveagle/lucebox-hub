@@ -367,10 +367,18 @@ def main():
     ap.add_argument("--draft",  type=Path, default=DEFAULT_DRAFT_ROOT)
     ap.add_argument("--bin",    type=Path, default=DEFAULT_BIN)
     ap.add_argument("--budget", type=int,  default=DEFAULT_BUDGET)
-    default_ctx = 131072 if os.environ.get("DFLASH27B_KV_Q4") == "1" else 6144
-    ap.add_argument("--max-ctx", type=int, default=default_ctx, help="Maximum context length")
+    ap.add_argument("--max-ctx", type=int, default=70_000,
+                    help="Maximum context length (auto-enables Q4 KV cache when > 6144)")
+    ap.add_argument("--kv-f16", action="store_true",
+                    help="Force F16 KV cache (caps max_ctx at ~6144)")
     ap.add_argument("--daemon", action="store_true", help="Run with persistent model daemon (now default)")
     args = ap.parse_args()
+
+    # Auto-enable Q4 KV cache when the requested context exceeds what F16 fits.
+    # Clients like Claude Code routinely send 10k+ token system prompts, so
+    # 6144 is too tight for real-world use.
+    if args.max_ctx > 6144 and not args.kv_f16:
+        os.environ["DFLASH27B_KV_Q4"] = "1"
 
     if not args.bin.is_file():
         raise SystemExit(f"binary not found at {args.bin}")
