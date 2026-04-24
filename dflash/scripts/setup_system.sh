@@ -42,6 +42,26 @@ apt-get install -y build-essential cmake git git-lfs
 git lfs install --system 2>/dev/null || git lfs install
 ok "Build tools installed."
 
+# ── huggingface-cli (via pipx, installed for the invoking user) ───────────────
+
+# pipx installs CLI tools into an isolated venv and links the binary into
+# ~/.local/bin. We install as $SUDO_USER (the real user) so the tool ends up
+# in their home, not root's.
+REAL_USER="${SUDO_USER:-$USER}"
+
+apt-get install -y pipx
+
+if sudo -u "${REAL_USER}" pipx list 2>/dev/null | grep -q huggingface_hub; then
+    ok "huggingface-cli already installed for ${REAL_USER}."
+else
+    info "Installing huggingface-cli for ${REAL_USER}..."
+    sudo -u "${REAL_USER}" pipx install "huggingface_hub[cli]"
+    ok "huggingface-cli installed."
+fi
+
+# Ensure ~/.local/bin is on the user's PATH (pipx ensurepath writes to their shell rc)
+sudo -u "${REAL_USER}" pipx ensurepath --quiet 2>/dev/null || true
+
 # ── CUDA Toolkit ─────────────────────────────────────────────────────────────
 
 CUDA_NEWLY_INSTALLED=0
