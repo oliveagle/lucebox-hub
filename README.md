@@ -76,7 +76,7 @@ python final_bench.py
 git clone --recurse-submodules https://github.com/Luce-Org/lucebox-hub && cd lucebox-hub/dflash
 
 # 2. build the C++/CUDA decoder (CUDA 12+, CMake 3.18+)
-# Default compiles for 75/80/86/89 (+120 and Thor on CUDA 12.8+, +sm_121/DGX Spark on CUDA 12.9+) so the binary runs on every supported card.
+# Default compiles for 75/80/86/89 (+120 on CUDA 12.8+, +sm_121/DGX Spark on CUDA 12.9+, +sm_110/Thor on CUDA 13.0+) so the binary runs on every supported card.
 # 3090-only users can add -DCMAKE_CUDA_ARCHITECTURES=86 to skip the other archs and build faster (~3 min).
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target test_dflash -j
@@ -120,7 +120,7 @@ Supported out of the box; the build just needs the right CUDA toolkit. `dflash/C
 | RTX 4090 Ada | `sm_89` | 12.0 | should work, unverified, pass `-DCMAKE_CUDA_ARCHITECTURES=89` |
 | RTX 5090 Blackwell consumer | `sm_120` | 12.8 | supported, auto-added by CMake |
 | DGX Spark / GB10 | `sm_121` (compute capability 12.1) | 12.9 | supported, auto-added by CMake |
-| Jetson AGX Thor | `sm_110` (`sm_101` on CUDA 12.x) | 13.0 (`sm_101` path: 12.8+) | supported, auto-added by CMake |
+| Jetson AGX Thor | `sm_110` | 13.0 | supported, auto-added by CMake |
 
 Verify your target:
 ```bash
@@ -139,7 +139,7 @@ cmake --build build --target test_dflash -j
 
 **Jetson AGX Thor quick start:**
 ```bash
-# CUDA 13.0+ uses sm_110; CUDA 12.8/12.9 toolchains use the older sm_101 spelling.
+# CUDA 13.0+ required for sm_110 / AGX Thor.
 nvcc --version
 git clone --recurse-submodules https://github.com/Luce-Org/lucebox-hub && cd lucebox-hub/dflash
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release   # CMake auto-adds the Thor arch your nvcc supports
@@ -175,11 +175,11 @@ All experiments in this repo are built, tuned, and benchmarked on NVIDIA RTX 309
 - **Ada** (sm_89, RTX 40xx): should work, unverified, CUDA 12+.
 - **Blackwell consumer** (sm_120, RTX 50xx incl. 5090): supported, CUDA 12.8+.
 - **DGX Spark / GB10** (sm_121, compute capability 12.1): supported, CUDA 12.9+.
-- **Jetson AGX Thor** (sm_110; sm_101 with CUDA 12.x toolchains): supported, CUDA 13+ recommended.
+- **Jetson AGX Thor** (sm_110): supported, CUDA 13+.
 
 PyTorch 2.0+. `dflash/` needs CMake 3.18+ and `--recurse-submodules` for the pinned `Luce-Org/llama.cpp@luce-dflash` fork (three tree-mode ggml ops); multi-arch build is automatic (see [Running on other GPUs](#running-on-other-gpus-4090-5090-dgx-spark--gb10-jetson-agx-thor)).
 
-**Megakernel porting note.** Tighter than dflash: `megakernel/setup.py` pins `-arch=sm_86 -DNUM_BLOCKS=82` (3090 SM count). To run on a different card, edit both defines and `pip install -e . --force-reinstall --no-deps`. Grid is persistent, one block per SM, so `NUM_BLOCKS` must match exactly. Suggested starting points: 4090 `sm_89` + `128`, 5090 `sm_120` + `170`, DGX Spark / GB10 `sm_121` + run `torch.cuda.get_device_properties(0).multi_processor_count` to read SM count, Jetson AGX Thor `sm_110` (`sm_101` on CUDA 12.x) + the same SM-count query.
+**Megakernel porting note.** Tighter than dflash: `megakernel/setup.py` pins `-arch=sm_86 -DNUM_BLOCKS=82` (3090 SM count). To run on a different card, edit both defines and `pip install -e . --force-reinstall --no-deps`. Grid is persistent, one block per SM, so `NUM_BLOCKS` must match exactly. Suggested starting points: 4090 `sm_89` + `128`, 5090 `sm_120` + `170`, DGX Spark / GB10 `sm_121` + run `torch.cuda.get_device_properties(0).multi_processor_count` to read SM count, Jetson AGX Thor `sm_110` + the same SM-count query.
 
 **Optional, find your GPU's sweet spot:** `sudo nvidia-smi -pl 220` (megakernel hits best tok/J at 220 W on 3090; re-sweep for other cards).
 

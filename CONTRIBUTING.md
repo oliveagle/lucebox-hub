@@ -18,7 +18,7 @@ Thanks for considering a contribution. Lucebox is a hub of self-contained optimi
 
 ### dflash
 
-**Hardware:** NVIDIA sm_86+ GPU (RTX 3090, A10, A40, 4090) or Jetson AGX Thor sm_110 (sm_101 under CUDA 12.x), 24 GB VRAM.
+**Hardware:** NVIDIA sm_86+ GPU (RTX 3090, A10, A40, 4090) or Jetson AGX Thor sm_110, 24 GB VRAM. Thor requires CUDA 13+.
 
 On Ubuntu 22.04 or 24.04, one script installs all system dependencies — `build-essential`, `cmake`, `git`, `git-lfs`, and the CUDA Toolkit from NVIDIA's repo:
 
