@@ -1,26 +1,59 @@
 # Contributing to Lucebox
 
-Thanks for considering a contribution. Lucebox is a hub of small, self-contained optimization projects. Each one lives under `projects/` with its own README, benchmarks, and code, and the hub stays thin on purpose.
+Thanks for considering a contribution. Lucebox is a hub of self-contained optimization projects. Each one lives with its own README, benchmarks, and code, and the hub stays thin on purpose.
 
 ## What we accept
 
 - **Kernel improvements** that preserve correctness and improve `tok/s`, `tok/J`, or memory footprint on the target hardware. Benchmark deltas required.
-- **New projects** under `projects/` that fit the thesis: software-defined efficiency for hybrid DeltaNet/Attention LLMs on consumer GPUs. Open an issue first.
+- **Speculative decoding algorithms** that improve our current SOTA performances
 - **Benchmark harness work** under `benchmarks/` once that directory starts shipping code.
 - **Doc fixes and writeups** — always welcome.
 
+
 ## What we don't accept (yet)
 
-- Support for attention-only architectures (LLaMA, Mistral) — use vLLM or SGLang.
-- Multi-tenant batching. Scope is single-user, batch-1 local inference.
 - Closed-source dependencies. Everything here has to be reproducible from public sources.
+
+## Luce DFash Setup
+
+### dflash
+
+**Hardware:** NVIDIA sm_86+ GPU (RTX 3090, A10, A40, 4090), 24 GB VRAM.
+
+On Ubuntu 22.04 or 24.04, one script installs all system dependencies — `build-essential`, `cmake`, `git`, `git-lfs`, and the CUDA Toolkit from NVIDIA's repo:
+
+```bash
+sudo dflash/scripts/setup_system.sh
+```
+
+The script is idempotent and configures `nvcc` on PATH for both bash and zsh. For other distros see the [CUDA installation guide](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/).
+
+| Tool | Min version |
+|------|------------|
+| GCC / G++ | 11 |
+| CMake | 3.18 |
+| Git | 2.x |
+| git-lfs | any |
+| CUDA Toolkit | 12.0+ |
+| huggingface-cli | any |
+
+After setup:
+
+```bash
+git submodule update --init --recursive
+cmake -B dflash/build -S dflash -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_BUILD_TYPE=Release
+cmake --build dflash/build --target test_dflash -j
+```
+
+> If cmake was previously run without CUDA, wipe the build directory first (`rm -rf dflash/build`) to avoid a stale compiler cache.
+
+---
 
 ## Before you open a PR
 
-1. **Read the target project's README** and match its style, tone, and measurement methodology.
-2. **Benchmark before and after** on the same hardware, at the same power limit, with the same warmup. Numbers without methodology don't get merged.
-3. **Run the existing correctness check** (`bench_pp_tg.py` for megakernel) and confirm your change doesn't regress output parity.
-4. **One concern per PR.** Kernel changes, docs, and build config go in separate commits or separate PRs.
+1. **Benchmark before and after** on the same hardware, at the same power limit, with the same warmup. Numbers without methodology don't get merged.
+2. **Run the existing correctness check** (`bench_pp_tg.py` for megakernel) and confirm your change doesn't regress output parity.
+3. **One concern per PR.** Kernel/algorithms changes, docs, and build config go in separate commits or separate PRs.
 
 ## Commit message format
 
@@ -38,13 +71,13 @@ Allowed types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `bench`, `chor
 
 If you want to contribute benchmarks but don't have the hardware:
 
-- We can run numbered runs on our RTX 3090 rig. Open an issue with the PR.
+- We can run numbered runs on our RTX 3090 (24GB) or Ryzen 395 AI Max (128GB). Open an issue with the PR.
 - Apple Silicon numbers need an M-series machine running `powermetrics`, not a remote box.
 
 ## Getting help
 
 - [Discord](https://discord.gg/yHfswqZmJQ) — fastest feedback
-- [Issues](https://github.com/Luce-Org/lucebox/issues) — for bugs and proposals
+- [Issues](https://github.com/Luce-Org/lucebox-hub/issues) — for bugs and proposals
 - Mention `@Luce-Org/maintainers` on a PR when it's ready for review
 
 ## Licensing
