@@ -15,6 +15,40 @@ Thanks for considering a contribution. Lucebox is a hub of small, self-contained
 - Multi-tenant batching. Scope is single-user, batch-1 local inference.
 - Closed-source dependencies. Everything here has to be reproducible from public sources.
 
+## Project setup
+
+### dflash
+
+**Hardware:** NVIDIA sm_86+ GPU (RTX 3090, A10, A40, 4090), 24 GB VRAM.
+
+On Ubuntu 22.04 or 24.04, one script installs all system dependencies — `build-essential`, `cmake`, `git`, `git-lfs`, and the CUDA Toolkit from NVIDIA's repo:
+
+```bash
+sudo dflash/scripts/setup_system.sh
+```
+
+The script is idempotent and configures `nvcc` on PATH for both bash and zsh. For other distros see the [CUDA installation guide](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/).
+
+| Tool | Min version |
+|------|------------|
+| GCC / G++ | 11 |
+| CMake | 3.18 |
+| Git | 2.x |
+| git-lfs | any |
+| CUDA Toolkit | 12.0+ |
+
+After setup:
+
+```bash
+git submodule update --init --recursive
+cmake -B dflash/build -S dflash -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_BUILD_TYPE=Release
+cmake --build dflash/build --target test_dflash -j
+```
+
+> If cmake was previously run without CUDA, wipe the build directory first (`rm -rf dflash/build`) to avoid a stale compiler cache.
+
+---
+
 ## Before you open a PR
 
 1. **Read the target project's README** and match its style, tone, and measurement methodology.
