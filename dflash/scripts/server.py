@@ -91,7 +91,7 @@ def _tokenizer_id_from_gguf(gguf_path: Path) -> str:
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | list[dict]
 
 
 class ChatRequest(BaseModel):
@@ -160,7 +160,9 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
         }
 
     def _tokenize_prompt(req: ChatRequest) -> Path:
-        msgs = [m.model_dump() for m in req.messages]
+        msgs = [{"role": m.role, "content": _anthropic_text_from_content(m.content)
+                 if isinstance(m.content, list) else m.content}
+                for m in req.messages]
         prompt = tokenizer.apply_chat_template(
             msgs, tokenize=False, add_generation_prompt=True)
         ids = tokenizer.encode(prompt, add_special_tokens=False)
