@@ -812,14 +812,9 @@ def main():
     args = ap.parse_args()
 
     # Auto-enable TQ3_0 KV cache when the requested context exceeds what F16 fits.
-    # If the user explicitly disabled TQ3 (DFLASH27B_KV_TQ3=0) without picking
-    # another path, fall back to Q4_0 rather than dropping to Q8_0 default
-    # (too heavy at long context). --kv-f16 is the dedicated full-accuracy opt-out.
+    # setdefault so an explicit user DFLASH27B_KV_TQ3=0 still wins.
     if args.max_ctx > 6144 and not args.kv_f16:
-        if os.environ.get("DFLASH27B_KV_TQ3", "1") == "0":
-            os.environ.setdefault("DFLASH27B_KV_Q4", "1")
-        else:
-            os.environ.setdefault("DFLASH27B_KV_TQ3", "1")
+        os.environ.setdefault("DFLASH27B_KV_TQ3", "1")
 
     if not args.bin.is_file():
         raise SystemExit(f"binary not found at {args.bin}")
