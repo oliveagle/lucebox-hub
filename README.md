@@ -44,7 +44,9 @@ git clone https://github.com/Luce-Org/lucebox-hub && cd lucebox-hub/megakernel
 
 # 2. install (Python 3.10+, CUDA 12+, PyTorch 2.0+). Weights stream from HF on first run.
 python -m venv .venv && source .venv/bin/activate   # required on Ubuntu 24+ system Python (PEP 668)
-pip install -e .
+pip install --upgrade pip
+pip install torch                          # install BEFORE the next step; setup.py imports torch at build time
+pip install -e . --no-build-isolation      # --no-build-isolation lets the build see the torch you just installed
 
 # 3. run the benchmark (prefill pp520 + decode tg128 vs llama.cpp BF16 + PyTorch HF)
 python final_bench.py
