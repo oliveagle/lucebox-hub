@@ -109,7 +109,10 @@ As more models go hybrid (and they will, because linear attention scales better)
 ```bash
 git clone https://github.com/Luce-Org/luce-megakernel
 cd luce-megakernel
-pip install -e .
+python3 -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip
+pip install torch                          # install BEFORE the next step; setup.py imports torch at build time
+pip install -e . --no-build-isolation      # --no-build-isolation lets the build see the torch you just installed
 python final_bench.py    # runs pp520 tg128 (properly warmed), prints tok/s
 ```
 
