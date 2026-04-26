@@ -137,7 +137,7 @@ python3 scripts/bench_he.py --n-gen 256 --ddtree-budget 22   # minimal HE bench
 DFLASH27B_KV_TQ3=1 DFLASH27B_PREFILL_UBATCH=16 \
   build/test_dflash models/Qwen3.5-27B-Q4_K_M.gguf \
   models/draft/model.safetensors /tmp/long_prompt.bin 64 /tmp/out.bin \
-  --fast-rollback --ddtree --ddtree-budget=16 --max-ctx=N   # N = align_up(prompt + n_gen + 64, 256); up to 262144
+  --fast-rollback --ddtree --ddtree-budget=16 --max-ctx=4096   # align_up(prompt + n_gen + 64, 256); raise up to 262144 for long prompts
 ```
 
 **Requirements:** NVIDIA sm_86+ GPU (3090, A10, A40, 4090) or Jetson AGX Thor sm_110, CUDA 12+ (CUDA 13+ required for Thor), 24 GB VRAM, ~80 GB disk.
