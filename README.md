@@ -43,6 +43,7 @@ Two projects today, more coming. Each one is a self-contained release with its o
 git clone https://github.com/Luce-Org/lucebox-hub && cd lucebox-hub/megakernel
 
 # 2. install (Python 3.10+, CUDA 12+, PyTorch 2.0+). Weights stream from HF on first run.
+python -m venv .venv && source .venv/bin/activate   # required on Ubuntu 24+ system Python (PEP 668)
 pip install -e .
 
 # 3. run the benchmark (prefill pp520 + decode tg128 vs llama.cpp BF16 + PyTorch HF)
@@ -58,6 +59,8 @@ python final_bench.py
 **What makes it work:** 82 blocks, 512 threads, one persistent kernel. No CPU round-trips between layers. Weights streamed straight from HuggingFace. Cooperative grid sync instead of ~100 kernel launches per token. Power ceiling hit before compute ceiling, so DVFS converts tight execution straight into saved watts.
 
 [Full writeup →](megakernel/README.md) · [Benchmarks →](megakernel/RESULTS.md) · [Blog post →](https://lucebox.com/blog/megakernel)
+
+> **Blackwell (RTX 5090, DGX Spark / GB10):** auto-detected by setup; NVFP4 decode path lands ~194 tok/s tg128 on GB10. See [megakernel/README.md#blackwell-sm_120--sm_121a](megakernel/README.md).
 
 ---
 
