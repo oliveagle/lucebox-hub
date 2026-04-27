@@ -219,6 +219,38 @@ class Decoder:
         self._seen_token_mask = torch.zeros(VOCAB_SIZE, **f32)
         self._out_token = torch.empty(1, **i32)
 
+        # Pre-pack fused weights for the chunk-parallel prefill kernel:
+        # one cuBLAS GEMM per layer instead of three (FA QKV) / two (MLP gate+up).
+        layer_data = weights["layer_data"]
+        fa_qkv_list = []
+        for li in range(NUM_LAYERS):
+            ld = layer_data[li]
+            if ld['type'] == 1:
+                q = ld['ptrs'][1]; k = ld['ptrs'][2]; v = ld['ptrs'][3]
+                fa_qkv_list.append(torch.cat([q, k, v], dim=0))
+        self._fused_fa_qkv = torch.stack(fa_qkv_list, dim=0).contiguous()
+        gate_up_list = []
+        for li in range(NUM_LAYERS):
+            ld = layer_data[li]
+            if ld['type'] == 0:
+                g = ld['ptrs'][11]; u = ld['ptrs'][12]
+            else:
+                g = ld['ptrs'][8]; u = ld['ptrs'][9]
+            gate_up_list.append(torch.cat([g, u], dim=0))
+        self._fused_gate_up = torch.stack(gate_up_list, dim=0).contiguous()
+
+    def alloc_prefill_scratch(self, S: int):
+        """Allocate per-prefill scratch buffers for the chunk-parallel kernel.
+        Buffers depend on S (sequence length); call once per distinct S."""
+        f32 = dict(dtype=torch.float32, device="cuda")
+        S_pad = ((S + 31) // 32) * 32
+        return dict(
+            dn_pre_qkv=torch.empty(S * DN_CONV_CHANNELS, **f32),
+            dn_u_scratch=torch.empty(S_pad * DN_NUM_HEADS * 128, **f32),
+            dn_w_scratch=torch.empty(S_pad * DN_NUM_HEADS * 128, **f32),
+            dn_cs_scratch=torch.empty(S_pad * DN_NUM_HEADS, **f32),
+        )
+
     def step(self, token_id: int) -> int:
         """Decode one token. Returns next token id."""
         if self._position >= self.max_seq_len:
