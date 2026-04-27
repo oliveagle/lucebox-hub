@@ -54,6 +54,7 @@ bufs = dict(
     lm_bmv=torch.empty(1024, **f32),
     lm_bmi=torch.empty(1024, **i32),
 )
+bufs.update(dec.alloc_prefill_scratch(S_MAX))
 
 def prefill(ids):
     ids_t = torch.tensor(ids, dtype=torch.int32, device="cuda")
@@ -65,6 +66,9 @@ def prefill(ids):
         bufs['proj_buf'], bufs['proj_buf2'],
         bufs['attn_buf'], bufs['mlp_buf'],
         bufs['dn_out_buf'], bufs['beta_buf'], bufs['alpha_buf'],
+        bufs['dn_pre_qkv'],
+        bufs['dn_u_scratch'], bufs['dn_w_scratch'], bufs['dn_cs_scratch'],
+        dec._fused_fa_qkv, dec._fused_gate_up,
         bufs['final_normed'], bufs['hidden_bf16_out'],
         bufs['lm_bmv'], bufs['lm_bmi'], dec.max_seq_len)
     # Handoff: copy hidden state for decode kernel

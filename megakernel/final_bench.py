@@ -56,6 +56,7 @@ b = dict(
     final_normed=torch.empty(HIDDEN_SIZE, **bf16), hidden_bf16_out=torch.empty(HIDDEN_SIZE, **bf16),
     lm_bmv=torch.empty(1024, **f32), lm_bmi=torch.empty(1024, **i32),
 )
+b.update(dec.alloc_prefill_scratch(S))
 ids_t = torch.tensor(prompt_ids, dtype=torch.int32, device="cuda")
 
 def our_prefill():
@@ -66,6 +67,9 @@ def our_prefill():
         b['hidden'], b['residual'], b['normalized'],
         b['proj_buf'], b['proj_buf2'], b['attn_buf'], b['mlp_buf'],
         b['dn_out_buf'], b['beta_buf'], b['alpha_buf'],
+        b['dn_pre_qkv'],
+        b['dn_u_scratch'], b['dn_w_scratch'], b['dn_cs_scratch'],
+        dec._fused_fa_qkv, dec._fused_gate_up,
         b['final_normed'], b['hidden_bf16_out'], b['lm_bmv'], b['lm_bmi'],
         dec.max_seq_len)
     dec._hidden.copy_(b['hidden_bf16_out'])
