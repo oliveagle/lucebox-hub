@@ -59,16 +59,18 @@ AR = autoregressive (`test_generate`). DFlash+DDTree = tree verify at budget=22 
 
 **Up to 256K context on 24 GB** via TQ3_0 KV cache (3.5 bpv, default; Q4_0 legacy path tops out near 128K) + sliding `target_feat` ring (4096 slots). TQ3 = ~9.7× memory saving vs F16; Q4_0 = 8×.
 
-| Prompt length | KV     | Prefill time | Decode tok/s |
+| Prompt length | KV     | Prefill time | Decode tok/s (FA window=2048) |
 |:-------------:|:------:|:------------:|:------------:|
-| 520 (HE)      | Q8_0   | 0.06 s       | 130          |
-| 32K           | Q8_0   | 38 s         | 85           |
-| 64K           | Q4_0   | 126 s        | 18           |
-| 128K          | Q4_0   | ~10 min      | ~15-20 (est) |
+| 520 (HE)      | Q8_0   | 0.06 s       | ~104 (window inactive)        |
+| 32K           | Q8_0   | 38 s         | ~95 (interp.)                 |
+| 64K           | Q4_0   | 126 s        | **91** (PR #26)               |
+| 128K          | TQ3_0  | ~10 min      | ~85–95 (sliding active)       |
 
 Prefill numbers assume `--max-ctx` sized to the prompt (auto-fit in `run.py` / `bench_llm.py`). Oversizing — e.g. `--max-ctx=131072` on a 32K prompt — triggers FA stride over unused KV and slows prefill ~27× at that ratio.
 
-HE 10-prompt bench mean in 128K mode (ctx=131072, ddtree-budget=16): **134.78 tok/s** at AL 8.33.
+HE 10-prompt bench mean in 128K mode (ctx=131072, ddtree-budget=16, FA window=2048): **134.78 tok/s** at AL 8.33.
+
+Decode tok/s assume the default sliding-window flash attention (`--fa-window 2048`, lossless: 100% acceptance at all window sizes). Disable with `--fa-window 0` for full attention; expect ~25 tok/s at 60K+. Tune the window via `python3 scripts/run.py --fa-window N` or `--fa-window N` on `test_dflash`/`server.py` (sweet spot 1024–2048; bigger windows trade speed for marginally tighter attention).
 
 Set `DFLASH27B_KV_TQ3=1` (TQ3_0, 3.5 bpv, default) or `DFLASH27B_KV_Q4=1` (Q4_0, 4.5 bpv, legacy) to enable. Full sweep in [RESULTS.md](RESULTS.md).
 
