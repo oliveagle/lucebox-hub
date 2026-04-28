@@ -74,6 +74,37 @@ Decode tok/s assume the default sliding-window flash attention (`--fa-window 204
 
 Set `DFLASH27B_KV_TQ3=1` (TQ3_0, 3.5 bpv, default) or `DFLASH27B_KV_Q4=1` (Q4_0, 4.5 bpv, legacy) to enable. Full sweep in [RESULTS.md](RESULTS.md).
 
+### Asymmetric K/V quantization
+
+The cache now supports independent quantization types for keys and values, optimizing memory-asymmetric workloads. Set `DFLASH27B_KV_K=<type>` and `DFLASH27B_KV_V=<type>` via environment or CLI flags. Supported types (case-insensitive): `f16`, `bf16`, `q4_0`, `q4_1`, `q5_0`, `q5_1`, `q8_0`, `tq3_0`.
+
+**Supported (K, V) pairs:**
+- K ∈ {F16, BF16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0} × V ∈ {F16, BF16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, TQ3_0}
+- K = TQ3_0 × V ∈ {F16, BF16, Q4_0, Q8_0, TQ3_0}
+
+Unsupported pairs abort at allocation with a printed list. Precedence (high→low): per-axis `_KV_K`/`_KV_V` override legacy shorthand (`--kv-tq3` / `--kv-q4` / `--kv-f16`); legacy shorthand last-wins among themselves. Default: `q8_0` for both.
+
+**Environment variables:**
+```bash
+DFLASH27B_KV_K=q8_0 DFLASH27B_KV_V=q4_0 ./test_dflash …
+```
+
+**CLI flags on `test_dflash` / `test_generate`:**
+```bash
+./test_dflash … -ctk q8_0 -ctv q4_0
+./test_dflash … --cache-type-k=q8_0 --cache-type-v=q4_0
+```
+
+**Python flags on `scripts/run.py`, `scripts/server.py`, `scripts/server_tools.py`:**
+```bash
+python3 scripts/run.py --ctk q8_0 --ctv q4_0 --prompt "hello"
+python3 scripts/run.py --cache-type-k q8_0 --cache-type-v q4_0 --prompt "hello"
+```
+
+**TQ3 semantics under asymmetry:** TQ3_0 is K-side-driven. The FWHT rotation is applied to the query and inverse-applied to the attention output only when `K=TQ3_0`. V's type is independent of rotation. The 256-stride context alignment is triggered if *either* K or V is TQ3_0.
+
+Legacy `--kv-tq3` / `--kv-q4` / `--kv-f16` flags continue to work as symmetric shorthand for backward compatibility.
+
 ## Qwen3.6-27B target (experimental)
 
 Qwen3.6-27B ships the same `qwen35` architecture string and identical layer/head dims as 3.5, so `test_dflash` loads it with no code change:

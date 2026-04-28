@@ -66,6 +66,13 @@ def main():
                     help="Q4_0 KV cache (required for max_ctx=131072)")
     ap.add_argument("--kv-tq3", action="store_true",
                     help="TQ3_0 KV cache (3.5 bpv, near-lossless)")
+    ap.add_argument("--cache-type-k", "--ctk", dest="cache_type_k", default=None,
+                    choices=["f16","bf16","q4_0","q4_1","q5_0","q5_1","q8_0","tq3_0"],
+                    help="K cache element type (overrides --kv-q4/--kv-tq3/--kv-f16 for K). "
+                         "See kv_quant.cpp for supported (K,V) pairs.")
+    ap.add_argument("--cache-type-v", "--ctv", dest="cache_type_v", default=None,
+                    choices=["f16","bf16","q4_0","q4_1","q5_0","q5_1","q8_0","tq3_0"],
+                    help="V cache element type (overrides --kv-q4/--kv-tq3/--kv-f16 for V).")
     ap.add_argument("--fa-window", type=int, default=None,
                     help="Sliding window for FA layers (KV positions). 0 = full "
                          "attention. Default 2048 (set in C++); only kicks in "
@@ -106,6 +113,10 @@ def main():
     env = {**os.environ}
     if sys.platform == "win32":
         env["PATH"] = dll_dir + os.pathsep + bin_dir + os.pathsep + env.get("PATH", "")
+    if args.cache_type_k:
+        env["DFLASH27B_KV_K"] = args.cache_type_k
+    if args.cache_type_v:
+        env["DFLASH27B_KV_V"] = args.cache_type_v
     if args.kv_q4:
         env["DFLASH27B_KV_Q4"] = "1"
     if args.kv_tq3:

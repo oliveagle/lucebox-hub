@@ -186,6 +186,7 @@ struct TargetCache {
     int cur_pos  = 0;         // number of tokens already committed
 
     ggml_type kv_k_type = GGML_TYPE_Q8_0;
+    ggml_type kv_v_type = GGML_TYPE_Q8_0;
 
     // Full-attention KV cache: one K and one V per full-attention layer.
     // Layout: [head_dim, max_ctx, n_head_kv] f16, contiguous per layer.

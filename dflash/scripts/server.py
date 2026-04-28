@@ -447,6 +447,13 @@ def main():
     ap.add_argument("--kv-f16", action="store_true",
                     help="Force F16 KV cache. When --max-ctx > 6144 the server "
                          "auto-enables TQ3_0 KV to fit; pass --kv-f16 to opt out.")
+    ap.add_argument("--cache-type-k", "--ctk", dest="cache_type_k", default=None,
+                    choices=["f16","bf16","q4_0","q4_1","q5_0","q5_1","q8_0","tq3_0"],
+                    help="K cache element type (overrides --kv-q4/--kv-tq3/--kv-f16 for K). "
+                         "See kv_quant.cpp for supported (K,V) pairs.")
+    ap.add_argument("--cache-type-v", "--ctv", dest="cache_type_v", default=None,
+                    choices=["f16","bf16","q4_0","q4_1","q5_0","q5_1","q8_0","tq3_0"],
+                    help="V cache element type (overrides --kv-q4/--kv-tq3/--kv-f16 for V).")
     ap.add_argument("--fa-window", type=int, default=None,
                     help="Sliding window for FA layers (KV positions). 0 = full "
                          "attention. Default 2048 (set in C++); only kicks in "
@@ -462,7 +469,11 @@ def main():
     # Clients like Claude Code routinely send 10k+ token system prompts, so
     # 6144 is too tight for real-world use. setdefault so an explicit user
     # DFLASH27B_KV_TQ3=0 still wins.
-    if args.max_ctx > 6144 and not args.kv_f16:
+    if args.cache_type_k:
+        os.environ["DFLASH27B_KV_K"] = args.cache_type_k
+    if args.cache_type_v:
+        os.environ["DFLASH27B_KV_V"] = args.cache_type_v
+    if args.max_ctx > 6144 and not args.kv_f16 and not args.cache_type_k and not args.cache_type_v:
         os.environ.setdefault("DFLASH27B_KV_TQ3", "1")
 
     if args.fa_window is not None:

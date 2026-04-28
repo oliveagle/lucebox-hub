@@ -32,6 +32,7 @@
 
 #include "internal.h"
 #include "delta_net_chunked.h"
+#include "kv_quant.h"
 
 #include <cmath>
 #include <cstdio>
@@ -93,43 +94,13 @@ bool create_target_cache(const TargetWeights & w,
     out.ssm_intermediate.assign(n_delta, nullptr);
     out.conv_input_cache.assign(n_delta, nullptr);
 
-    // KV type from env
+    // KV cache element types (resolved from env; aborts on unsupported pair).
     ggml_type kv_k_type = GGML_TYPE_Q8_0;
     ggml_type kv_v_type = GGML_TYPE_Q8_0;
-    if (const char * s = std::getenv("DFLASH27B_KV_F16")) {
-        if (std::atoi(s) != 0) { kv_k_type = GGML_TYPE_F16; kv_v_type = GGML_TYPE_F16; }
-    }
-    if (const char * s = std::getenv("DFLASH27B_KV_Q4")) {
-        if (std::atoi(s) != 0) { kv_k_type = GGML_TYPE_Q4_0; kv_v_type = GGML_TYPE_Q4_0; }
-    }
-    if (const char * s = std::getenv("DFLASH27B_KV_TQ3")) {
-        if (std::atoi(s) != 0) { kv_k_type = GGML_TYPE_TQ3_0; kv_v_type = GGML_TYPE_TQ3_0; }
-    }
-    // Per-axis overrides (applied after joint vars, so they take priority).
-    // E.g. DFLASH27B_KV_TQ3=1 + DFLASH27B_KV_K=q8  →  K=Q8, V=TQ3.
-    if (const char * s = std::getenv("DFLASH27B_KV_K")) {
-        if (std::atoi(s) != 0) {
-            // accept: f16, q4, q8, tq3
-            std::string sv = std::string(s);
-            for (auto &c : sv) c = std::tolower(c);
-            if (sv == "f16") kv_k_type = GGML_TYPE_F16;
-            else if (sv == "q4" || sv == "q4_0") kv_k_type = GGML_TYPE_Q4_0;
-            else if (sv == "q8" || sv == "q8_0") kv_k_type = GGML_TYPE_Q8_0;
-            else if (sv == "tq3" || sv == "tq3_0") kv_k_type = GGML_TYPE_TQ3_0;
-        }
-    }
-    if (const char * s = std::getenv("DFLASH27B_KV_V")) {
-        if (std::atoi(s) != 0) {
-            std::string sv = std::string(s);
-            for (auto &c : sv) c = std::tolower(c);
-            if (sv == "f16") kv_v_type = GGML_TYPE_F16;
-            else if (sv == "q4" || sv == "q4_0") kv_v_type = GGML_TYPE_Q4_0;
-            else if (sv == "q8" || sv == "q8_0") kv_v_type = GGML_TYPE_Q8_0;
-            else if (sv == "tq3" || sv == "tq3_0") kv_v_type = GGML_TYPE_TQ3_0;
-        }
-    }
+    dflash::resolve_kv_types(kv_k_type, kv_v_type);
     out.kv_k_type = kv_k_type;
-    const int max_ctx_alloc = (kv_k_type == GGML_TYPE_TQ3_0)
+    out.kv_v_type = kv_v_type;
+    const int max_ctx_alloc = (kv_k_type == GGML_TYPE_TQ3_0 || kv_v_type == GGML_TYPE_TQ3_0)
         ? ((max_ctx + 255) / 256) * 256
         : max_ctx;
 
@@ -402,6 +373,7 @@ static ggml_tensor * build_full_attn_block(
     int kv_start,
     int n_tokens,
     ggml_type kv_k_type,
+    ggml_type kv_v_type,
     int fa_window = 0
 ) {
     // ── Q projection (packed Q || gate), shape [2*q_dim, n_tokens]
@@ -482,16 +454,21 @@ static ggml_tensor * build_full_attn_block(
     const int kv_len = kv_start + n_tokens;
     const int win_len = kv_len - win_start;
 
-    const int fattn_stride  = (kv_k_type == GGML_TYPE_TQ3_0) ? 256 : 1;
+    const int fattn_stride  = (kv_k_type == GGML_TYPE_TQ3_0 || kv_v_type == GGML_TYPE_TQ3_0) ? 256 : 1;
     const int win_len_padded = ((win_len + fattn_stride - 1) / fattn_stride) * fattn_stride;
 
     ggml_tensor * Qfa = ggml_permute(ctx, Q, 0, 2, 1, 3);
     Qfa = ggml_cont(ctx, Qfa);
 
-    // For TQ3_0 KV cache, K/V are stored in FWHT-rotated space.
-    // Rotate Q to match before computing KQ dot product.
-    const bool needs_rotation = (kv_k_type == GGML_TYPE_TQ3_0);
-    if (needs_rotation) {
+    // For TQ3_0 KV cache, K/V are stored in FWHT-rotated space (the f32->TQ3_0
+    // quantize kernel applies tq3_rotate_forward before the centroid search,
+    // see ggml-cuda/cpy-utils.cuh quantize_f32_tq3_0_group).
+    // Rotation gates are independent for K and V:
+    //   * K=TQ3 needs Q rotated forward so softmax(Qfa . Kfa^T) = softmax(QK^T)
+    //   * V=TQ3 needs attn_out inverse-rotated to recover plain V space
+    const bool q_rotate   = (kv_k_type == GGML_TYPE_TQ3_0);
+    const bool out_rotate = (kv_v_type == GGML_TYPE_TQ3_0);
+    if (q_rotate) {
         Qfa = ggml_turbo_wht(ctx, Qfa, 0);
     }
 
@@ -512,8 +489,8 @@ static ggml_tensor * build_full_attn_block(
                                              kq_scale, 0.0f, 0.0f);
     // attn: [head_dim, n_head, n_tokens] (permuted)
 
-    // Un-rotate the FA output from FWHT-rotated V space.
-    if (needs_rotation) {
+    // Un-rotate the FA output from FWHT-rotated V space (only when V is TQ3).
+    if (out_rotate) {
         attn = ggml_cont(ctx, attn);
         attn = ggml_turbo_wht(ctx, attn, 1);
     }
@@ -826,7 +803,7 @@ static ggml_tensor * build_single_layer(
         cur = build_full_attn_block(ctx, gf, L, cur, positions, w.rope_sections,
                                     cache.attn_k[fa_idx], cache.attn_v[fa_idx],
                                     attn_mask, kv_start, n_tokens,
-                                    cache.kv_k_type, fa_window);
+                                    cache.kv_k_type, cache.kv_v_type, fa_window);
     } else {
         int dn_idx = 0;
         for (int il = 0; il < layer_idx; il++) {
@@ -930,7 +907,7 @@ QwenGraphOutputs build_qwen35_graph(
             cur = build_full_attn_block(ctx, gf, L, cur, in.positions, w.rope_sections,
                                         cache.attn_k[fa_idx], cache.attn_v[fa_idx],
                                         in.attn_mask, in.kv_start, n_tokens,
-                                        cache.kv_k_type, in.fa_window);
+                                        cache.kv_k_type, cache.kv_v_type, in.fa_window);
             fa_idx++;
         } else {
             DeltaNetCapture * cap_ptr = nullptr;

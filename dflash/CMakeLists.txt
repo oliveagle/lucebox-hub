@@ -42,6 +42,7 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/ggml/CMakeLists.txt")
         "deps/llama.cpp submodule missing. Run: "
         "git submodule update --init --recursive")
 endif()
+set(GGML_CUDA_FA_ALL_QUANTS ON CACHE BOOL "Compile fattn kernels for all quant pairs (needed for asymmetric KV-quant)" FORCE)
 add_subdirectory(deps/llama.cpp/ggml EXCLUDE_FROM_ALL)
 
 # ─── dflash27b static library ──────────────────────────────────────
@@ -53,6 +54,7 @@ add_library(dflash27b STATIC
     src/qwen35_target_graph.cpp
     src/qwen3_dflash_graph.cpp
     src/kv_cache.cpp
+    src/kv_quant.cpp
     src/f16_convert.cu
     src/delta_net_chunked.cpp
 )
@@ -103,6 +105,11 @@ endif()
 
 option(DFLASH27B_TESTS "Build numerics tests" ON)
 if(DFLASH27B_TESTS)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_kv_quant.cpp")
+        add_executable(test_kv_quant test/test_kv_quant.cpp)
+        target_include_directories(test_kv_quant PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(test_kv_quant PRIVATE dflash27b)
+    endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_draft_vs_reference.cpp")
         add_executable(test_draft_vs_reference test/test_draft_vs_reference.cpp)
         target_link_libraries(test_draft_vs_reference PRIVATE dflash27b)
