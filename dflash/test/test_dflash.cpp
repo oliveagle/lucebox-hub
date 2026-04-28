@@ -1209,8 +1209,7 @@ int main(int argc, char ** argv) {
             // Rebuild cache + step graph between requests so KV / SSM / conv /
             // target_feat ring start fresh. Weights stay resident.
             if (!daemon_first_iter) {
-                step_graph_free(sg);
-                sg = StepGraph{};
+                step_graph_destroy(sg);
                 free_target_cache(cache);
                 if (!create_target_cache(w, max_ctx, max_verify_tokens, backend, cache,
                                          /*prefill_only=*/true)) {
@@ -1394,7 +1393,7 @@ int main(int argc, char ** argv) {
 
         // Promote prefill-only cache to full decode cache
         auto t_mig0 = std::chrono::steady_clock::now();
-        sg = StepGraph{};
+        step_graph_destroy(sg);
         if (!migrate_prefill_cache(w, max_ctx, max_verify_tokens, backend, cache)) {
             std::fprintf(stderr, "cache migration: %s\n", dflash27b_last_error());
             return 1;
@@ -1475,8 +1474,7 @@ int main(int argc, char ** argv) {
     // Promote prefill-only cache to full decode cache with rollback tensors.
     // Copies KV, SSM/conv state, and target_feat device→device (~1 ms).
     auto t_mig0 = std::chrono::steady_clock::now();
-    step_graph_free(sg);
-    sg = StepGraph{};
+    step_graph_destroy(sg);
     if (!migrate_prefill_cache(w, max_ctx, max_verify_tokens, backend, cache)) {
         std::fprintf(stderr, "cache migration: %s\n", dflash27b_last_error());
         return 1;
