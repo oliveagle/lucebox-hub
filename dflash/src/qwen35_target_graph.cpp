@@ -460,10 +460,15 @@ static ggml_tensor * build_full_attn_block(
     ggml_tensor * Qfa = ggml_permute(ctx, Q, 0, 2, 1, 3);
     Qfa = ggml_cont(ctx, Qfa);
 
-    // For TQ3_0 KV cache, K/V are stored in FWHT-rotated space.
-    // Rotate Q to match before computing KQ dot product.
-    const bool needs_rotation = (kv_k_type == GGML_TYPE_TQ3_0);
-    if (needs_rotation) {
+    // For TQ3_0 KV cache, K/V are stored in FWHT-rotated space (the f32->TQ3_0
+    // quantize kernel applies tq3_rotate_forward before the centroid search,
+    // see ggml-cuda/cpy-utils.cuh quantize_f32_tq3_0_group).
+    // Rotation gates are independent for K and V:
+    //   * K=TQ3 needs Q rotated forward so softmax(Qfa . Kfa^T) = softmax(QK^T)
+    //   * V=TQ3 needs attn_out inverse-rotated to recover plain V space
+    const bool q_rotate   = (kv_k_type == GGML_TYPE_TQ3_0);
+    const bool out_rotate = (kv_v_type == GGML_TYPE_TQ3_0);
+    if (q_rotate) {
         Qfa = ggml_turbo_wht(ctx, Qfa, 0);
     }
 
@@ -484,8 +489,8 @@ static ggml_tensor * build_full_attn_block(
                                              kq_scale, 0.0f, 0.0f);
     // attn: [head_dim, n_head, n_tokens] (permuted)
 
-    // Un-rotate the FA output from FWHT-rotated V space.
-    if (needs_rotation) {
+    // Un-rotate the FA output from FWHT-rotated V space (only when V is TQ3).
+    if (out_rotate) {
         attn = ggml_cont(ctx, attn);
         attn = ggml_turbo_wht(ctx, attn, 1);
     }
