@@ -795,7 +795,7 @@ static bool build_draft_step(
 int main(int argc, char ** argv) {
     if (argc < 3) {
         std::fprintf(stderr,
-            "usage: %s <target.gguf> <draft.safetensors> [<prompt_ids.bin> <n_gen> <out_ids.bin>] [--daemon] ...\n", argv[0]);
+            "usage: %s <target.gguf> <draft.safetensors> [<prompt_ids.bin> <n_gen> <out_ids.bin>] [--daemon] [-ctk <type>] [-ctv <type>] ...\n", argv[0]);
         return 2;
     }
     // TurboQuant FA kernel requires kv_len aligned to FATTN_KQ_STRIDE=256.
@@ -863,6 +863,26 @@ int main(int argc, char ** argv) {
         }
         else if (std::strncmp(argv[i], "--max-ctx=", 10) == 0) {
             g_max_ctx_override = std::atoi(argv[i] + 10);
+        }
+        // KV cache type flags (mirror llama-cli -ctk / -ctv).
+        // Set the env var before resolve_kv_types() reads it inside create_target_cache.
+        else if (std::strcmp(argv[i], "--cache-type-k") == 0 || std::strcmp(argv[i], "-ctk") == 0) {
+            if (i + 1 < argc) setenv("DFLASH27B_KV_K", argv[++i], 1);
+        }
+        else if (std::strncmp(argv[i], "--cache-type-k=", 15) == 0) {
+            setenv("DFLASH27B_KV_K", argv[i] + 15, 1);
+        }
+        else if (std::strncmp(argv[i], "-ctk=", 5) == 0) {
+            setenv("DFLASH27B_KV_K", argv[i] + 5, 1);
+        }
+        else if (std::strcmp(argv[i], "--cache-type-v") == 0 || std::strcmp(argv[i], "-ctv") == 0) {
+            if (i + 1 < argc) setenv("DFLASH27B_KV_V", argv[++i], 1);
+        }
+        else if (std::strncmp(argv[i], "--cache-type-v=", 15) == 0) {
+            setenv("DFLASH27B_KV_V", argv[i] + 15, 1);
+        }
+        else if (std::strncmp(argv[i], "-ctv=", 5) == 0) {
+            setenv("DFLASH27B_KV_V", argv[i] + 5, 1);
         }
     }
 

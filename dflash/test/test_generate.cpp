@@ -131,6 +131,26 @@ int main(int argc, char ** argv) {
         if (std::strncmp(argv[i], "--stream-fd=", 12) == 0) {
             stream_fd = std::atoi(argv[i] + 12);
         }
+        // KV cache type flags (mirror llama-cli -ctk / -ctv).
+        // Set the env var before resolve_kv_types() reads it inside create_target_cache.
+        else if (std::strcmp(argv[i], "--cache-type-k") == 0 || std::strcmp(argv[i], "-ctk") == 0) {
+            if (i + 1 < argc) setenv("DFLASH27B_KV_K", argv[++i], 1);
+        }
+        else if (std::strncmp(argv[i], "--cache-type-k=", 15) == 0) {
+            setenv("DFLASH27B_KV_K", argv[i] + 15, 1);
+        }
+        else if (std::strncmp(argv[i], "-ctk=", 5) == 0) {
+            setenv("DFLASH27B_KV_K", argv[i] + 5, 1);
+        }
+        else if (std::strcmp(argv[i], "--cache-type-v") == 0 || std::strcmp(argv[i], "-ctv") == 0) {
+            if (i + 1 < argc) setenv("DFLASH27B_KV_V", argv[++i], 1);
+        }
+        else if (std::strncmp(argv[i], "--cache-type-v=", 15) == 0) {
+            setenv("DFLASH27B_KV_V", argv[i] + 15, 1);
+        }
+        else if (std::strncmp(argv[i], "-ctv=", 5) == 0) {
+            setenv("DFLASH27B_KV_V", argv[i] + 5, 1);
+        }
     }
     auto stream_emit = [&](int32_t tok) {
         if (stream_fd < 0) return;
