@@ -176,9 +176,11 @@ void free_draft_weights(DraftWeights & w);
 // Created once via create_target_cache() and threaded through every
 // build_qwen35_graph() call.
 struct TargetCache {
-    ggml_context *        ctx      = nullptr;
+    ggml_context *        base_ctx     = nullptr;
+    ggml_backend_buffer_t base_buf     = nullptr;
+    ggml_context *        rollback_ctx = nullptr;
+    ggml_backend_buffer_t rollback_buf = nullptr;
     ggml_backend_t        backend  = nullptr;
-    ggml_backend_buffer_t buf      = nullptr;
 
     int max_ctx  = 0;         // max tokens in the KV cache
     int cur_pos  = 0;         // number of tokens already committed
