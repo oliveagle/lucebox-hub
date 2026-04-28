@@ -709,13 +709,14 @@ pf_dn_chunk_phase2_wmma(
     int j_start = js * DN_PHASE2_J_PER_BLOCK;
 
     // Dynamic shared memory layout (f32 base + bf16 mirrors + WMMA tile).
+    // s_w (f32) was used by the scalar d-compute path; the WMMA d-compute
+    // reads s_w_bf16 only, so s_w f32 is dropped here (saves 4 KB).
     constexpr int DK_S = DN_KEY + 1;   // 129 (f32 stride, bank-conflict pad)
     constexpr int DK_B = DN_KEY;       // 128 (bf16 stride; no pad needed for our access pattern)
     extern __shared__ float smem[];
     float *s_state = smem;
     float *s_u     = s_state + DN_PHASE2_J_PER_BLOCK * DK_S;
-    float *s_w     = s_u     + DN_CHUNK_C * DN_PHASE2_J_PER_BLOCK;
-    float *s_Q     = s_w     + DN_CHUNK_C * DK_S;
+    float *s_Q     = s_u     + DN_CHUNK_C * DN_PHASE2_J_PER_BLOCK;
     float *s_K     = s_Q     + DN_CHUNK_C * DK_S;
     float *s_d     = s_K     + DN_CHUNK_C * DK_S;
     float *s_qkt   = s_d     + DN_CHUNK_C * DN_PHASE2_J_PER_BLOCK;
@@ -763,13 +764,12 @@ pf_dn_chunk_phase2_wmma(
                 s_u[ci] = 0.f;
             }
         }
-        // Load w[n, :, h, :] → s_w with padded stride DK_S, ALSO mirror to s_w_bf16.
+        // Load w[n, :, h, :] → s_w_bf16 directly (WMMA path doesn't need the f32 mirror).
         for (int ci = tid; ci < DN_CHUNK_C * DN_KEY; ci += DN_PHASE2_BLOCK) {
             int c = ci / DN_KEY;
             int d = ci % DN_KEY;
             int t = t_start + c;
             float v = (t < S) ? w_in[((n * DN_CHUNK_C + c) * DN_HEADS + h) * DN_KEY + d] : 0.f;
-            s_w[c * DK_S + d] = v;
             s_w_bf16[c * DK_B + d] = __float2bfloat16(v);
         }
         // Pad s_w_bf16 rows DN_CHUNK_C..15 with zero so the WMMA fragment sees
@@ -1606,18 +1606,32 @@ extern "C" void launch_prefill_bf16(
                 + DN_CHUNK_C                         // s_cs
                 + DN_CHUNK_C;                        // s_decay_rem_buf
             constexpr size_t P2_SMEM_BYTES = P2_SMEM_FLOATS * sizeof(float);
-            // WMMA variant adds: s_wmma_tile (16×32 f32, shared by d and o_inter qs)
-            //                  + s_state_bf16 (J_per×DN_KEY bf16)
-            //                  + s_w_bf16, s_Q_bf16, s_K_bf16 (each 16×DN_KEY bf16, M-padded)
-            //                  + s_d_bf16 (16 × J_per bf16, K-padded for state-update fragment).
-            constexpr size_t P2_WMMA_EXTRA_BYTES =
-                /*s_wmma_tile  */ 16 * 32 * sizeof(float)
-                + /*s_state_bf16*/ DN_PHASE2_J_PER_BLOCK * DN_KEY * sizeof(__nv_bfloat16)
-                + /*s_w_bf16    */ 16 * DN_KEY * sizeof(__nv_bfloat16)
-                + /*s_Q_bf16    */ 16 * DN_KEY * sizeof(__nv_bfloat16)
-                + /*s_K_bf16    */ 16 * DN_KEY * sizeof(__nv_bfloat16)
-                + /*s_d_bf16    */ 16 * DN_PHASE2_J_PER_BLOCK * sizeof(__nv_bfloat16);
-            constexpr size_t P2_WMMA_SMEM_BYTES = P2_SMEM_BYTES + P2_WMMA_EXTRA_BYTES;
+            // WMMA path drops s_w (f32) — only s_w_bf16 is read by the WMMA d-compute —
+            // and adds: s_wmma_tile (16×32 f32, shared by d and o_inter qs)
+            //         + s_state_bf16 (J_per×DN_KEY bf16)
+            //         + s_w_bf16, s_Q_bf16, s_K_bf16 (each 16×DN_KEY bf16, M-padded)
+            //         + s_d_bf16 (16 × J_per bf16, K-padded for state-update fragment).
+            // Computing the WMMA budget directly (rather than P2_SMEM_BYTES + extras) lets
+            // us actually drop the s_w slot — important because at ~50 KB/block we need to
+            // stay under 100 KB per SM to fit 2 blocks/SM (per __launch_bounds__(128, 2)).
+            constexpr size_t P2_WMMA_F32_BYTES = (
+                  DN_PHASE2_J_PER_BLOCK * DK_S         // s_state
+                + DN_CHUNK_C * DN_PHASE2_J_PER_BLOCK   // s_u
+                + DN_CHUNK_C * DK_S                    // s_Q  (s_w dropped)
+                + DN_CHUNK_C * DK_S                    // s_K
+                + DN_CHUNK_C * DN_PHASE2_J_PER_BLOCK   // s_d
+                + DN_CHUNK_C * DN_CHUNK_C              // s_qkt
+                + DN_CHUNK_C                           // s_cs
+                + DN_CHUNK_C                           // s_decay_rem_buf
+                + 16 * 32                              // s_wmma_tile
+                ) * sizeof(float);
+            constexpr size_t P2_WMMA_BF16_BYTES =
+                  DN_PHASE2_J_PER_BLOCK * DN_KEY * sizeof(__nv_bfloat16)   // s_state_bf16
+                + 16 * DN_KEY * sizeof(__nv_bfloat16)                      // s_w_bf16
+                + 16 * DN_KEY * sizeof(__nv_bfloat16)                      // s_Q_bf16
+                + 16 * DN_KEY * sizeof(__nv_bfloat16)                      // s_K_bf16
+                + 16 * DN_PHASE2_J_PER_BLOCK * sizeof(__nv_bfloat16);      // s_d_bf16
+            constexpr size_t P2_WMMA_SMEM_BYTES = P2_WMMA_F32_BYTES + P2_WMMA_BF16_BYTES;
             // Runtime dispatcher: MEGAKERNEL_DN_PHASE2_WMMA_RUNTIME=1 → WMMA, else scalar.
             static const bool use_wmma_phase2 = []() {
                 const char *e = std::getenv("MEGAKERNEL_DN_PHASE2_WMMA_RUNTIME");
