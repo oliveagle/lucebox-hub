@@ -58,13 +58,13 @@ add_library(dflash27b STATIC
     src/f16_convert.cu
     src/delta_net_chunked.cpp
 )
-# Ampere (86) always; Blackwell consumer (120) and Thor (110 on CUDA 13+)
-# added when nvcc supports them. DGX Spark /
+# Turing (75) and Ampere (86) always; Blackwell consumer (120) and Thor
+# (110 on CUDA 13+) added when nvcc supports them. DGX Spark /
 # GB10 is compute capability 12.1 (121), added at CUDA 12.9+.
 if(DFLASH27B_USER_CUDA_ARCHITECTURES)
     set(_dflash27b_archs "${DFLASH27B_USER_CUDA_ARCHITECTURES}")
 else()
-    set(_dflash27b_archs "86")
+    set(_dflash27b_archs "75;86")
     if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
         list(APPEND _dflash27b_archs "120")
     endif()
