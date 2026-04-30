@@ -77,6 +77,14 @@ else()
 endif()
 set_target_properties(dflash27b PROPERTIES CUDA_ARCHITECTURES "${_dflash27b_archs}")
 
+# Extract the minimum SM from the arch list so safetensors_draft.cpp can decide
+# at compile time whether to convert BF16 draft weights to FP16 (cuBLAS BF16
+# GEMM has no tensor core acceleration on SM < 80).
+list(GET _dflash27b_archs 0 _dflash27b_min_sm)
+# Strip any trailing 'a' suffix (e.g. "121a" → "121")
+string(REGEX REPLACE "[^0-9]" "" _dflash27b_min_sm "${_dflash27b_min_sm}")
+target_compile_definitions(dflash27b PRIVATE DFLASH27B_MIN_SM=${_dflash27b_min_sm})
+
 target_include_directories(dflash27b
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
