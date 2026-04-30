@@ -32,6 +32,10 @@ Three projects today, more coming. Each one is a self-contained release with its
   <a href="dflash/"><img src="assets/svg/card-dflash-dark.svg" alt="DFlash 27B" width="46%"></a>
 </p>
 
+<p align="center">
+  <a href="pflash/"><img src="assets/svg/card-pflash-dark.svg" alt="PFlash speculative prefill" width="46%"></a>
+</p>
+
 ---
 
 ## 01 · Megakernel Qwen3.5 0.8B on RTX 3090
