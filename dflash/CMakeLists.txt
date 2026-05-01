@@ -47,6 +47,10 @@ set(GGML_CUDA_FA_ALL_QUANTS ${DFLASH27B_FA_ALL_QUANTS} CACHE BOOL "" FORCE)
 # Use only the ggml subtree of llama.cpp (skip libllama).
 add_subdirectory(deps/llama.cpp/ggml EXCLUDE_FROM_ALL)
 
+# The C++ sources include <cuda_runtime.h> directly, so the toolkit headers must
+# be available when compiling the library.
+find_package(CUDAToolkit REQUIRED)
+
 # ─── dflash27b static library ──────────────────────────────────────
 
 add_library(dflash27b STATIC
@@ -135,6 +139,7 @@ target_include_directories(dflash27b
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CUDAToolkit_INCLUDE_DIRS}
 )
 if(DFLASH27B_ENABLE_BSA)
     target_include_directories(dflash27b PRIVATE
