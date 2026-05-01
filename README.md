@@ -70,7 +70,7 @@ python final_bench.py
 
 ---
 
-## 02 · DFlash DDtree Qwen3.5 27B GGUF on RTX 3090
+## 02 · DFlash DDtree Qwen3.5 & Qwen3.6 27B GGUF on RTX 3090
 
 **First GGUF port of DFlash speculative decoding.** Qwen3.5-27B on a single RTX 3090, Q4_K_M target + BF16 draft, DDTree budget=22.
 
@@ -91,8 +91,8 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target test_dflash -j
 
 # 3. fetch weights: ~16 GB Q4_K_M target + 3.46 GB bf16 draft
-huggingface-cli download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-Q4_K_M.gguf --local-dir models/
-huggingface-cli download z-lab/Qwen3.5-27B-DFlash model.safetensors --local-dir models/draft/
+huggingface-cli download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
+huggingface-cli download z-lab/Qwen3.6-27B-DFlash model.safetensors --local-dir models/draft/
 
 # 4a. one-shot streaming generate
 python3 scripts/run.py --prompt "def fibonacci(n):"
@@ -186,7 +186,7 @@ cmake --build build --target test_dflash test_flashprefill_kernels -j
 # 2. fetch weights: 27B Q4_K_M target + 0.6B BF16 drafter (GGUF) + DFlash spec-decode draft
 huggingface-cli download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
 huggingface-cli download unsloth/Qwen3-0.6B-GGUF Qwen3-0.6B-BF16.gguf --local-dir models/
-huggingface-cli download z-lab/Qwen3.5-27B-DFlash model.safetensors --local-dir models/draft/
+huggingface-cli download z-lab/Qwen3.6-27B-DFlash model.safetensors --local-dir models/draft/
 
 # 3. run the daemon: compress (drafter scoring) + generate (target spec decode)
 DFLASH_FP_USE_BSA=1 DFLASH_FP_ALPHA=0.85 \
@@ -291,7 +291,7 @@ Per-project citations live in each subproject's README.
 ## Inspired by
 
 - [Hazy Research](https://hazyresearch.stanford.edu/blog/2025-05-27-no-bubbles): megakernel idea and the intelligence-per-watt methodology.
-- [z-lab/DFlash](https://arxiv.org/abs/2602.06036) (Wang et al., 2026): block-diffusion speculative decoding algorithm. We use their published Qwen3.5-27B-DFlash draft weights as-is.
+- [z-lab/DFlash](https://arxiv.org/abs/2602.06036) (Wang et al., 2026): block-diffusion speculative decoding algorithm. We use their published Qwen3.5/Qwen3.6-27B-DFlash draft weights as-is.
 - [DDTree](https://arxiv.org/abs/2604.12989) (Ringel & Romano, 2026): tree-structured verify that DFlash 27B uses for its 3.5× speedup over chain spec decoding. [liranringel/ddtree](https://github.com/liranringel/ddtree).
 - [AlpinDale/qwen_megakernel](https://github.com/AlpinDale/qwen_megakernel), [Infatoshi/MegaQwen](https://github.com/Infatoshi/MegaQwen): prior art on fused Qwen kernels.
 
