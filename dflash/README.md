@@ -151,15 +151,28 @@ git clone --recurse-submodules https://github.com/Luce-Org/lucebox-hub
 cd lucebox-hub/dflash
 
 # Build (CUDA 12+, CMake 3.18+, sm_75+ GPU; CUDA 13+ required for Jetson AGX Thor sm_110)
-# For 2080 Ti: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=75
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+# Pass -DCMAKE_CUDA_ARCHITECTURES matching your GPU. Common values:
+#   75 = 2080 Ti (auto-converts BF16 draft → FP16 at load)
+#   86 = RTX 3090 / A40
+#   89 = RTX 4090
+#   90 = H100
+#   120 = Blackwell / DGX Spark
+#   110 = Jetson AGX Thor (CUDA 13+)
+# Omitting the flag falls back to the CMake-set default ("75;86"), which
+# fails to compile pflash's BF16 WMMA kernels on the sm_75 pass — set the
+# flag explicitly to your real arch to avoid this.
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=86
 cmake --build build --target test_dflash -j
 
-# Fetch models: ~16 GB target + 3.46 GB draft
-huggingface-cli download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-Q4_K_M.gguf --local-dir models/
-huggingface-cli download z-lab/Qwen3.5-27B-DFlash model.safetensors --local-dir models/draft/
+# Fetch models: ~16 GB target + 3.46 GB draft.
+# Quickstart pins to Qwen3.6-27B (latest release). For Qwen3.5-27B swap in
+# unsloth/Qwen3.5-27B-GGUF + z-lab/Qwen3.5-27B-DFlash; arch is identical so
+# no rebuild is needed (see "Qwen3.6-27B target" section above for AL deltas).
+huggingface-cli download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
+huggingface-cli download z-lab/Qwen3.6-27B-DFlash model.safetensors --local-dir models/draft/
 
-# Streaming one-shot generate
+# Streaming one-shot generate (run.py defaults to models/Qwen3.6-27B-Q4_K_M.gguf;
+# override with --target or DFLASH_TARGET=... env var).
 python3 scripts/run.py --prompt "def fibonacci(n):"
 
 # Multi-turn chat REPL
@@ -178,7 +191,7 @@ python3 scripts/bench_he.py --n-gen 256 --ddtree-budget 22   # minimal HE bench
 **Long-context mode (up to 256K):**
 ```bash
 DFLASH27B_KV_TQ3=1 DFLASH27B_PREFILL_UBATCH=16 \
-  build/test_dflash models/Qwen3.5-27B-Q4_K_M.gguf \
+  build/test_dflash models/Qwen3.6-27B-Q4_K_M.gguf \
   models/draft/model.safetensors /tmp/long_prompt.bin 64 /tmp/out.bin \
   --fast-rollback --ddtree --ddtree-budget=16 --max-ctx=4096   # align_up(prompt + n_gen + 64, 256); raise up to 262144 for long prompts
 ```

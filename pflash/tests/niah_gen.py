@@ -37,7 +37,9 @@ def main():
     with open(args.out, "w") as f:
         for i in range(args.n):
             ex = gen_one(seed=42 + i, target_tokens=args.ctx, tokenizer=tok)
-            ex["n_tokens"] = len(tok(ex["prompt"], return_tensors="pt")["input_ids"][0])
+            # plain encode keeps the bench harness torch-free; pyproject only
+            # depends on transformers + tokenizers.
+            ex["n_tokens"] = len(tok.encode(ex["prompt"]))
             f.write(json.dumps(ex) + "\n")
             print(f"  case {i}: ntok={ex['n_tokens']} key={ex['key']} ans={ex['answer']}")
     print(f"saved {args.n} cases to {args.out}")

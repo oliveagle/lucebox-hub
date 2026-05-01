@@ -5,7 +5,12 @@ Streaming one-shot generation.
     echo "Write a haiku about GPUs" | python3 scripts/run.py
 
 Tokens print live as they are committed by the spec-decode loop.
-Auto-applies Qwen3.5 chat template unless --raw is passed.
+Auto-applies the Qwen3.5/3.6 chat template unless --raw is passed.
+
+Default target is Qwen3.6-27B-Q4_K_M.gguf. Override with `--target` or the
+`DFLASH_TARGET` env var (also honored by bench_he.py / bench_llm.py).
+The HF tokenizer repo defaults to `Qwen/Qwen3.6-27B` and can be overridden via
+the `DFLASH_TOKENIZER` env var.
 """
 import argparse
 import os
@@ -18,8 +23,9 @@ from pathlib import Path
 
 def default_paths():
     return {
-        "target": "models/Qwen3.5-27B-Q4_K_M.gguf",
-        "draft":  "models/draft",
+        "target": os.environ.get("DFLASH_TARGET",
+                                 "models/Qwen3.6-27B-Q4_K_M.gguf"),
+        "draft":  os.environ.get("DFLASH_DRAFT", "models/draft"),
         "bin":    "build/test_dflash" + (".exe" if sys.platform == "win32" else ""),
     }
 
@@ -90,7 +96,8 @@ def main():
         sys.exit("no prompt")
 
     from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-27B",
+    tok_repo = os.environ.get("DFLASH_TOKENIZER", "Qwen/Qwen3.6-27B")
+    tokenizer = AutoTokenizer.from_pretrained(tok_repo,
                                               trust_remote_code=True)
 
     if args.raw:

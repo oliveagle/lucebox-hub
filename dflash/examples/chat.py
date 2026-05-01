@@ -15,7 +15,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-TARGET = ROOT / "models" / "Qwen3.5-27B-Q4_K_M.gguf"
+TARGET = Path(os.environ.get(
+    "DFLASH_TARGET",
+    str(ROOT / "models" / "Qwen3.6-27B-Q4_K_M.gguf"),
+))
 DRAFT_ROOT = ROOT / "models" / "draft"
 BIN = ROOT / "build" / ("test_dflash.exe" if sys.platform == "win32" else "test_dflash")
 

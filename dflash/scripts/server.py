@@ -40,7 +40,10 @@ from _prefill_hook import (
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_TARGET = ROOT / "models" / "Qwen3.5-27B-Q4_K_M.gguf"
+DEFAULT_TARGET = Path(os.environ.get(
+    "DFLASH_TARGET",
+    str(ROOT / "models" / "Qwen3.6-27B-Q4_K_M.gguf"),
+))
 DEFAULT_DRAFT_ROOT = ROOT / "models" / "draft"
 DEFAULT_BIN = ROOT / "build" / ("test_dflash" + (".exe" if sys.platform == "win32" else ""))
 DEFAULT_BUDGET = 22

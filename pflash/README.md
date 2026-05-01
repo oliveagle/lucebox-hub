@@ -68,10 +68,15 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
                     -DDFLASH27B_ENABLE_BSA=ON
 cmake --build build --target test_dflash test_flashprefill_kernels -j
 
-# 2. fetch weights
+# 2. fetch weights (target + spec-decode draft + drafter scorer)
 huggingface-cli download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
 huggingface-cli download Qwen/Qwen3-0.6B model.safetensors tokenizer.json --local-dir models/drafter/
-huggingface-cli download z-lab/Qwen3.5-27B-DFlash model.safetensors --local-dir models/draft/
+huggingface-cli download z-lab/Qwen3.6-27B-DFlash model.safetensors --local-dir models/draft/
+
+# 2b. convert the drafter (Qwen3-0.6B HF) to a BF16 GGUF for the C++ scorer.
+#     The submodule already vendors llama.cpp at deps/llama.cpp.
+python deps/llama.cpp/convert_hf_to_gguf.py models/drafter \
+       --outtype bf16 --outfile models/Qwen3-0.6B-BF16.gguf
 
 # 3. install pflash bench harness (Python only used for benchmarking)
 cd ../pflash

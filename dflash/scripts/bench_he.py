@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BIN_SUFFIX = ".exe" if os.name == "nt" else ""
 TARGET = os.environ.get(
     "DFLASH_TARGET",
-    str(ROOT / "models" / "Qwen3.5-27B-Q4_K_M.gguf"),
+    str(ROOT / "models" / "Qwen3.6-27B-Q4_K_M.gguf"),
 )
 _LOCAL_DRAFT_FILE = ROOT / "models" / "draft" / "model.safetensors"
 _LOCAL_DRAFT_ROOT = ROOT / "models" / "draft"
