@@ -1,4 +1,4 @@
-# dflash spec-prefill — daemon-side build & tunables
+# dflash spec-prefill, daemon-side build & tunables
 
 In-process speculative-prefill + speculative-decode daemon (C++/CUDA only,
 no Python, no Triton, no PyTorch at runtime).
