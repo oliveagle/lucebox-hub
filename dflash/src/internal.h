@@ -165,8 +165,16 @@ struct DraftWeights {
 
     ggml_tensor *          fc          = nullptr;   // [5*hidden, hidden]
     ggml_tensor *          hidden_norm = nullptr;   // [hidden]
-    std::vector<DraftLayer> layers;                 // size = 5
+    std::vector<DraftLayer> layers;                 // size = n_layer
     ggml_tensor *          out_norm    = nullptr;   // [hidden]
+
+    // Architecture metadata (populated by loader).
+    int n_layer   = DFLASH27B_DRAFT_LAYERS;           // 5
+    int n_head    = DFLASH27B_TARGET_N_HEADS;          // 32
+    int n_head_kv = DFLASH27B_TARGET_N_KV_HEADS;       // 8
+    int head_dim  = DFLASH27B_TARGET_HEAD_DIM;         // 128
+    int n_embd    = DFLASH27B_TARGET_HIDDEN;           // 5120
+    int n_ff      = DFLASH27B_TARGET_INTERMEDIATE;     // 17408
 };
 
 bool load_draft_safetensors(const std::string & path,
