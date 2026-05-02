@@ -1568,6 +1568,7 @@ int main(int argc, char ** argv) {
                     std::printf("[park] draft released\n"); std::fflush(stdout);
                 }
                 if (want_target && !target_parked) {
+                    step_graph_destroy(proj_sg);
                     free_target_weights(w);
                     target_parked = true;
                     std::printf("[park] target released\n"); std::fflush(stdout);
@@ -1638,6 +1639,7 @@ int main(int argc, char ** argv) {
                 bool restore_target = !target_parked;
                 bool restore_draft  = !draft_parked;
                 if (restore_target) {
+                    step_graph_destroy(proj_sg);
                     free_target_weights(w);
                     target_parked = true;
                     std::printf("[compress] target parked\n"); std::fflush(stdout);
