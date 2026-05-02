@@ -468,6 +468,8 @@ struct StepGraph {
 
     // Output
     ggml_tensor *   logits = nullptr;
+    ggml_tensor *   argmax_tokens = nullptr; // [n_tokens] i32, GPU-side argmax of logits
+    ggml_tensor *   topk_indices = nullptr;  // [K, n_tokens] i32, GPU-side top-K indices
 
     // Per-delta-net-layer captures (verify only). One entry per delta-net layer.
     // Each entry's tensors are graph views on the gated_delta_net result:
@@ -492,6 +494,8 @@ static void step_graph_free(StepGraph & sg) {
     sg.target_hidden_cat = sg.positions_k = nullptr;
     sg.parent_ids = nullptr;
     sg.logits = nullptr;
+    sg.argmax_tokens = nullptr;
+    sg.topk_indices = nullptr;
     sg.delta_captures.clear();
 }
 
@@ -657,7 +661,11 @@ static bool build_target_step(
     sg.logits = go.logits;
     sg.delta_captures = std::move(go.delta_captures);
     ggml_set_output(sg.logits);
-    ggml_build_forward_expand(sg.gf, sg.logits);
+
+    sg.argmax_tokens = ggml_argmax(sg.ctx, sg.logits);
+    ggml_set_name(sg.argmax_tokens, "chain_verify_argmax");
+    ggml_set_output(sg.argmax_tokens);
+    ggml_build_forward_expand(sg.gf, sg.argmax_tokens);
 
     if (!sg.alloc) {
         sg.alloc = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend));
@@ -729,7 +737,11 @@ static bool build_target_step_tree(
     sg.logits = go.logits;
     sg.delta_captures = std::move(go.delta_captures);
     ggml_set_output(sg.logits);
-    ggml_build_forward_expand(sg.gf, sg.logits);
+
+    sg.argmax_tokens = ggml_argmax(sg.ctx, sg.logits);
+    ggml_set_name(sg.argmax_tokens, "tree_verify_argmax");
+    ggml_set_output(sg.argmax_tokens);
+    ggml_build_forward_expand(sg.gf, sg.argmax_tokens);
 
     if (!sg.alloc) {
         sg.alloc = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend));
@@ -788,7 +800,12 @@ static bool build_draft_step(
     }
     sg.logits = go.logits;
     ggml_set_output(sg.logits);
-    ggml_build_forward_expand(sg.gf, sg.logits);
+
+    // GPU-side argmax: avoids 16 CPU argmaxes over 248K vocab
+    sg.argmax_tokens = ggml_argmax(sg.ctx, sg.logits);
+    ggml_set_name(sg.argmax_tokens, "argmax_tokens");
+    ggml_set_output(sg.argmax_tokens);
+    ggml_build_forward_expand(sg.gf, sg.argmax_tokens);
 
     if (!sg.alloc) {
         sg.alloc = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend));
@@ -1751,10 +1768,16 @@ int main(int argc, char ** argv) {
         auto T_draft_compute = sync_us();
         tt_draft_compute += std::chrono::duration<double, std::micro>(T_draft_compute - T_draft_set).count();
 
-        ggml_backend_tensor_get(sg.logits, draft_logits_buf.data(), 0,
-                                sizeof(float) * vocab * q_len);
-        for (int i = 0; i < q_len; i++) {
-            draft_tok[i] = argmax_f32(draft_logits_buf.data() + (size_t)i * vocab, vocab);
+        // DDTree top-K: use GPU argmax for draft_tok; full logits transfer
+        // only when DDTree needs top-K (K>1) for sibling expansion.
+        const int ddtree_K = (ddtree_budget > q_len - 1) ? 8 : 1;
+
+        // Always use GPU argmax for draft_tok (saves CPU argmax over 248K vocab)
+        {
+            std::vector<int32_t> gpu_argmax(q_len);
+            ggml_backend_tensor_get(sg.argmax_tokens, gpu_argmax.data(), 0,
+                                    sizeof(int32_t) * q_len);
+            for (int i = 0; i < q_len; i++) draft_tok[i] = gpu_argmax[i];
         }
         // The block-diffusion draft is free to "denoise" position 0 even though
         // the input there is the unmasked last_tok. Pin it back so verify and
@@ -1769,7 +1792,6 @@ int main(int argc, char ** argv) {
         // tree siblings. Budget <= L means pure chain → no siblings needed, so
         // we can skip the O(L*vocab) top-K extract entirely and just fill rank 0
         // from draft_tok. For larger budgets we need real top-K.
-        const int ddtree_K = (ddtree_budget > q_len - 1) ? 8 : 1;
         static std::vector<float>   ddtree_top_log_probs; // [L × K]
         static std::vector<int32_t> ddtree_top_token_ids; // [L × K]
         if (ddtree_mode) {
@@ -1786,6 +1808,10 @@ int main(int argc, char ** argv) {
                     ddtree_top_token_ids[i] = draft_tok[i + 1];  // +1 to skip slot 0
                 }
             } else {
+                // DDTree K>1: need real log-probs for best-first tree scoring.
+                // Transfer full logits for positions 1..q_len-1.
+                ggml_backend_tensor_get(sg.logits, draft_logits_buf.data(), 0,
+                                        sizeof(float) * vocab * q_len);
                 extract_draft_topk(draft_logits_buf.data() + (size_t)vocab,
                                    L, vocab, ddtree_K,
                                    ddtree_top_log_probs.data(),
@@ -1906,13 +1932,10 @@ int main(int argc, char ** argv) {
             T_verify_compute = sync_us();
             tt_verify_compute += std::chrono::duration<double, std::micro>(T_verify_compute - T_verify_set).count();
 
-            // Read the N verify logits, compute posterior argmax per slot.
-            ggml_backend_tensor_get(sg.logits, verify_logits_buf.data(), 0,
-                                    sizeof(float) * vocab * N);
+            // Read the N verify argmax from GPU (N × 4 bytes, not N × 248K × 4).
             std::vector<int32_t> posterior(N);
-            for (int i = 0; i < N; i++) {
-                posterior[i] = argmax_f32(verify_logits_buf.data() + (size_t)i * vocab, vocab);
-            }
+            ggml_backend_tensor_get(sg.argmax_tokens, posterior.data(), 0,
+                                    sizeof(int32_t) * N);
 
             // Walk tree: accepted DFS indices and next bonus token.
             int next_token = -1;
@@ -2191,11 +2214,8 @@ int main(int argc, char ** argv) {
             T_verify_compute = sync_us();
             tt_verify_compute += std::chrono::duration<double, std::micro>(T_verify_compute - T_verify_set).count();
 
-            ggml_backend_tensor_get(sg.logits, verify_logits_buf.data(), 0,
-                                    sizeof(float) * vocab * q_len);
-            for (int i = 0; i < q_len; i++) {
-                target_tok[i] = argmax_f32(verify_logits_buf.data() + (size_t)i * vocab, vocab);
-            }
+            ggml_backend_tensor_get(sg.argmax_tokens, target_tok.data(), 0,
+                                    sizeof(int32_t) * q_len);
         } else {
             // Sequential verify: q_len independent single-token decodes.
             // Each call writes K/V at slot committed+i and advances SSM by 1.
