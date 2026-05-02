@@ -411,14 +411,30 @@ class PrefixCache:
               f"prefix_len={target_cut}", flush=True)
 
     def abort_inline_snap(self, slot: int) -> None:
-        """Release the reservation made by prepare_inline_snap without
-        evicting the old entry or registering a new one.  Call this from
-        exception paths where the request failed before the daemon snapshot
-        could complete, so the pending eviction is cancelled.
+        """Release the reservation made by prepare_inline_snap.
+
+        At-cap case: prepare_inline_snap peeked at the LRU (old_key -> slot)
+        and stashed old_key in _pending_evict_key WITHOUT removing it. We
+        cannot tell from here whether the daemon already committed the
+        snapshot to ``slot`` before the failure was observed:
+          - If it didn't: old_key -> slot is still semantically valid and
+            we should keep it.
+          - If it did:    slot now holds the NEW prompt's KV, so old_key
+            -> slot is stale and a future lookup would return data that
+            doesn't match the key.
+        Without daemon-side query we conservatively assume the worst and
+        drop old_key from the LRU. We accept losing one valid cache entry
+        in exchange for never returning a wrong-KV restore. Callers that
+        know the daemon did NOT process the snap (e.g. early validation
+        failure before any send) should evict only the pending key — but
+        in practice, every failure path that calls this happens AFTER the
+        daemon command was issued, so the conservative drop is correct.
         """
         if self.disabled:
             return
-        self._pending_evict_key = None
+        if self._pending_evict_key is not None:
+            self.entries.pop(self._pending_evict_key, None)
+            self._pending_evict_key = None
 
     # ------------------------------------------------------------------
     # Option 3: full-compress-result cache
@@ -623,11 +639,22 @@ class PrefixCache:
         finally:
             try: os.unlink(tmp_path)
             except OSError: pass
-            # On any failure path (timeout, cancellation, etc.) the reservation
-            # made by prepare_inline_snap must be released — otherwise
-            # _pending_evict_key stays set and the next prepare* call would
-            # incorrectly evict the wrong LRU entry.
             if not confirmed:
+                # The SNAPSHOT command may already have been processed on the
+                # daemon (the slot now holds new-prompt KV) even though we
+                # didn't observe the ack. To keep daemon and Python state
+                # consistent: free the slot daemon-side (best effort), then
+                # drop the at-cap LRU mapping in abort_inline_snap.
+                try:
+                    self._send(f"FREE_SNAPSHOT {slot}\n")
+                    await self._await_reply("[snap] freed slot=", timeout=2.0)
+                except Exception:
+                    # If the daemon doesn't ack the free either, the slot may
+                    # leak in the daemon until next startup_sync — but that's
+                    # bounded and recoverable, while a stale hash->slot
+                    # mapping in Python would cause silent KV corruption on
+                    # the next lookup.
+                    pass
                 self.abort_inline_snap(slot)
 
     async def startup_sync(self) -> None:
