@@ -201,6 +201,12 @@ print(f"t3 < 30% of t1:            {ok_speedup_t3}")
 print(f"log [pc] full-cache hits:  {full_cache_hits} (need >= 2): {ok_log_hits}")
 print(f"needle retrieved turn 1:   {ok_needle_t1}  (looking for {ANSWER!r})")
 
+# needle retrieval is informational, not gated. The needle is a quality
+# property of pFlash's compression (depends on --prefill-keep-ratio and the
+# importance-scoring picking the right blocks), not of the cache. Failing
+# the test on needle absence would couple cache correctness to compression
+# quality. Tracked separately; for the cache test, identity-of-replies +
+# log-confirmed cache hits is the right gate.
 passed = ok_identical and ok_speedup_t2 and ok_speedup_t3 and ok_log_hits
 if not passed:
     print("\nFAILED — see /tmp/test_full_compress_cache_server.log for details")

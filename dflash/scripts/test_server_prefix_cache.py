@@ -16,8 +16,9 @@ DRAFT  = Path.home() / "models/qwen3.6-27b-dflash"
 BIN    = ROOT / "dflash/build/test_dflash"
 SERVER_SCRIPT = ROOT / "dflash/scripts/server.py"
 
-if not TARGET.exists() or not BIN.exists():
-    print(f"SKIP: prereqs missing (target={TARGET.exists()} bin={BIN.exists()})")
+if not TARGET.exists() or not BIN.exists() or not DRAFT.exists():
+    print(f"SKIP: prereqs missing (target={TARGET.exists()} "
+          f"draft={DRAFT.exists()} bin={BIN.exists()})")
     sys.exit(0)
 
 # Start server with prefix cache enabled

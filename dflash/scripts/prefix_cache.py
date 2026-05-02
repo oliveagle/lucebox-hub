@@ -117,8 +117,15 @@ class DaemonStdoutBus:
         """Block until daemon emits a line starting with *prefix*."""
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[str] = loop.create_future()
-        self._waiters.append((prefix, fut))
-        return await asyncio.wait_for(fut, timeout=timeout)
+        entry = (prefix, fut)
+        self._waiters.append(entry)
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            # On timeout / cancellation the matcher loop never popped us;
+            # remove ourselves so _waiters doesn't grow without bound.
+            try: self._waiters.remove(entry)
+            except ValueError: pass
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +455,11 @@ class PrefixCache:
             self._full_disabled = True
             return
 
+        # Idempotency guard: a second call would otherwise reset full_entries +
+        # slot allocator and orphan any cur_bin files already on disk.
+        if not getattr(self, "_full_disabled", True):
+            return
+
         remaining = self.DAEMON_MAX_SLOTS - self.cap
         if full_cap > remaining:
             print(f"{self.log_prefix} full-cache cap={full_cap} would exceed "
@@ -599,16 +611,24 @@ class PrefixCache:
         with os.fdopen(fd, "wb") as f:
             for t in prompt_ids[:cut]:
                 f.write(struct.pack("<i", int(t)))
+        confirmed = False
         try:
             self._send(f"{tmp_path} 0\n")
             if token_stream_consumer is not None:
                 await token_stream_consumer()
             self._send(f"SNAPSHOT {slot}\n")
             await self._await_reply("[snap] slot=")
+            self.confirm_inline_snap(slot, cut, prompt_ids)
+            confirmed = True
         finally:
             try: os.unlink(tmp_path)
             except OSError: pass
-        self.confirm_inline_snap(slot, cut, prompt_ids)
+            # On any failure path (timeout, cancellation, etc.) the reservation
+            # made by prepare_inline_snap must be released — otherwise
+            # _pending_evict_key stays set and the next prepare* call would
+            # incorrectly evict the wrong LRU entry.
+            if not confirmed:
+                self.abort_inline_snap(slot)
 
     async def startup_sync(self) -> None:
         """Query the daemon for existing slots and free them all.

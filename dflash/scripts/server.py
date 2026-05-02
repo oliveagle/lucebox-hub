@@ -404,6 +404,13 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
                         if full_hit is None:
                             try: cur_bin.unlink()
                             except Exception: pass
+                        else:
+                            # On full-cache hit, cur_bin points at the persistent cached file
+                            # (which we MUST keep). The tokenize-stage prompt_bin tempfile, on
+                            # the other hand, was never used (we hit before _maybe_compress) and
+                            # would otherwise leak.
+                            try: prompt_bin.unlink()
+                            except Exception: pass
                     if full_snap_prep is not None:
                         fslot, _ = full_snap_prep
                         prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
@@ -482,6 +489,13 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
 
         if full_hit is None:
             try: cur_bin.unlink()
+            except Exception: pass
+        else:
+            # On full-cache hit, cur_bin points at the persistent cached file
+            # (which we MUST keep). The tokenize-stage prompt_bin tempfile, on
+            # the other hand, was never used (we hit before _maybe_compress) and
+            # would otherwise leak.
+            try: prompt_bin.unlink()
             except Exception: pass
         text = tokenizer.decode(tokens, skip_special_tokens=True)
         return JSONResponse({
@@ -646,6 +660,13 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
                         if full_hit is None:
                             try: cur_bin.unlink()
                             except Exception: pass
+                        else:
+                            # On full-cache hit, cur_bin points at the persistent cached file
+                            # (which we MUST keep). The tokenize-stage prompt_bin tempfile, on
+                            # the other hand, was never used (we hit before _maybe_compress) and
+                            # would otherwise leak.
+                            try: prompt_bin.unlink()
+                            except Exception: pass
 
                     if full_snap_prep is not None:
                         fslot, _ = full_snap_prep
@@ -731,6 +752,13 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
 
         if full_hit is None:
             try: cur_bin.unlink()
+            except Exception: pass
+        else:
+            # On full-cache hit, cur_bin points at the persistent cached file
+            # (which we MUST keep). The tokenize-stage prompt_bin tempfile, on
+            # the other hand, was never used (we hit before _maybe_compress) and
+            # would otherwise leak.
+            try: prompt_bin.unlink()
             except Exception: pass
         text = tokenizer.decode(tokens, skip_special_tokens=True)
         return JSONResponse({

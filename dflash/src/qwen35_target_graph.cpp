@@ -219,7 +219,9 @@ void free_target_cache(TargetCache & c) {
 }
 
 void reset_target_cache(TargetCache & c) {
-    c.cur_pos = 0;
+    c.cur_pos  = 0;
+    c.last_tok = -1;   // prevent the previous request's decode seed from
+                       // leaking into the next request after a reset.
     std::vector<uint8_t> zeros(1 * 1024 * 1024, 0);
     ggml_context * ctx_list[] = { c.base_ctx, c.rollback_ctx };
     for (int ci = 0; ci < 2; ci++) {
@@ -437,6 +439,21 @@ bool restore_target_cache(const PrefixSnapshot & snap, TargetCache & cache) {
         set_last_error("restore_target_cache: max_ctx mismatch");
         return false;
     }
+    // Topology: snapshot must describe the same model layout the cache was
+    // allocated against. A mismatch (stale snapshot from a different daemon
+    // run, or a snap captured before a model swap) would index past
+    // cache.attn_k / .ssm_state / .conv_state and silently corrupt memory.
+    if (snap.attn_k_snap.size() != cache.attn_k.size() ||
+        snap.attn_v_snap.size() != cache.attn_v.size() ||
+        snap.ssm_state_snap.size()  != cache.ssm_state.size() ||
+        snap.conv_state_snap.size() != cache.conv_state.size()) {
+        set_last_error("restore_target_cache: layer-count mismatch (stale snapshot?)");
+        return false;
+    }
+    if (snap.cur_pos < 0 || snap.cur_pos > cache.max_ctx) {
+        set_last_error("restore_target_cache: snap.cur_pos out of range");
+        return false;
+    }
 
     const int n_full_attn = (int)snap.attn_k_snap.size();
     const int n_delta     = (int)snap.ssm_state_snap.size();
@@ -482,6 +499,12 @@ bool snapshot_target_cache_thin(const TargetWeights & w,
                                  PrefixSnapshot & snap) {
     if (kv_end <= kv_start || kv_start < 0 || kv_end > cache.max_ctx) {
         set_last_error("snapshot_thin: invalid kv range");
+        return false;
+    }
+    // Capturing past cur_pos would snapshot uninitialized KV data — the
+    // restore path would then resume decode from garbage state.
+    if (kv_end > cache.cur_pos) {
+        set_last_error("snapshot_thin: kv_end exceeds cache.cur_pos (would capture uninitialized KV)");
         return false;
     }
     const int n_full_attn = w.n_layer / w.full_attention_interval;
