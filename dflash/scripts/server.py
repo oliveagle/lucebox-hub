@@ -37,6 +37,7 @@ from _prefill_hook import (
     PrefillConfig, add_cli_flags, config_from_args,
     compress_text_via_daemon,
 )
+from prefix_cache import DaemonStdoutBus, PrefixCache
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -131,7 +132,9 @@ class AnthropicMessagesRequest(BaseModel):
 def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: int,
               tokenizer: AutoTokenizer, stop_ids: set[int],
               prefill_cfg: PrefillConfig | None = None,
-              drafter_tokenizer: AutoTokenizer | None = None) -> FastAPI:
+              drafter_tokenizer: AutoTokenizer | None = None,
+              prefix_cache_slots: int = 4,
+              prefill_cache_slots: int = 4) -> FastAPI:
     import asyncio
     app = FastAPI(title="Luce DFlash OpenAI server")
     daemon_lock = asyncio.Lock()
@@ -156,11 +159,50 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
            f"--stream-fd={stream_fd_val}"]
     if sys.platform == "win32":
         daemon_proc = subprocess.Popen(cmd, close_fds=False, env=env,
-                                       stdin=subprocess.PIPE)
+                                       stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, bufsize=0)
     else:
         daemon_proc = subprocess.Popen(cmd, pass_fds=(w_pipe,), env=env,
-                                       stdin=subprocess.PIPE)
+                                       stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, bufsize=0)
     os.close(w_pipe)
+
+    bus = DaemonStdoutBus(daemon_proc.stdout)
+    # Resolve effective KV-K type from env at daemon spawn time. Mirrors the
+    # parsing the C++ daemon does in create_target_cache (with shorthand
+    # vars resolved last-wins). This becomes part of the prefix-cache hash
+    # so a daemon restart with different flags doesn't reuse stale state.
+    def _resolve_kv_k_type():
+        kv = "q8_0"
+        if os.environ.get("DFLASH27B_KV_F16", "0") != "0":
+            kv = "f16"
+        if os.environ.get("DFLASH27B_KV_Q4", "0") != "0":
+            kv = "q4_0"
+        if os.environ.get("DFLASH27B_KV_TQ3", "0") != "0":
+            kv = "tq3_0"
+        if os.environ.get("DFLASH27B_KV_K"):
+            kv = os.environ["DFLASH27B_KV_K"].lower()
+        return kv
+    _fa_window = int(os.environ.get("DFLASH27B_FA_WINDOW", 2048))
+    prefix_cache = PrefixCache(
+        daemon_stdin=daemon_proc.stdin,
+        await_reply=bus.await_reply,
+        daemon_lock=daemon_lock,
+        tokenizer=tokenizer,
+        kv_k_type=_resolve_kv_k_type(),
+        fa_window=_fa_window,
+        cap=prefix_cache_slots,
+    )
+    # Option 3: full-compress-result cache.  Only meaningful when pFlash
+    # compression is enabled.  Uses a separate slot range [prefix_cap, ...).
+    if prefill_cfg is not None and prefill_cache_slots > 0:
+        prefix_cache.init_full_cache(prefill_cache_slots)
+
+    @app.on_event("startup")
+    async def _startup():
+        import asyncio
+        bus.start(asyncio.get_running_loop())
+        await prefix_cache.startup_sync()
 
     @app.get("/v1/models")
     def list_models():
@@ -251,6 +293,15 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
             if generated >= n_gen:
                 hit_stop = True
 
+    async def _drain_pipe_to_sentinel():
+        """Async drain of r_pipe up to the next ``-1`` end-of-request sentinel.
+
+        Used by PrefixCache.maybe_snapshot's n_gen=0 prefill pass to consume
+        the daemon's empty-stream marker before the next protocol command.
+        """
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: list(_token_stream(r_pipe, 0)))
+
     @app.post("/v1/chat/completions")
     async def chat_completions(req: ChatRequest):
         prompt_bin, prompt_ids, raw_msgs = _tokenize_prompt(req)
@@ -264,21 +315,68 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
         if req.stream:
             async def sse() -> AsyncIterator[str]:
                 async with daemon_lock:
-                    cur_bin, cur_ids = await asyncio.to_thread(
-                        _maybe_compress, raw_msgs, prompt_bin, prompt_ids)
-                    prompt_len = len(cur_ids)
-                    gen_len = _gen_len_for(prompt_len)
-                    if gen_len <= 0:
-                        try: cur_bin.unlink()
-                        except Exception: pass
-                        err = {"id": completion_id, "object": "chat.completion.chunk",
-                               "created": created, "model": MODEL_NAME,
-                               "choices": [{"index": 0, "delta": {},
-                                            "finish_reason": "length"}]}
-                        yield f"data: {json.dumps(err)}\n\n"
-                        yield "data: [DONE]\n\n"
-                        return
-                    cmd_line = f"{cur_bin} {gen_len}\n"
+                    # --- Option 3: try full-compress-result cache first ---
+                    full_hit = prefix_cache.lookup_full(prompt_ids)
+                    full_snap_prep = None
+                    if full_hit is not None:
+                        slot, cached_cur_bin, cached_cur_ids_len = full_hit
+                        cur_bin = Path(cached_cur_bin)
+                        cur_ids = None  # not needed for hit path
+                        prompt_len = cached_cur_ids_len
+                        gen_len = _gen_len_for(prompt_len)
+                        if gen_len <= 0:
+                            err = {"id": completion_id, "object": "chat.completion.chunk",
+                                   "created": created, "model": MODEL_NAME,
+                                   "choices": [{"index": 0, "delta": {},
+                                                "finish_reason": "length"}]}
+                            yield f"data: {json.dumps(err)}\n\n"
+                            yield "data: [DONE]\n\n"
+                            try: prompt_bin.unlink()
+                            except Exception: pass
+                            return
+                        # Daemon RESTORE: snapshot covers all cached_cur_ids_len
+                        # tokens, so prefill is a no-op and decode seeds from
+                        # cache.last_tok.  No snap= suffix needed.
+                        cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}\n"
+                        snap_prep = None
+                    else:
+                        cur_bin, cur_ids = await asyncio.to_thread(
+                            _maybe_compress, raw_msgs, prompt_bin, prompt_ids)
+                        prompt_len = len(cur_ids)
+                        gen_len = _gen_len_for(prompt_len)
+                        if gen_len <= 0:
+                            try: cur_bin.unlink()
+                            except Exception: pass
+                            err = {"id": completion_id, "object": "chat.completion.chunk",
+                                   "created": created, "model": MODEL_NAME,
+                                   "choices": [{"index": 0, "delta": {},
+                                                "finish_reason": "length"}]}
+                            yield f"data: {json.dumps(err)}\n\n"
+                            yield "data: [DONE]\n\n"
+                            return
+                        compression_fired = (cur_bin != prompt_bin)
+                        if compression_fired:
+                            # Full-cache miss path: arrange to snapshot the
+                            # full compressed result for next time.
+                            full_snap_prep = prefix_cache.prepare_full_snap(prompt_ids)
+                            if full_snap_prep is not None:
+                                fslot, _ = full_snap_prep
+                                cmd_line = f"{cur_bin} {gen_len} snap={len(cur_ids)}:{fslot}\n"
+                            else:
+                                cmd_line = f"{cur_bin} {gen_len}\n"
+                            snap_prep = None  # skip prefix-cache snap when compression fired
+                        else:
+                            full_snap_prep = None
+                            hit = prefix_cache.lookup(cur_ids)
+                            snap_prep = prefix_cache.prepare_inline_snap(cur_ids)
+                            if hit:
+                                slot, _prefix_len = hit
+                                cmd_line = f"RESTORE {slot} {cur_bin} {gen_len}"
+                            else:
+                                cmd_line = f"{cur_bin} {gen_len}"
+                            if snap_prep:
+                                cmd_line += f" snap={snap_prep[1]}:{snap_prep[0]}"
+                            cmd_line += "\n"
                     daemon_proc.stdin.write(cmd_line.encode("utf-8"))
                     daemon_proc.stdin.flush()
                     head = {
@@ -303,8 +401,21 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
                             }
                             yield f"data: {json.dumps(chunk)}\n\n"
                     finally:
-                        try: cur_bin.unlink()
-                        except Exception: pass
+                        if full_hit is None:
+                            try: cur_bin.unlink()
+                            except Exception: pass
+                        else:
+                            # On full-cache hit, cur_bin points at the persistent cached file
+                            # (which we MUST keep). The tokenize-stage prompt_bin tempfile, on
+                            # the other hand, was never used (we hit before _maybe_compress) and
+                            # would otherwise leak.
+                            try: prompt_bin.unlink()
+                            except Exception: pass
+                    if full_snap_prep is not None:
+                        fslot, _ = full_snap_prep
+                        prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
+                    elif snap_prep:
+                        prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
                     tail = {
                         "id": completion_id, "object": "chat.completion.chunk",
                         "created": created, "model": MODEL_NAME,
@@ -318,23 +429,74 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
 
         # Non-streaming: collect all tokens, return one response
         async with daemon_lock:
-            cur_bin, cur_ids = await asyncio.to_thread(
-                _maybe_compress, raw_msgs, prompt_bin, prompt_ids)
-            prompt_len = len(cur_ids)
-            gen_len = _gen_len_for(prompt_len)
-            if gen_len <= 0:
-                try: cur_bin.unlink()
-                except Exception: pass
-                return JSONResponse(
-                    {"detail": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"},
-                    status_code=400)
-            cmd_line = f"{cur_bin} {gen_len}\n"
+            full_snap_prep = None
+            # --- Option 3: try full-compress-result cache first ---
+            full_hit = prefix_cache.lookup_full(prompt_ids)
+            if full_hit is not None:
+                slot, cached_cur_bin, cached_cur_ids_len = full_hit
+                cur_bin = Path(cached_cur_bin)
+                cur_ids = None
+                prompt_len = cached_cur_ids_len
+                gen_len = _gen_len_for(prompt_len)
+                if gen_len <= 0:
+                    try: prompt_bin.unlink()
+                    except Exception: pass
+                    return JSONResponse(
+                        {"detail": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"},
+                        status_code=400)
+                cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}\n"
+                snap_prep = None
+            else:
+                cur_bin, cur_ids = await asyncio.to_thread(
+                    _maybe_compress, raw_msgs, prompt_bin, prompt_ids)
+                prompt_len = len(cur_ids)
+                gen_len = _gen_len_for(prompt_len)
+                if gen_len <= 0:
+                    try: cur_bin.unlink()
+                    except Exception: pass
+                    return JSONResponse(
+                        {"detail": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"},
+                        status_code=400)
+                compression_fired = (cur_bin != prompt_bin)
+                if compression_fired:
+                    full_snap_prep = prefix_cache.prepare_full_snap(prompt_ids)
+                    if full_snap_prep is not None:
+                        fslot, _ = full_snap_prep
+                        cmd_line = f"{cur_bin} {gen_len} snap={len(cur_ids)}:{fslot}\n"
+                    else:
+                        cmd_line = f"{cur_bin} {gen_len}\n"
+                    snap_prep = None
+                else:
+                    full_snap_prep = None
+                    hit = prefix_cache.lookup(cur_ids)
+                    snap_prep = prefix_cache.prepare_inline_snap(cur_ids)
+                    if hit:
+                        slot, _prefix_len = hit
+                        cmd_line = f"RESTORE {slot} {cur_bin} {gen_len}"
+                    else:
+                        cmd_line = f"{cur_bin} {gen_len}"
+                    if snap_prep:
+                        cmd_line += f" snap={snap_prep[1]}:{snap_prep[0]}"
+                    cmd_line += "\n"
             daemon_proc.stdin.write(cmd_line.encode("utf-8"))
             daemon_proc.stdin.flush()
             tokens = list(_token_stream(r_pipe, gen_len))
+            if full_snap_prep is not None:
+                fslot, _ = full_snap_prep
+                prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
+            elif snap_prep:
+                prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
 
-        try: cur_bin.unlink()
-        except Exception: pass
+        if full_hit is None:
+            try: cur_bin.unlink()
+            except Exception: pass
+        else:
+            # On full-cache hit, cur_bin points at the persistent cached file
+            # (which we MUST keep). The tokenize-stage prompt_bin tempfile, on
+            # the other hand, was never used (we hit before _maybe_compress) and
+            # would otherwise leak.
+            try: prompt_bin.unlink()
+            except Exception: pass
         text = tokenizer.decode(tokens, skip_special_tokens=True)
         return JSONResponse({
             "id": completion_id,
@@ -402,6 +564,7 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
     @app.post("/v1/messages")
     async def anthropic_messages(req: AnthropicMessagesRequest):
         prompt_bin, prompt_ids, raw_msgs = _tokenize_anthropic(req)
+
         msg_id = "msg_" + uuid.uuid4().hex[:24]
 
         if req.stream:
@@ -409,18 +572,60 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
                 # Hold the lock across the ENTIRE read cycle so concurrent
                 # requests don't interleave tokens through the shared pipe.
                 async with daemon_lock:
-                    cur_bin, cur_ids = await asyncio.to_thread(
-                        _maybe_compress, raw_msgs, prompt_bin, prompt_ids)
-                    prompt_len = len(cur_ids)
-                    gen_len = min(req.max_tokens, max_ctx - prompt_len - 20)
-                    if gen_len <= 0:
-                        try: cur_bin.unlink()
-                        except Exception: pass
-                        err = {"type": "error",
-                               "error": {"type": "invalid_request_error",
-                                         "message": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"}}
-                        yield f"event: error\ndata: {json.dumps(err)}\n\n"
-                        return
+                    # --- Option 3: try full-compress-result cache first ---
+                    full_hit = prefix_cache.lookup_full(prompt_ids)
+                    full_snap_prep = None
+                    if full_hit is not None:
+                        slot, cached_cur_bin, cached_cur_ids_len = full_hit
+                        cur_bin = Path(cached_cur_bin)
+                        cur_ids = None
+                        prompt_len = cached_cur_ids_len
+                        gen_len = min(req.max_tokens, max_ctx - prompt_len - 20)
+                        if gen_len <= 0:
+                            try: prompt_bin.unlink()
+                            except Exception: pass
+                            err = {"type": "error",
+                                   "error": {"type": "invalid_request_error",
+                                             "message": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"}}
+                            yield f"event: error\ndata: {json.dumps(err)}\n\n"
+                            return
+                        cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}\n"
+                        snap_prep = None
+                    else:
+                        cur_bin, cur_ids = await asyncio.to_thread(
+                            _maybe_compress, raw_msgs, prompt_bin, prompt_ids)
+                        prompt_len = len(cur_ids)
+                        gen_len = min(req.max_tokens, max_ctx - prompt_len - 20)
+                        if gen_len <= 0:
+                            try: cur_bin.unlink()
+                            except Exception: pass
+                            err = {"type": "error",
+                                   "error": {"type": "invalid_request_error",
+                                             "message": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"}}
+                            yield f"event: error\ndata: {json.dumps(err)}\n\n"
+                            return
+                        compression_fired = (cur_bin != prompt_bin)
+                        if compression_fired:
+                            full_snap_prep = prefix_cache.prepare_full_snap(prompt_ids)
+                            if full_snap_prep is not None:
+                                fslot, _ = full_snap_prep
+                                cmd_line = f"{cur_bin} {gen_len} snap={len(cur_ids)}:{fslot}\n"
+                            else:
+                                cmd_line = f"{cur_bin} {gen_len}\n"
+                            snap_prep = None
+                        else:
+                            full_snap_prep = None
+                            hit = prefix_cache.lookup(cur_ids)
+                            snap_prep = prefix_cache.prepare_inline_snap(cur_ids)
+                            if hit:
+                                slot, _prefix_len = hit
+                                cmd_line = f"RESTORE {slot} {cur_bin} {gen_len}"
+                            else:
+                                cmd_line = f"{cur_bin} {gen_len}"
+                            if snap_prep:
+                                cmd_line += f" snap={snap_prep[1]}:{snap_prep[0]}"
+                            cmd_line += "\n"
+
                     message_start = {
                         "type": "message_start",
                         "message": {
@@ -438,7 +643,6 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
                     }
                     yield f"event: content_block_start\ndata: {json.dumps(cb_start)}\n\n"
 
-                    cmd_line = f"{cur_bin} {gen_len}\n"
                     daemon_proc.stdin.write(cmd_line.encode("utf-8"))
                     daemon_proc.stdin.flush()
 
@@ -453,8 +657,22 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
                             }
                             yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
                     finally:
-                        try: cur_bin.unlink()
-                        except Exception: pass
+                        if full_hit is None:
+                            try: cur_bin.unlink()
+                            except Exception: pass
+                        else:
+                            # On full-cache hit, cur_bin points at the persistent cached file
+                            # (which we MUST keep). The tokenize-stage prompt_bin tempfile, on
+                            # the other hand, was never used (we hit before _maybe_compress) and
+                            # would otherwise leak.
+                            try: prompt_bin.unlink()
+                            except Exception: pass
+
+                    if full_snap_prep is not None:
+                        fslot, _ = full_snap_prep
+                        prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
+                    elif snap_prep:
+                        prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
 
                     yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
 
@@ -470,25 +688,78 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
 
         # Non-streaming
         async with daemon_lock:
-            cur_bin, cur_ids = await asyncio.to_thread(
-                _maybe_compress, raw_msgs, prompt_bin, prompt_ids)
-            prompt_len = len(cur_ids)
-            gen_len = min(req.max_tokens, max_ctx - prompt_len - 20)
-            if gen_len <= 0:
-                try: cur_bin.unlink()
-                except Exception: pass
-                return JSONResponse(
-                    {"type": "error",
-                     "error": {"type": "invalid_request_error",
-                               "message": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"}},
-                    status_code=400)
-            cmd_line = f"{cur_bin} {gen_len}\n"
+            full_snap_prep = None
+            # --- Option 3: try full-compress-result cache first ---
+            full_hit = prefix_cache.lookup_full(prompt_ids)
+            if full_hit is not None:
+                slot, cached_cur_bin, cached_cur_ids_len = full_hit
+                cur_bin = Path(cached_cur_bin)
+                cur_ids = None
+                prompt_len = cached_cur_ids_len
+                gen_len = min(req.max_tokens, max_ctx - prompt_len - 20)
+                if gen_len <= 0:
+                    try: prompt_bin.unlink()
+                    except Exception: pass
+                    return JSONResponse(
+                        {"type": "error",
+                         "error": {"type": "invalid_request_error",
+                                   "message": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"}},
+                        status_code=400)
+                cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}\n"
+                snap_prep = None
+            else:
+                cur_bin, cur_ids = await asyncio.to_thread(
+                    _maybe_compress, raw_msgs, prompt_bin, prompt_ids)
+                prompt_len = len(cur_ids)
+                gen_len = min(req.max_tokens, max_ctx - prompt_len - 20)
+                if gen_len <= 0:
+                    try: cur_bin.unlink()
+                    except Exception: pass
+                    return JSONResponse(
+                        {"type": "error",
+                         "error": {"type": "invalid_request_error",
+                                   "message": f"Prompt length ({prompt_len}) exceeds max_ctx ({max_ctx})"}},
+                        status_code=400)
+                compression_fired = (cur_bin != prompt_bin)
+                if compression_fired:
+                    full_snap_prep = prefix_cache.prepare_full_snap(prompt_ids)
+                    if full_snap_prep is not None:
+                        fslot, _ = full_snap_prep
+                        cmd_line = f"{cur_bin} {gen_len} snap={len(cur_ids)}:{fslot}\n"
+                    else:
+                        cmd_line = f"{cur_bin} {gen_len}\n"
+                    snap_prep = None
+                else:
+                    full_snap_prep = None
+                    hit = prefix_cache.lookup(cur_ids)
+                    snap_prep = prefix_cache.prepare_inline_snap(cur_ids)
+                    if hit:
+                        slot, _prefix_len = hit
+                        cmd_line = f"RESTORE {slot} {cur_bin} {gen_len}"
+                    else:
+                        cmd_line = f"{cur_bin} {gen_len}"
+                    if snap_prep:
+                        cmd_line += f" snap={snap_prep[1]}:{snap_prep[0]}"
+                    cmd_line += "\n"
             daemon_proc.stdin.write(cmd_line.encode("utf-8"))
             daemon_proc.stdin.flush()
             tokens = [t async for t in _astream_tokens(r_pipe, gen_len)]
+            if full_snap_prep is not None:
+                fslot, _ = full_snap_prep
+                prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
+            elif snap_prep:
+                prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
 
-        try: cur_bin.unlink()
-        except Exception: pass
+        if full_hit is None:
+            try: cur_bin.unlink()
+            except Exception: pass
+        else:
+            # On full-cache hit, cur_bin points at the persistent cached file
+            # (which we MUST keep). The tokenize-stage prompt_bin tempfile, on
+            # the other hand, was never used (we hit before _maybe_compress) and
+            # would otherwise leak.
+            try: prompt_bin.unlink()
+            except Exception: pass
         text = tokenizer.decode(tokens, skip_special_tokens=True)
         return JSONResponse({
             "id": msg_id,
@@ -541,6 +812,12 @@ def main():
     ap.add_argument("--tokenizer", type=str, default=None,
                     help="HuggingFace tokenizer repo ID (default: auto-detect "
                          "from target GGUF basename; falls back to Qwen/Qwen3.5-27B)")
+    ap.add_argument("--prefix-cache-slots", type=int, default=4,
+                    help="Number of prefix-cache snapshot slots (0 to disable)")
+    ap.add_argument("--prefill-cache-slots", type=int, default=4,
+                    help="Number of full-compress-result cache slots (Option 3). "
+                         "Only active when --prefill-compression is enabled. "
+                         "prefix-cache-slots + prefill-cache-slots must not exceed 8.")
     ap.add_argument("--daemon", action="store_true", help="Run with persistent model daemon (now default)")
     add_cli_flags(ap)
     args = ap.parse_args()
@@ -567,6 +844,12 @@ def main():
     if args.prefill_compression != "off":
         os.environ.setdefault("DFLASH27B_LM_HEAD_FIX", "0")
         os.environ.setdefault("DFLASH27B_FA_WINDOW", "0")
+        # FlashPrefill bench-tuned defaults from pflash/README.md headline numbers
+        # (10x TTFT @ 64K). Without these the drafter falls through to the WMMA
+        # fallback at the default ALPHA=0.12, which roughly triples cold-start
+        # TTFT. setdefault so explicit user overrides still win.
+        os.environ.setdefault("DFLASH_FP_USE_BSA", "1")
+        os.environ.setdefault("DFLASH_FP_ALPHA",   "0.85")
 
     if not args.bin.is_file():
         raise SystemExit(f"binary not found at {args.bin}")
@@ -591,7 +874,9 @@ def main():
     app = build_app(args.target, draft, args.bin, args.budget, args.max_ctx,
                     tokenizer, stop_ids,
                     prefill_cfg=prefill_cfg if prefill_cfg.enabled else None,
-                    drafter_tokenizer=drafter_tokenizer)
+                    drafter_tokenizer=drafter_tokenizer,
+                    prefix_cache_slots=args.prefix_cache_slots,
+                    prefill_cache_slots=args.prefill_cache_slots)
 
     import uvicorn
     print(f"Luce DFlash OpenAI server on http://{args.host}:{args.port}")
