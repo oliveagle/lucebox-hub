@@ -127,6 +127,11 @@ struct TargetWeights {
     int ssm_d_state             = 128;
     int ssm_dt_rank             = 48;
     int ssm_n_group             = 16;
+
+    // Target layer IDs captured for the DFlash draft model.
+    // Computed from n_layer at load time: step = (n_layer - 2) / (N - 1),
+    // ids[k] = 1 + k * step.  E.g. 27B→{1,16,31,46,61}, 9B→{1,8,15,22,29}.
+    int capture_layer_ids[DFLASH27B_DRAFT_N_TARGET_LAYERS] = {1, 16, 31, 46, 61};
 };
 
 // Load a Q4_K_M target model from a GGUF file on disk.
@@ -160,8 +165,16 @@ struct DraftWeights {
 
     ggml_tensor *          fc          = nullptr;   // [5*hidden, hidden]
     ggml_tensor *          hidden_norm = nullptr;   // [hidden]
-    std::vector<DraftLayer> layers;                 // size = 5
+    std::vector<DraftLayer> layers;                 // size = n_layer
     ggml_tensor *          out_norm    = nullptr;   // [hidden]
+
+    // Architecture metadata (populated by loader).
+    int n_layer   = DFLASH27B_DRAFT_LAYERS;           // 5
+    int n_head    = DFLASH27B_TARGET_N_HEADS;          // 32
+    int n_head_kv = DFLASH27B_TARGET_N_KV_HEADS;       // 8
+    int head_dim  = DFLASH27B_TARGET_HEAD_DIM;         // 128
+    int n_embd    = DFLASH27B_TARGET_HIDDEN;           // 5120
+    int n_ff      = DFLASH27B_TARGET_INTERMEDIATE;     // 17408
 };
 
 bool load_draft_safetensors(const std::string & path,
