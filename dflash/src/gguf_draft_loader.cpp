@@ -155,12 +155,53 @@ bool load_draft_gguf(const std::string & path,
     const uint32_t n_head    = read_u32("attention.head_count",    0);
     const uint32_t n_head_kv = read_u32("attention.head_count_kv", 0);
     const uint32_t head_dim  = read_u32("attention.key_length",    0);
+    const uint32_t block_sz  = read_u32("dflash.block_size",       0);
+    const uint32_t n_tgt_lay = read_u32("dflash.n_target_layers",  0);
 
     if (n_embd == 0 || n_layer == 0 || n_ff == 0 || n_head == 0 ||
         n_head_kv == 0 || head_dim == 0) {
         char buf[256];
         std::snprintf(buf, sizeof(buf),
             "draft GGUF: missing hparams: n_embd=%u n_layer=%u n_ff=%u "
+            "n_head=%u n_head_kv=%u head_dim=%u",
+            n_embd, n_layer, n_ff, n_head, n_head_kv, head_dim);
+        set_last_error(buf);
+        gguf_free(gctx);
+        return false;
+    }
+
+    // The draft graph builder still hardcodes block_size and the number of
+    // captured target layers (drives fc weight shape and capture_layer_ids
+    // array length). Reject GGUFs whose metadata disagrees with the compiled
+    // constants, otherwise we would silently mis-shape the graph.
+    if (block_sz != (uint32_t)DFLASH27B_DRAFT_BLOCK_SIZE ||
+        n_tgt_lay != (uint32_t)DFLASH27B_DRAFT_N_TARGET_LAYERS) {
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "draft GGUF: dflash.block_size=%u (expected %d), "
+            "dflash.n_target_layers=%u (expected %d)",
+            block_sz, DFLASH27B_DRAFT_BLOCK_SIZE,
+            n_tgt_lay, DFLASH27B_DRAFT_N_TARGET_LAYERS);
+        set_last_error(buf);
+        gguf_free(gctx);
+        return false;
+    }
+
+    // Upper bounds on hparams. Guards against malformed/hostile GGUFs that
+    // would otherwise trigger huge allocations or signed-int overflow when
+    // narrowed below. Limits chosen well above any plausible LLM config.
+    constexpr uint32_t MAX_LAYERS  = 1024;
+    constexpr uint32_t MAX_EMBD    = 1u << 17;   // 131072
+    constexpr uint32_t MAX_FF      = 1u << 19;   // 524288
+    constexpr uint32_t MAX_HEADS   = 1024;
+    constexpr uint32_t MAX_HEADDIM = 1024;
+    if (n_layer   > MAX_LAYERS  || n_embd    > MAX_EMBD  ||
+        n_ff      > MAX_FF      || n_head    > MAX_HEADS ||
+        n_head_kv > MAX_HEADS   || head_dim  > MAX_HEADDIM ||
+        n_head_kv > n_head      || (n_head % n_head_kv) != 0) {
+        char buf[320];
+        std::snprintf(buf, sizeof(buf),
+            "draft GGUF: hparams out of range: n_embd=%u n_layer=%u n_ff=%u "
             "n_head=%u n_head_kv=%u head_dim=%u",
             n_embd, n_layer, n_ff, n_head, n_head_kv, head_dim);
         set_last_error(buf);

@@ -270,12 +270,43 @@ bool load_target_gguf(const std::string & path,
     int rope_sections[4] = {0, 0, 0, 0};
     {
         int64_t rid = gguf_find_key(gctx, "qwen35.rope.dimension_sections");
-        if (rid >= 0) {
-            size_t n = gguf_get_arr_n(gctx, rid);
-            if (n >= 4) {
-                const int32_t * arr = (const int32_t *)gguf_get_arr_data(gctx, rid);
-                for (int k = 0; k < 4; k++) rope_sections[k] = arr[k];
+        if (rid < 0) {
+            set_last_error("missing qwen35.rope.dimension_sections");
+            gguf_free(gctx); return false;
+        }
+        size_t n = gguf_get_arr_n(gctx, rid);
+        if (n < 4) {
+            set_last_error("qwen35.rope.dimension_sections has < 4 entries");
+            gguf_free(gctx); return false;
+        }
+        const int32_t * arr = (const int32_t *)gguf_get_arr_data(gctx, rid);
+        for (int k = 0; k < 4; k++) rope_sections[k] = arr[k];
+    }
+
+    // Validate rope_sections against head_dim. n_rot = 2 * sum(sections) is
+    // the number of dims rotated by ggml_rope_multi; it must be even, > 0,
+    // and ≤ head_dim, otherwise rope reads/writes out of bounds.
+    {
+        long sum = 0;
+        for (int k = 0; k < 4; k++) {
+            if (rope_sections[k] < 0) {
+                char buf[160];
+                std::snprintf(buf, sizeof(buf),
+                    "rope_sections[%d]=%d is negative", k, rope_sections[k]);
+                set_last_error(buf);
+                gguf_free(gctx); return false;
             }
+            sum += rope_sections[k];
+        }
+        const long n_rot = 2 * sum;
+        if (n_rot <= 0 || n_rot > (long)kl) {
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                "rope_sections {%d,%d,%d,%d} → n_rot=%ld invalid for head_dim=%u",
+                rope_sections[0], rope_sections[1], rope_sections[2], rope_sections[3],
+                n_rot, kl);
+            set_last_error(buf);
+            gguf_free(gctx); return false;
         }
     }
 
