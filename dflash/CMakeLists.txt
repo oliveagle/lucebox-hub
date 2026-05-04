@@ -44,6 +44,33 @@ endif()
 # the spec_prefill demo (target_gen path uses standard quant pairs).
 option(DFLASH27B_FA_ALL_QUANTS "Compile ggml-cuda fattn kernels for all KV-quant pairs" ON)
 set(GGML_CUDA_FA_ALL_QUANTS ${DFLASH27B_FA_ALL_QUANTS} CACHE BOOL "" FORCE)
+
+# Consumer Blackwell workaround: skip sm_12x→sm_12xa replacement and FP4
+# mmq kernels that can trigger illegal-instruction faults on consumer chips.
+# By default, auto-enable when the resolved CUDA arch list includes a 12x
+# entry. Set DFLASH27B_USE_BLACKWELL_CONSUMER_FIX=ON to force this behavior
+# explicitly (for cross-compiles or custom arch lists).
+option(DFLASH27B_USE_BLACKWELL_CONSUMER_FIX
+    "Enable ggml consumer-Blackwell workaround (skip sm_12x→sm_12xa, exclude FP4 mmq kernels)" OFF)
+if(DFLASH27B_USE_BLACKWELL_CONSUMER_FIX)
+    set(_dflash_is_consumer_blackwell ON)
+endif()
+
+if(NOT DEFINED _dflash_is_consumer_blackwell)
+    set(_dflash_is_consumer_blackwell OFF)
+    foreach(_arch IN LISTS CMAKE_CUDA_ARCHITECTURES)
+        string(REGEX REPLACE "[^0-9]" "" _dflash_arch_num "${_arch}")
+        if(_dflash_arch_num MATCHES "^12[0-9]$")
+            set(_dflash_is_consumer_blackwell ON)
+            break()
+        endif()
+    endforeach()
+endif()
+
+if(_dflash_is_consumer_blackwell)
+    set(GGML_CUDA_BLACKWELL_CONSUMER ON CACHE BOOL
+        "Skip sm_12X→sm_12Xa for consumer Blackwell (no FP4)" FORCE)
+endif()
 # Use only the ggml subtree of llama.cpp (skip libllama).
 add_subdirectory(deps/llama.cpp/ggml EXCLUDE_FROM_ALL)
 
