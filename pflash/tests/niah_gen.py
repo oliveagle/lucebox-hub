@@ -1,6 +1,16 @@
 """Generate NIAH single-needle test cases at any context size."""
-import argparse, json, random
+import argparse, json, random, sys
 from transformers import AutoTokenizer
+
+
+def _positive_int(s):
+    try:
+        v = int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {s!r}")
+    if v <= 0:
+        raise argparse.ArgumentTypeError(f"must be positive, got {v}")
+    return v
 
 FILLER = ("The grass is green. The sky is blue. The sun is yellow. "
           "Here we go. There and back again. ")
@@ -15,10 +25,15 @@ def gen_one(seed: int, target_tokens: int, tokenizer, tolerance: float = 0.005):
 
     Strategy: binary-search the chars-per-token ratio against the actual
     tokenizer until we land within tolerance, then hard-trim chars off the
-    filler if we still overshoot by even one token. The hard trim guarantees
-    `n_tokens <= target_tokens` so callers can set `--ctx` to a model's RoPE
-    limit without silent truncation.
+    filler if we still overshoot by even one token. Token counts include
+    special tokens (BOS etc) so the cap matches what downstream consumers
+    see when they tokenize the prompt with default settings.
+
+    Raises ValueError if `target_tokens` is below the scaffold floor (the
+    fixed intro + needle + question alone exceed the budget).
     """
+    if target_tokens <= 0:
+        raise ValueError(f"target_tokens must be positive, got {target_tokens}")
     rng = random.Random(seed)
     key = "".join(rng.choices("abcdefghijklmnopqrstuvwxyz", k=8))
     value = "".join(rng.choices("0123456789", k=7))
@@ -37,7 +52,10 @@ def gen_one(seed: int, target_tokens: int, tokenizer, tolerance: float = 0.005):
         )
 
     def n_tokens(prompt: str) -> int:
-        return len(tokenizer.encode(prompt, add_special_tokens=False))
+        # Default add_special_tokens=True matches what downstream consumers
+        # (bench_niah_cpp.py via tokenizer(prompt)) actually see, so the cap
+        # below correctly accounts for any BOS/EOS the tokenizer prepends.
+        return len(tokenizer.encode(prompt))
 
     # Binary-search chars-per-token. Bounds [2.0, 6.0] cover every common
     # tokenizer (Qwen ~3.7, Llama/Mistral ~4.0, GPT-2 BPE ~4.2, byte-level ~5+).
@@ -64,20 +82,33 @@ def gen_one(seed: int, target_tokens: int, tokenizer, tolerance: float = 0.005):
             prompt = build(target_chars)
             actual = n_tokens(prompt)
 
+    if actual > target_tokens:
+        # filler at zero and the fixed scaffold (intro + needle + question +
+        # any specials) alone exceeds target_tokens. Surface this clearly
+        # rather than returning an over-limit prompt.
+        raise ValueError(
+            f"target_tokens={target_tokens} is below the scaffold floor "
+            f"(empty filler + needle + question + specials = {actual} tokens). "
+            f"Pick a larger target."
+        )
+
     return {"prompt": prompt, "answer": value, "key": key, "n_tokens": actual}
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=10)
-    ap.add_argument("--ctx", type=int, default=8192)
+    ap.add_argument("--n", type=_positive_int, default=10)
+    ap.add_argument("--ctx", type=_positive_int, default=8192)
     ap.add_argument("--out", required=True)
     ap.add_argument("--tokenizer", default="Qwen/Qwen3.6-27B")
     args = ap.parse_args()
     tok = AutoTokenizer.from_pretrained(args.tokenizer)
     with open(args.out, "w") as f:
         for i in range(args.n):
-            ex = gen_one(seed=42 + i, target_tokens=args.ctx, tokenizer=tok)
+            try:
+                ex = gen_one(seed=42 + i, target_tokens=args.ctx, tokenizer=tok)
+            except ValueError as e:
+                sys.exit(f"[error] case {i}: {e}")
             assert ex["n_tokens"] <= args.ctx, (
                 f"case {i}: n_tokens={ex['n_tokens']} exceeds --ctx={args.ctx}")
             f.write(json.dumps(ex) + "\n")
