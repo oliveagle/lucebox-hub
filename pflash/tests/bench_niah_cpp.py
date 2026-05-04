@@ -35,11 +35,14 @@ def main():
 
     target_tok = AutoTokenizer.from_pretrained(args.target_tokenizer)
     drafter_tok = AutoTokenizer.from_pretrained(args.drafter_tokenizer)
-    cases = [json.loads(l) for l in open(args.cases)][:args.n]
+    with open(args.cases) as f:
+        cases = [json.loads(l) for l in f][:args.n]
 
     max_ctx = args.max_ctx
     if args.auto_max_ctx:
-        first = json.loads(open(args.cases).readline())
+        if not cases:
+            raise ValueError("--auto-max-ctx requires at least one case in --cases")
+        first = cases[0]
         src_tokens_est = len(drafter_tok(first["prompt"], return_tensors="pt")["input_ids"][0])
         expected_compressed = int(src_tokens_est * args.keep_ratio * 1.15) + 64
         needed = expected_compressed + args.n_gen + 512
