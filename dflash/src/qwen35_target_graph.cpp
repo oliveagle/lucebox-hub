@@ -878,7 +878,19 @@ static ggml_tensor * build_delta_net_block(
     // past graph_compute). After graph_compute, the cache buffer's data is
     // always valid; the rollback code slices it at commit_n.
     if (cap && cap->conv_input) {
-        ggml_build_forward_expand(gf, ggml_cpy(ctx, conv_input, cap->conv_input));
+        // conv_input may be shorter than the pre-allocated cache
+        // (e.g. during prefill when n_tokens < max_verify_tokens).
+        // Copy into a matching-sized view of the cache destination.
+        const int64_t ci_len = conv_input->ne[0];
+        ggml_tensor * dst;
+        if (ci_len == cap->conv_input->ne[0]) {
+            dst = cap->conv_input;
+        } else {
+            dst = ggml_view_3d(ctx, cap->conv_input,
+                ci_len, cap->conv_input->ne[1], cap->conv_input->ne[2],
+                cap->conv_input->nb[1], cap->conv_input->nb[2], 0);
+        }
+        ggml_build_forward_expand(gf, ggml_cpy(ctx, conv_input, dst));
     }
 
     // ── Save the last (kernel-1) steps back to conv_state
@@ -1034,8 +1046,14 @@ static ggml_tensor * build_delta_net_block(
             S_v * S_v * r_elt,
             S_v * S_v * H_v * r_elt,
             inter_offset);
-        ggml_build_forward_expand(gf,
-            ggml_cpy(ctx, inter_view, cap->ssm_intermediate_states));
+        // inter_view may be shorter than pre-allocated cache during prefill
+        ggml_tensor * inter_dst = cap->ssm_intermediate_states;
+        if (ggml_nelements(inter_view) != ggml_nelements(inter_dst)) {
+            inter_dst = ggml_view_4d(ctx, inter_dst,
+                inter_view->ne[0], inter_view->ne[1], inter_view->ne[2], inter_view->ne[3],
+                inter_dst->nb[1], inter_dst->nb[2], inter_dst->nb[3], 0);
+        }
+        ggml_build_forward_expand(gf, ggml_cpy(ctx, inter_view, inter_dst));
     }
     } // end of block started at `{` before `const int64_t S_v = head_v_dim;`
 
