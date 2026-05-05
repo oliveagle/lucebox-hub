@@ -49,6 +49,8 @@ DEFAULT_BIN = ROOT / "build" / ("test_dflash" + (".exe" if sys.platform == "win3
 DEFAULT_BUDGET = 22
 MODEL_NAME = "luce-dflash"
 
+_ALLOWED_TEMPLATE_KWARGS = frozenset({"enable_thinking", "tools", "add_generation_prompt"})
+
 
 def resolve_draft(root: Path) -> Path:
     for st in root.rglob("model.safetensors"):
@@ -261,7 +263,7 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
         """
         prompt = tokenizer.apply_chat_template(
             msgs_list, tokenize=False, add_generation_prompt=True,
-            **(template_kwargs or {}))
+            **{k: v for k, v in (template_kwargs or {}).items() if k in _ALLOWED_TEMPLATE_KWARGS})
         ids = tokenizer.encode(prompt, add_special_tokens=False)
         return _ids_to_bin(ids), ids, prompt
 
