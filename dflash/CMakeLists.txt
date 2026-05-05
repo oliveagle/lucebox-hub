@@ -45,6 +45,30 @@ endif()
 option(DFLASH27B_FA_ALL_QUANTS "Compile ggml-cuda fattn kernels for all KV-quant pairs" ON)
 set(GGML_CUDA_FA_ALL_QUANTS ${DFLASH27B_FA_ALL_QUANTS} CACHE BOOL "" FORCE)
 
+# Resolve the CUDA architecture list up-front so downstream logic (notably
+# the consumer-Blackwell ggml workaround below) can inspect the actual
+# arches nvcc will compile for. The dflash27b target itself is created
+# later; its CUDA_ARCHITECTURES property is applied via
+# set_target_properties once the target exists.
+#
+# Turing (75) and Ampere (86) always; Blackwell consumer (120) and Thor
+# (110 on CUDA 13+) added when nvcc supports them. DGX Spark /
+# GB10 is compute capability 12.1 (121), added at CUDA 12.9+.
+if(DFLASH27B_USER_CUDA_ARCHITECTURES)
+    set(_dflash27b_archs "${DFLASH27B_USER_CUDA_ARCHITECTURES}")
+else()
+    set(_dflash27b_archs "75;86")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
+        list(APPEND _dflash27b_archs "120")
+    endif()
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
+        list(APPEND _dflash27b_archs "110")
+    endif()
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.9")
+        list(APPEND _dflash27b_archs "121")
+    endif()
+endif()
+
 # Consumer Blackwell workaround: skip sm_12x→sm_12xa replacement and FP4
 # mmq kernels that can trigger illegal-instruction faults on consumer chips.
 # By default, auto-enable when the resolved CUDA arch list includes a 12x
@@ -58,7 +82,9 @@ endif()
 
 if(NOT DEFINED _dflash_is_consumer_blackwell)
     set(_dflash_is_consumer_blackwell OFF)
-    foreach(_arch IN LISTS CMAKE_CUDA_ARCHITECTURES)
+    # Iterate the resolved dflash27b arch list, not raw CMAKE_CUDA_ARCHITECTURES,
+    # which is empty on the default path (the project supplies its own list above).
+    foreach(_arch IN LISTS _dflash27b_archs)
         string(REGEX REPLACE "[^0-9]" "" _dflash_arch_num "${_arch}")
         if(_dflash_arch_num MATCHES "^12[0-9]$")
             set(_dflash_is_consumer_blackwell ON)
@@ -106,23 +132,8 @@ if(NOT DEFINED DFLASH27B_ENABLE_BSA)
     set(DFLASH27B_ENABLE_BSA ON)
 endif()
 
-# Turing (75) and Ampere (86) always; Blackwell consumer (120) and Thor
-# (110 on CUDA 13+) added when nvcc supports them. DGX Spark /
-# GB10 is compute capability 12.1 (121), added at CUDA 12.9+.
-if(DFLASH27B_USER_CUDA_ARCHITECTURES)
-    set(_dflash27b_archs "${DFLASH27B_USER_CUDA_ARCHITECTURES}")
-else()
-    set(_dflash27b_archs "75;86")
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
-        list(APPEND _dflash27b_archs "120")
-    endif()
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-        list(APPEND _dflash27b_archs "110")
-    endif()
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.9")
-        list(APPEND _dflash27b_archs "121")
-    endif()
-endif()
+# Apply the arch list resolved above (before add_subdirectory, so the
+# consumer-Blackwell workaround can inspect it) to the dflash27b target.
 set_target_properties(dflash27b PROPERTIES CUDA_ARCHITECTURES "${_dflash27b_archs}")
 
 # Extract the minimum SM from the arch list so safetensors_draft.cpp can decide
