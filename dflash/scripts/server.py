@@ -117,6 +117,7 @@ class ChatRequest(BaseModel):
     seed: int | None = None             # rng seed for sampling
     top_p: float | None = None         # nucleus, applied when temperature > 0
     top_k: int | None = None           # top-k, applied when temperature > 0
+    frequency_penalty: float | None = None  # OAI -> rep_pen = 1 + freq_pen (sampling only)
     stop: list[str] | str | None = None  # FIX 3: accept stop field (Open WebUI sends it)
     chat_template_kwargs: dict | None = None
 
@@ -135,6 +136,7 @@ class AnthropicMessagesRequest(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     seed: int | None = None
+    frequency_penalty: float | None = None
     stop_sequences: list[str] | None = None
     chat_template_kwargs: dict | None = None
 
@@ -395,11 +397,12 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int, max_ctx: i
         if compression_fired:
             full_snap_prep = prefix_cache.prepare_full_snap(prompt_ids)
             full_snap_prep_ref[0] = full_snap_prep
+            samp = _samp_suffix(req)
             if full_snap_prep is not None:
                 fslot, _ = full_snap_prep
-                return f"{cur_bin} {gen_len} snap={len(cur_ids)}:{fslot}\n", None
+                return f"{cur_bin} {gen_len} snap={len(cur_ids)}:{fslot}" + samp + "\n", None
             else:
-                return f"{cur_bin} {gen_len}\n", None
+                return f"{cur_bin} {gen_len}" + samp + "\n", None
         else:
             full_snap_prep_ref[0] = None
             hit = prefix_cache.lookup(cur_ids)
