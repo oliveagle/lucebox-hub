@@ -190,4 +190,27 @@ LagunaGraphOutputs build_laguna_graph(
     LagunaTargetCache &          cache,
     const LagunaGraphInputs &    in);
 
+// Build + run a single Laguna forward step on a fresh ggml context. Used by
+// both the daemon (laguna_daemon.cpp) and any caller that wants a turnkey
+// prefill chunk or per-token decode without managing graph allocation.
+// Builds BOTH a full causal mask (FULL layers) and a sliding-window-causal
+// mask (SWA layers). Updates `cache.cur_pos` to `kv_start + n_tok` on
+// success. Pass `no_mask=true` for kernel ablation — semantically wrong but
+// useful for perf isolation.
+//
+// `embed`  : [n_tok, n_embd] f32 host buffer (caller pre-embeds via
+//             CpuEmbedder).
+// `out_logits` : on success, resized to vocab and filled with last-token
+//             logits when in.output_last_only == true (default in this
+//             helper).
+bool laguna_step(
+    ggml_backend_t              backend,
+    const LagunaTargetWeights & w,
+    LagunaTargetCache &         cache,
+    const float *               embed,
+    int                         n_tok,
+    int                         kv_start,
+    bool                        no_mask,
+    std::vector<float> &        out_logits);
+
 } // namespace dflash27b

@@ -34,7 +34,6 @@
 
 #include "ggml-backend.h"
 #include "ggml-cuda.h"
-#include "ggml-alloc.h"
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -90,101 +89,9 @@ bool write_counted_i32(const std::string & path, const std::vector<int32_t> & id
     return (bool)f;
 }
 
-// Build + run a single Laguna forward step. Returns last-token logits via host.
-// Builds BOTH a full causal mask AND a sliding-window-causal mask.
-bool laguna_step(
-    ggml_backend_t backend,
-    const LagunaTargetWeights & w,
-    LagunaTargetCache & cache,
-    const float * embed,
-    int n_tok,
-    int kv_start,
-    bool no_mask,
-    std::vector<float> & out_logits)
-{
-    ggml_init_params ip{};
-    ip.mem_size = ggml_tensor_overhead() * 16384 + ggml_graph_overhead() + 16 * 1024 * 1024;
-    ip.no_alloc = true;
-    ggml_context * ctx = ggml_init(ip);
-    ggml_cgraph * gf = ggml_new_graph_custom(ctx, 16384, false);
-
-    ggml_tensor * ie = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, w.n_embd, n_tok, 1);
-    ggml_set_input(ie);
-    ggml_tensor * pp = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tok);
-    ggml_set_input(pp);
-    ggml_tensor * mk_full = nullptr, * mk_full_cnv = nullptr;
-    ggml_tensor * mk_swa  = nullptr, * mk_swa_cnv  = nullptr;
-    const int kv_len = kv_start + n_tok;
-    if (!no_mask) {
-        mk_full = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, kv_len, n_tok, 1, 1);
-        ggml_set_input(mk_full);
-        mk_full_cnv = ggml_cast(ctx, mk_full, GGML_TYPE_F16);
-        mk_swa = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, kv_len, n_tok, 1, 1);
-        ggml_set_input(mk_swa);
-        mk_swa_cnv = ggml_cast(ctx, mk_swa, GGML_TYPE_F16);
-    }
-
-    LagunaGraphInputs gi{};
-    gi.inp_embed     = ie;
-    gi.positions     = pp;
-    gi.attn_mask     = mk_full_cnv;
-    gi.attn_mask_swa = mk_swa_cnv;
-    gi.n_tokens      = n_tok;
-    gi.kv_start      = kv_start;
-    gi.output_last_only = true;
-
-    LagunaGraphOutputs go = build_laguna_graph(ctx, gf, w, cache, gi);
-    ggml_set_output(go.logits);
-
-    static ggml_gallocr_t galloc = nullptr;
-    if (!galloc) galloc = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend));
-    if (!ggml_gallocr_alloc_graph(galloc, gf)) {
-        std::fprintf(stderr, "laguna_step: gallocr_alloc_graph failed\n");
-        ggml_free(ctx);
-        return false;
-    }
-
-    ggml_backend_tensor_set(ie, embed, 0, ggml_nbytes(ie));
-    std::vector<int32_t> pos((size_t)n_tok);
-    for (int i = 0; i < n_tok; ++i) pos[i] = kv_start + i;
-    ggml_backend_tensor_set(pp, pos.data(), 0, ggml_nbytes(pp));
-
-    if (!no_mask) {
-        std::vector<float> mfull((size_t)kv_len * n_tok, -INFINITY);
-        for (int q = 0; q < n_tok; ++q) {
-            const int abs_q = kv_start + q;
-            for (int k = 0; k <= abs_q && k < kv_len; ++k) {
-                mfull[(size_t)q * kv_len + k] = 0.0f;
-            }
-        }
-        ggml_backend_tensor_set(mk_full, mfull.data(), 0, ggml_nbytes(mk_full));
-
-        std::vector<float> mswa((size_t)kv_len * n_tok, -INFINITY);
-        const int W = w.sliding_window;
-        for (int q = 0; q < n_tok; ++q) {
-            const int abs_q = kv_start + q;
-            const int win_lo = std::max(0, abs_q - W + 1);
-            for (int k = win_lo; k <= abs_q && k < kv_len; ++k) {
-                mswa[(size_t)q * kv_len + k] = 0.0f;
-            }
-        }
-        ggml_backend_tensor_set(mk_swa, mswa.data(), 0, ggml_nbytes(mk_swa));
-    }
-
-    if (ggml_backend_graph_compute(backend, gf) != GGML_STATUS_SUCCESS) {
-        std::fprintf(stderr, "laguna_step: graph_compute failed\n");
-        ggml_free(ctx);
-        return false;
-    }
-
-    out_logits.resize((size_t)w.embedder.n_vocab);
-    ggml_backend_tensor_get(go.logits, out_logits.data(), 0,
-                             out_logits.size() * sizeof(float));
-
-    cache.cur_pos = kv_len;
-    ggml_free(ctx);
-    return true;
-}
+// laguna_step lives in src/laguna_target_graph.cpp as a public helper so the
+// daemon, benches, and any future caller share one forward-step
+// implementation. We just call it from the daemon loop below.
 
 }  // namespace
 
