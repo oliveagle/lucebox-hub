@@ -1,8 +1,9 @@
 #pragma once
 
 // Minimal CUDA/HIP runtime compatibility for dflash harness code that already
-// uses cuda* names. ggml exposes the HIP backend through ggml-cuda.h-compatible
-// APIs, so keeping the call sites unchanged avoids touching the hot-path logic.
+// uses cuda* names. This is not a HIP-only shim: CUDA builds include the CUDA
+// runtime through this header, while HIP builds map the existing cuda* runtime
+// spellings to hip*.
 
 #if defined(DFLASH27B_BACKEND_HIP) || defined(GGML_USE_HIP)
 

@@ -22,7 +22,7 @@
 #include "internal.h"
 #include "dflash_graph.h"
 #include "qwen3_drafter.h"
-#include "gpu_compat.h"
+#include "gpu_runtime_compat.h"
 
 #include "ggml.h"
 #include "ggml-alloc.h"
