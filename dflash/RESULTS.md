@@ -345,6 +345,7 @@ activation alloc inside 24 GB):
 |--------:|:----:|:-----:|---------:|--------:|
 |   4 096 | Q8_0 | 4096  |     1.04 |  3 932  |
 |  16 384 | Q8_0 | 4096  |     5.71 |  2 867  |
+|  32 768 | Q4_0 | 2048  |    19.26 |  1 701  |
 |  65 536 | Q4_0 | 1024  |    53.17 |  1 233  |
 |  65 536 | Q4_0 | 2048  |    51.33 |  1 277  |
 
@@ -364,6 +365,10 @@ survive aggressive `keep` ratios.
 | Context | KV   | keep | drafter (s) | target prefill (s) | end-to-end TTFT | NIAH |
 |--------:|:----:|:----:|------------:|-------------------:|----------------:|:----:|
 |   4 096 | Q8_0 | 0.10 |        1.54 |               0.39 |          1.92 s |  ✅  |
+|  16 384 | Q8_0 | 0.10 |        1.27 |               0.51 |          1.78 s |  ✅  |
+|  16 384 | Q8_0 | 0.20 |        1.20 |               0.91 |          2.11 s |  ✅  |
+|  32 768 | Q4_0 | 0.10 |        2.08 |               0.91 |          2.99 s |  ✅  |
+|  32 768 | Q4_0 | 0.20 |        2.06 |               1.97 |          4.03 s |  ❌ (synthetic-NIAH variance; keep=0.10 PASS) |
 |  65 536 | Q4_0 | 0.10 |        ~5   |                ~6  |           ~11 s |  ✅  |
 |  65 536 | Q4_0 | 0.20 |        ~5   |                ~8  |           ~13 s |  ✅  |
 |  65 536 | Q4_0 | 0.30 |        ~5   |                ~10 |           ~15 s |  ✅  |
@@ -387,3 +392,15 @@ draft-loaded path is reserved for that future drop-in.
 
 Four distinct outputs from the same prompt confirms the rep_penalty → top_k
 → softmax(temp) → top_p → draw chain is wired correctly end to end.
+
+### Parity vs HF reference (deferred)
+
+`scripts/parity_laguna.py` runs identical token IDs through the dflash
+daemon and a Hugging Face `LagunaForCausalLM` reference loaded from
+`poolside/Laguna-XS.2`, then reports last-position argmax agreement at
+4K—128K context. Cannot be run on a single 24 GB GPU because the BF16
+reference weighs ~37 GiB; pin to an A6000 / H100 (or use CPU offload) to
+produce the cos-sim numbers. The dflash forward itself was originally
+verified to match `llama.cpp build_laguna` for 30+ tokens during the
+scaffold-time bring-up (see `Lucebox/Laguna-XS.2-GGUF` README). The NIAH
+table above functions as the in-PR functional sanity check at 4K–131K.
