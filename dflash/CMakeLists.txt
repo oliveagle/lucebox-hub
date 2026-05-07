@@ -125,6 +125,7 @@ add_library(dflash27b STATIC
     src/laguna_target_loader.cpp
     src/laguna_target_graph.cpp
     src/laguna_daemon.cpp
+    src/sampler.cpp
 )
 # FlashPrefill custom CUDA kernels need BF16 WMMA (sm_80+). On Turing (sm_75)
 # the drafter uses ggml's flash_attn_ext instead. Guard added after SM check.

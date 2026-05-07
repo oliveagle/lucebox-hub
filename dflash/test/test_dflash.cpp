@@ -25,6 +25,9 @@
 #include "laguna_daemon.h"  // arch dispatch — laguna targets are served by
                             // dflash27b::run_laguna_daemon() instead of the
                             // qwen35 + DFlash + DDTree pipeline below.
+#include "sampler.h"        // shared CPU sampler chain (SamplerCfg /
+                            // sample_logits / parse_sampler_token) used by
+                            // both arches; behaviour stays identical.
 
 #include "ggml.h"
 #include "gguf.h"  // gguf_init_from_file / gguf_find_key for arch detect
@@ -125,103 +128,12 @@ static int argmax_f32(const float * x, int n) {
     return best;
 }
 
-// Optional sampling. Greedy is the default. When SamplerCfg.temp > 0
-// the corresponding committed-token argmax sites instead run a small
-// CPU sampler chain (rep penalty -> top_k -> top_p -> temp -> draw).
-// The DDTree skeleton itself stays argmax to keep accept rate intact.
-struct SamplerCfg {
-    float    temp       = 0.0f;
-    float    top_p      = 1.0f;
-    int      top_k      = 0;
-    float    rep_pen    = 1.0f;
-    int      rep_window = 256;
-    uint64_t seed       = 0;
-};
-
-static int sample_logits(const float * logits_in,
-                         int vocab,
-                         const SamplerCfg & cfg,
-                         const std::vector<int32_t> & history,
-                         std::mt19937_64 & rng) {
-    std::vector<std::pair<float,int>> cand(vocab);
-    for (int i = 0; i < vocab; i++) cand[i] = {logits_in[i], i};
-
-    if (cfg.rep_pen > 1.0f && !history.empty()) {
-        const int win  = std::min((int)history.size(), cfg.rep_window);
-        const int from = (int)history.size() - win;
-        std::unordered_set<int> seen;
-        for (int i = from; i < (int)history.size(); i++) seen.insert(history[i]);
-        for (auto & c : cand) {
-            if (seen.count(c.second)) {
-                c.first = (c.first > 0.0f) ? c.first / cfg.rep_pen
-                                           : c.first * cfg.rep_pen;
-            }
-        }
-    }
-
-    if (cfg.top_k > 0 && cfg.top_k < vocab) {
-        std::partial_sort(cand.begin(), cand.begin() + cfg.top_k, cand.end(),
-                          [](auto & a, auto & b){ return a.first > b.first; });
-        cand.resize(cfg.top_k);
-    } else {
-        std::sort(cand.begin(), cand.end(),
-                  [](auto & a, auto & b){ return a.first > b.first; });
-    }
-
-    const float inv_t = 1.0f / std::max(1e-3f, cfg.temp);
-    float maxv = cand.front().first * inv_t;
-    double Z   = 0.0;
-    std::vector<float> probs(cand.size());
-    for (size_t i = 0; i < cand.size(); i++) {
-        probs[i] = std::exp(cand[i].first * inv_t - maxv);
-        Z       += probs[i];
-    }
-    for (auto & p : probs) p = (float)(p / Z);
-
-    if (cfg.top_p > 0.0f && cfg.top_p < 1.0f) {
-        double cum = 0.0;
-        size_t cut = probs.size();
-        for (size_t i = 0; i < probs.size(); i++) {
-            cum += probs[i];
-            if (cum >= cfg.top_p) { cut = i + 1; break; }
-        }
-        probs.resize(cut); cand.resize(cut);
-        double zz = 0.0;
-        for (auto p : probs) zz += p;
-        for (auto & p : probs) p = (float)(p / zz);
-    }
-
-    std::uniform_real_distribution<double> u(0.0, 1.0);
-    double r   = u(rng);
-    double acc = 0.0;
-    for (size_t i = 0; i < probs.size(); i++) {
-        acc += probs[i];
-        if (r <= acc) return cand[i].second;
-    }
-    return cand.back().second;
-}
-
-static bool parse_sampler_token(std::string & line, SamplerCfg & out) {
-    auto pos = line.find(" samp=");
-    if (pos == std::string::npos) return false;
-    auto end = line.find(' ', pos + 1);
-    std::string tok = (end == std::string::npos)
-                          ? line.substr(pos + 6)
-                          : line.substr(pos + 6, end - (pos + 6));
-    line.erase(pos, (end == std::string::npos ? std::string::npos : end - pos));
-    float t = 0.0f, tp = 1.0f, rp = 1.0f;
-    int   tk = 0;
-    unsigned long long sd = 0;
-    int n = std::sscanf(tok.c_str(), "%f,%f,%d,%f,%llu",
-                        &t, &tp, &tk, &rp, &sd);
-    if (n < 1) return false;
-    out.temp    = t;
-    out.top_p   = tp;
-    out.top_k   = tk;
-    out.rep_pen = rp;
-    out.seed    = sd;
-    return true;
-}
+// CPU sampler chain (SamplerCfg / sample_logits / parse_sampler_token) lives
+// in src/sampler.{h,cpp} and is shared with src/laguna_daemon.cpp. Behaviour
+// is unchanged: greedy when cfg.temp <= 0, otherwise rep_penalty -> top_k ->
+// softmax(temp) -> top_p -> draw. The DDTree skeleton itself stays argmax to
+// keep the accept rate intact; sample_logits only runs at committed-token
+// sites when ` samp=` was on the request line.
 
 // ggml_flash_attn_ext expects kv_len aligned to KQ_MASK_PAD (32) on the
 // f16/Q* paths, and to FATTN_KQ_STRIDE (256) on the TurboQuant FA paths.
