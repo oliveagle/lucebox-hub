@@ -393,6 +393,22 @@ draft-loaded path is reserved for that future drop-in.
 Four distinct outputs from the same prompt confirms the rep_penalty → top_k
 → softmax(temp) → top_p → draw chain is wired correctly end to end.
 
+### Speedup at 128K context (RTX 3090, Q4_K_M target, Q4_0 KV, FA on)
+
+| Path                                  |  Time @ 131072 | tok/s    | Notes |
+|---------------------------------------|---------------:|---------:|-------|
+| llama.cpp pp131072 (vendored fork)    |       86.60 s  |  1513.4  | `llama-bench -p 131072 -n 0 -ctk q4_0 -ctv q4_0 -fa 1 -t 8 -r 1 -ngl 99` |
+| dflash + PFlash keep=0.10 (end-to-end)|       15.91 s  |  8 240   | drafter compress 11.11s + target prefill 4.79s |
+| dflash target prefill only            |        4.79 s  | 27 364   | on the 13 120-token compressed prompt |
+
+Headline: **dflash PFlash gives 5.4× faster TTFT than llama.cpp at 131K
+context** end-to-end on a 24 GB RTX 3090. The target prefill alone runs
+18.1× faster because PFlash compression has reduced the effective input
+length from 131 072 tokens to 13 120 (10× token-count drop). The drafter
+adds 11 s of fixed overhead which dominates at long context but folds
+below 1× of the target prefill cost as the haystack shrinks (4K @ keep=0.10
+spends 1.5 s drafter + 0.4 s target, net 1.92 s vs llama.cpp 1.7 s).
+
 ### Parity vs HF reference (deferred)
 
 `scripts/parity_laguna.py` runs identical token IDs through the dflash
