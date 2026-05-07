@@ -187,6 +187,7 @@ bool load_drafter(const std::string & gguf_path, int /*gpu_layers*/,
 
 #if defined(DFLASH27B_USE_HIP)
     if (!prewarm_drafter_once(out.weights)) {
+        free_drafter(out);
         return false;
     }
 #endif
@@ -218,7 +219,8 @@ static std::vector<int32_t> qwen35_score_and_compress(
     const std::vector<int32_t> & ids,
     float keep_ratio,
     int chunk_size,
-    int n_lookahead) {
+    int n_lookahead,
+    int pool_kernel) {
 
     const int S = (int)ids.size();
     const int hidden = w.n_embd;
@@ -229,23 +231,32 @@ static std::vector<int32_t> qwen35_score_and_compress(
 
     TargetCache cache;
 #if defined(_WIN32)
+    char *  old_tq3_raw = nullptr;
+    size_t  old_tq3_len = 0;
+    _dupenv_s(&old_tq3_raw, &old_tq3_len, "DFLASH27B_KV_TQ3");
+    const bool had_old_tq3 = (old_tq3_raw != nullptr);
+    std::string old_tq3_s  = had_old_tq3 ? old_tq3_raw : "";
+    free(old_tq3_raw);
     _putenv_s("DFLASH27B_KV_TQ3", "0");
+    auto restore_tq3 = [&]() {
+        // _putenv_s with empty value removes the variable on MSVCRT.
+        _putenv_s("DFLASH27B_KV_TQ3", had_old_tq3 ? old_tq3_s.c_str() : "");
+    };
 #else
     const char * old_tq3 = std::getenv("DFLASH27B_KV_TQ3");
     std::string old_tq3_s = old_tq3 ? old_tq3 : "";
+    const bool had_old_tq3 = (old_tq3 != nullptr);
     setenv("DFLASH27B_KV_TQ3", "0", 1);
+    auto restore_tq3 = [&]() {
+        if (had_old_tq3) setenv("DFLASH27B_KV_TQ3", old_tq3_s.c_str(), 1);
+        else unsetenv("DFLASH27B_KV_TQ3");
+    };
 #endif
     if (!create_target_cache(w, S, 0, w.backend, cache, true)) {
-#if !defined(_WIN32)
-        if (old_tq3) setenv("DFLASH27B_KV_TQ3", old_tq3_s.c_str(), 1);
-        else unsetenv("DFLASH27B_KV_TQ3");
-#endif
+        restore_tq3();
         return {};
     }
-#if !defined(_WIN32)
-    if (old_tq3) setenv("DFLASH27B_KV_TQ3", old_tq3_s.c_str(), 1);
-    else unsetenv("DFLASH27B_KV_TQ3");
-#endif
+    restore_tq3();
 
     ggml_init_params act_ip{};
     act_ip.mem_size = (size_t)8 * ggml_tensor_overhead() + 4096;
@@ -462,9 +473,12 @@ static std::vector<int32_t> qwen35_score_and_compress(
     const int n_keep = std::max(1, (int)((float)n_chunks * keep_ratio));
     
     std::vector<float> smooth_score = score;
-    int pool_kernel = std::max(3, env_int("DFLASH_COMPRESS_POOL_KERNEL", 5));
+    // Caller pool_kernel takes precedence; if zero/negative, fall back to env or 5.
+    const int pk = (pool_kernel > 0)
+        ? pool_kernel
+        : std::max(3, env_int("DFLASH_COMPRESS_POOL_KERNEL", 5));
     std::vector<float> smoothed((size_t)S, 0.0f);
-    int half = pool_kernel / 2;
+    int half = pk / 2;
     for (int j = 0; j < S; ++j) {
         int lo = std::max(0, j - half);
         int hi = std::min(S - 1, j + half);
@@ -612,7 +626,7 @@ std::vector<int32_t> drafter_score_and_compress(
             return {};
         }
         auto * st = static_cast<Qwen35DrafterState *>(ctx.arch_state);
-        return qwen35_score_and_compress(st->weights, ids, keep_ratio, chunk_size, n_lookahead);
+        return qwen35_score_and_compress(st->weights, ids, keep_ratio, chunk_size, n_lookahead, pool_kernel);
     }
     const int S = (int)ids.size();
     if (S < n_lookahead + 1) {

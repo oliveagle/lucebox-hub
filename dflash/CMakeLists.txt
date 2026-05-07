@@ -77,6 +77,14 @@ endif()
 option(DFLASH27B_FA_ALL_QUANTS "Compile ggml-cuda fattn kernels for all KV-quant pairs" ON)
 set(GGML_CUDA_FA_ALL_QUANTS ${DFLASH27B_FA_ALL_QUANTS} CACHE BOOL "" FORCE)
 
+# HIP Phase 2 — opt-in rocWMMA flashprefill kernels (Strix Halo / gfx1151).
+# Default OFF (Phase 1 = ggml q8 fallback). Set ON for the 1.7-2.7× compress
+# speedup at 8K-32K context. Requires rocwmma headers installed under
+# ${ROCM_PATH}/include (e.g. `sudo apt install rocwmma`).
+option(DFLASH27B_HIP_SM80_EQUIV
+    "HIP: build the rocWMMA flashprefill kernels (Phase 2). Requires rocwmma."
+    OFF)
+
 # Resolve the CUDA architecture list up-front so downstream logic (notably
 # the consumer-Blackwell ggml workaround below) can inspect the actual
 # arches nvcc will compile for. The dflash27b target itself is created
@@ -88,13 +96,20 @@ set(GGML_CUDA_FA_ALL_QUANTS ${DFLASH27B_FA_ALL_QUANTS} CACHE BOOL "" FORCE)
 # GB10 is compute capability 12.1 (121), added at CUDA 12.9+.
 # Strix Halo (gfx1151) default for HIP/ROCm builds.
 if(DFLASH27B_USE_HIP)
-    if(AMDGPU_TARGETS)
+    # User override precedence: -DCMAKE_HIP_ARCHITECTURES (captured into
+    # DFLASH27B_USER_GPU_ARCHITECTURES before project()) → -DAMDGPU_TARGETS
+    # → gfx1151 default (Strix Halo).
+    if(DFLASH27B_USER_GPU_ARCHITECTURES)
+        set(_dflash27b_archs "${DFLASH27B_USER_GPU_ARCHITECTURES}")
+    elseif(AMDGPU_TARGETS)
         set(_dflash27b_archs "${AMDGPU_TARGETS}")
     else()
         set(_dflash27b_archs "gfx1151")
     endif()
-elseif(DFLASH27B_USER_CUDA_ARCHITECTURES)
-    set(_dflash27b_archs "${DFLASH27B_USER_CUDA_ARCHITECTURES}")
+    # Make sure the HIP language picks up the resolved arch list.
+    set(CMAKE_HIP_ARCHITECTURES "${_dflash27b_archs}" CACHE STRING "" FORCE)
+elseif(DFLASH27B_USER_GPU_ARCHITECTURES)
+    set(_dflash27b_archs "${DFLASH27B_USER_GPU_ARCHITECTURES}")
 else()
     set(_dflash27b_archs "75;86")
     if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
@@ -185,8 +200,10 @@ add_library(dflash27b STATIC ${_dflash27b_sources})
 if(NOT DEFINED DFLASH27B_ENABLE_BSA)
     set(DFLASH27B_ENABLE_BSA ON)
 endif()
-if(DFLASH27B_USE_HIP AND DFLASH27B_ENABLE_BSA)
-    message(WARNING "DFLASH27B_ENABLE_BSA is CUDA-only; disabling it for the HIP build.")
+if(DFLASH27B_USE_HIP AND DFLASH27B_ENABLE_BSA AND NOT DFLASH27B_HIP_SM80_EQUIV)
+    message(STATUS
+        "BSA on HIP is backed by the rocWMMA sparse-FA kernel (Phase 2). "
+        "Build with -DDFLASH27B_HIP_SM80_EQUIV=ON to enable; disabling BSA for this Phase 1 HIP build.")
     set(DFLASH27B_ENABLE_BSA OFF)
 endif()
 
@@ -198,24 +215,52 @@ endif()
 
 # Extract the minimum SM from the arch list so safetensors_draft.cpp can decide
 # at compile time whether to convert BF16 draft weights to FP16 (cuBLAS BF16
-# GEMM has no tensor core acceleration on SM < 80).
-list(GET _dflash27b_archs 0 _dflash27b_min_sm)
-# Strip any trailing 'a' suffix (e.g. "121a" → "121")
-string(REGEX REPLACE "[^0-9]" "" _dflash27b_min_sm "${_dflash27b_min_sm}")
-target_compile_definitions(dflash27b PRIVATE DFLASH27B_MIN_SM=${_dflash27b_min_sm})
+# GEMM has no tensor core acceleration on SM < 80). Only meaningful for CUDA;
+# on HIP, the Phase 2 block below sets DFLASH27B_MIN_SM=80 directly.
+if(NOT DFLASH27B_USE_HIP)
+    list(GET _dflash27b_archs 0 _dflash27b_min_sm)
+    # Strip any trailing 'a' suffix (e.g. "121a" → "121")
+    string(REGEX REPLACE "[^0-9]" "" _dflash27b_min_sm "${_dflash27b_min_sm}")
+    target_compile_definitions(dflash27b PRIVATE DFLASH27B_MIN_SM=${_dflash27b_min_sm})
+endif()
 if(DFLASH27B_USE_HIP)
     target_compile_definitions(dflash27b PUBLIC DFLASH27B_USE_HIP=1)
 endif()
 
+# FlashPrefill custom kernels.
+#   CUDA: BF16 WMMA needs sm_80+; on sm_75 we fall back to ggml flash_attn_ext.
+#   HIP Phase 1 (default): ggml q8 fallback, no custom kernels.
+#   HIP Phase 2 (DFLASH27B_HIP_SM80_EQUIV=ON): rocWMMA-native kernels for the
+#                                              1.7-2.7× compress speedup.
 if(DFLASH27B_USE_HIP)
-    set_source_files_properties(
-        src/flashprefill_kernels.cu
-        PROPERTIES LANGUAGE HIP)
-endif()
-
-# FlashPrefill custom CUDA kernels need BF16 WMMA (sm_80+).
-# On sm_75 the drafter falls back to ggml's flash_attn_ext (see qwen3_0p6b_graph.cpp).
-if(_dflash27b_min_sm GREATER_EQUAL 80)
+    if(DFLASH27B_HIP_SM80_EQUIV)
+        find_path(DFLASH27B_ROCWMMA_INCLUDE_DIR rocwmma/rocwmma.hpp
+            HINTS "${_dflash27b_rocm_root}/include" /opt/rocm/include
+            NO_DEFAULT_PATH)
+        if(NOT DFLASH27B_ROCWMMA_INCLUDE_DIR)
+            message(FATAL_ERROR
+                "DFLASH27B_HIP_SM80_EQUIV=ON but rocwmma/rocwmma.hpp not found. "
+                "Install rocwmma (e.g. `sudo apt install rocwmma` on Debian/Ubuntu, "
+                "or fetch headers from https://github.com/ROCm/rocWMMA), or rebuild "
+                "with -DDFLASH27B_HIP_SM80_EQUIV=OFF (uses the slower q8 fallback).")
+        endif()
+        target_sources(dflash27b PRIVATE
+            src/flashprefill_kernels.hip.cu
+            src/flashprefill_select.cpp
+            src/flashprefill.cpp)
+        set_source_files_properties(src/flashprefill_kernels.hip.cu
+            PROPERTIES LANGUAGE HIP)
+        target_include_directories(dflash27b PRIVATE
+            ${DFLASH27B_ROCWMMA_INCLUDE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/hip_compat)
+        target_compile_definitions(dflash27b PRIVATE
+            DFLASH27B_HAVE_FLASHPREFILL=1
+            DFLASH27B_MIN_SM=80)
+        message(STATUS "dflash: HIP Phase 2 — rocWMMA flashprefill kernels enabled")
+    else()
+        message(STATUS "dflash: HIP Phase 1 — ggml q8 fallback for flashprefill")
+    endif()
+elseif(_dflash27b_min_sm GREATER_EQUAL 80)
     target_sources(dflash27b PRIVATE
         src/flashprefill_kernels.cu
         src/flashprefill_select.cpp
@@ -236,10 +281,10 @@ if(DFLASH27B_ENABLE_BSA)
         endif()
     endforeach()
 endif()
-# BSA also requires the Block-Sparse-Attention submodule (with bundled cutlass).
+# BSA on CUDA also requires the Block-Sparse-Attention submodule (with bundled cutlass).
 # Existing users who `git pull` without `--recurse-submodules` would otherwise
 # hit a missing-header compile error — auto-disable here with a clear message.
-if(DFLASH27B_ENABLE_BSA AND NOT EXISTS
+if(DFLASH27B_ENABLE_BSA AND NOT DFLASH27B_USE_HIP AND NOT EXISTS
    "${CMAKE_CURRENT_SOURCE_DIR}/deps/Block-Sparse-Attention/csrc/cutlass/include/cutlass/numeric_types.h")
     message(WARNING
         "DFLASH27B_ENABLE_BSA=ON requested but the Block-Sparse-Attention submodule "
@@ -249,7 +294,13 @@ if(DFLASH27B_ENABLE_BSA AND NOT EXISTS
     set(DFLASH27B_ENABLE_BSA OFF)
 endif()
 if(DFLASH27B_ENABLE_BSA)
-    target_sources(dflash27b PRIVATE src/bsa_fwd_inst.cu src/bsa_launcher.cu)
+    if(DFLASH27B_USE_HIP)
+        # HIP BSA: backed by our rocWMMA sparse-FA kernel; no CUTLASS needed.
+        target_sources(dflash27b PRIVATE src/bsa_launcher_hip.cu)
+        set_source_files_properties(src/bsa_launcher_hip.cu PROPERTIES LANGUAGE HIP)
+    else()
+        target_sources(dflash27b PRIVATE src/bsa_fwd_inst.cu src/bsa_launcher.cu)
+    endif()
 endif()
 
 target_include_directories(dflash27b
@@ -263,17 +314,23 @@ if(NOT DFLASH27B_USE_HIP)
     target_include_directories(dflash27b PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 endif()
 if(DFLASH27B_ENABLE_BSA)
-    target_include_directories(dflash27b PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/deps/bsa_stubs
-        ${CMAKE_CURRENT_SOURCE_DIR}/deps/Block-Sparse-Attention/csrc/cutlass/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/deps/Block-Sparse-Attention/csrc/block_sparse_attn/src)
-    target_compile_options(dflash27b PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
-    target_compile_definitions(dflash27b PRIVATE FLASHATTENTION_DISABLE_DROPOUT FLASH_NAMESPACE=flash DFLASH27B_HAVE_BSA=1)
-    # MSVC's <cmath> hides POSIX M_* macros (M_LOG2E etc.) unless _USE_MATH_DEFINES
-    # is set before any cmath include. BSA's softmax.h relies on M_LOG2E; define
-    # globally on the target so it precedes every TU's first <cmath> include.
-    if(WIN32)
-        target_compile_definitions(dflash27b PRIVATE _USE_MATH_DEFINES)
+    if(DFLASH27B_USE_HIP)
+        # HIP path: bsa_launcher_hip.cu only needs DFLASH27B_HAVE_BSA + the
+        # hip_compat shim (which the Phase 2 block above already adds).
+        target_compile_definitions(dflash27b PRIVATE DFLASH27B_HAVE_BSA=1)
+    else()
+        target_include_directories(dflash27b PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/deps/bsa_stubs
+            ${CMAKE_CURRENT_SOURCE_DIR}/deps/Block-Sparse-Attention/csrc/cutlass/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/deps/Block-Sparse-Attention/csrc/block_sparse_attn/src)
+        target_compile_options(dflash27b PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
+        target_compile_definitions(dflash27b PRIVATE FLASHATTENTION_DISABLE_DROPOUT FLASH_NAMESPACE=flash DFLASH27B_HAVE_BSA=1)
+        # MSVC's <cmath> hides POSIX M_* macros (M_LOG2E etc.) unless _USE_MATH_DEFINES
+        # is set before any cmath include. BSA's softmax.h relies on M_LOG2E; define
+        # globally on the target so it precedes every TU's first <cmath> include.
+        if(WIN32)
+            target_compile_definitions(dflash27b PRIVATE _USE_MATH_DEFINES)
+        endif()
     endif()
 endif()
 

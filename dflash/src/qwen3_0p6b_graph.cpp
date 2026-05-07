@@ -484,18 +484,15 @@ bool forward_qwen3_0p6b_drafter(
         }
 
         // ── Attention dispatch ──
-        // Use the ggml FA path (flash_prefill_forward_q8) when:
-        //   - SM < 80 (BF16 WMMA unavailable), OR
-        //   - The drafter's persistent buffers are not BF16 (e.g. F16 on Turing)
-        // Use the custom BF16 WMMA path on SM >= 80 with BF16 buffers.
+        // Use the ggml FA path (flash_prefill_forward_q8) when the custom kernels
+        // are not compiled in (CUDA SM<80, or HIP Phase 1) or buffers are not BF16.
+        // Use the custom BF16 WMMA / rocWMMA path otherwise.
         auto tF0 = std::chrono::steady_clock::now();
         const bool use_bf16_fp = (Q_buf.t->type == GGML_TYPE_BF16)
-#if defined(DFLASH27B_USE_HIP)
-                                 && false;  // ROCm: use ggml flash_attn_ext; custom sparse kernel is too slow on gfx1151.
-#elif DFLASH27B_MIN_SM >= 80
+#if defined(DFLASH27B_HAVE_FLASHPREFILL) && DFLASH27B_MIN_SM >= 80
                                  && true;
 #else
-                                 && false;  // WMMA kernels not compiled
+                                 && false;
 #endif
         if (use_bf16_fp) {
 #if DFLASH27B_MIN_SM >= 80
@@ -627,6 +624,20 @@ bool forward_qwen3_0p6b_drafter(
                 std::fflush(stderr);
             }
 
+            // Run gf_proj_add FIRST so gb.h_after holds the current chunk's
+            // projected residual sum before we read it back for CPU-side
+            // RMSNorm. (Reading h_after before this compute would pick up
+            // the previous chunk's value — stale FFN inputs.)
+            auto tB0 = std::chrono::steady_clock::now();
+            double proj_s = 0, gate_s = 0, up_s = 0, mul_s = 0, down_s = 0, add_s = 0;
+            auto one = [&](ggml_cgraph * gf, double & acc) {
+                auto ts0 = std::chrono::steady_clock::now();
+                ggml_backend_graph_compute(w.backend, gf);
+                auto ts1 = std::chrono::steady_clock::now();
+                acc = std::chrono::duration<double>(ts1 - ts0).count();
+            };
+            one(gb.gf_proj_add, proj_s);
+
             auto tB_norm0 = std::chrono::steady_clock::now();
             ggml_backend_tensor_get(gb.h_after, h_after_cpu.data(), 0, h_bytes);
             for (int tok_idx = 0; tok_idx < cl; ++tok_idx) {
@@ -645,15 +656,6 @@ bool forward_qwen3_0p6b_drafter(
             auto tB_norm1 = std::chrono::steady_clock::now();
             t_b_norm += std::chrono::duration<double>(tB_norm1 - tB_norm0).count();
 
-            auto tB0 = std::chrono::steady_clock::now();
-            double proj_s = 0, gate_s = 0, up_s = 0, mul_s = 0, down_s = 0, add_s = 0;
-            auto one = [&](ggml_cgraph * gf, double & acc) {
-                auto ts0 = std::chrono::steady_clock::now();
-                ggml_backend_graph_compute(w.backend, gf);
-                auto ts1 = std::chrono::steady_clock::now();
-                acc = std::chrono::duration<double>(ts1 - ts0).count();
-            };
-            one(gb.gf_proj_add, proj_s);
             one(gb.gf_gate, gate_s);
             one(gb.gf_up, up_s);
             one(gb.gf_mul, mul_s);

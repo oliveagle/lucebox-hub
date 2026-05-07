@@ -527,6 +527,10 @@ bool load_target_gguf_partial(const std::string & path,
 #else
     out.embedder.mmap_fd        = mm.fd;
 #endif
+    if (out.n_vocab <= 0) {
+        set_last_error("invalid n_vocab in GGUF metadata (token embedder cannot be sized)");
+        return false;
+    }
     out.embedder.tok_embd_bytes = (const uint8_t *)mm.addr + tok_embd_off;
     out.embedder.tok_embd_type  = tok_embd_type;
     out.embedder.n_embd         = out.n_embd;
