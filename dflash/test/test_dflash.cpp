@@ -909,7 +909,8 @@ static bool build_target_step(
     bool with_mask,
     bool capture,
     bool capture_delta_intermediate = false,
-    int fa_window = 0) {
+    int fa_window = 0,
+    bool last_token_logits_only = false) {
     step_graph_free(sg);
 
     ggml_init_params ip{};
@@ -953,6 +954,7 @@ static bool build_target_step(
     gi.capture_layers             = capture;
     gi.capture_delta_intermediate = capture_delta_intermediate;
     gi.fa_window                  = fa_window;
+    gi.last_token_logits_only     = last_token_logits_only;
 
     QwenGraphOutputs go = build_qwen35_graph(sg.ctx, sg.gf, w, cache, gi);
     if (!go.logits) return false;
@@ -3196,6 +3198,9 @@ int main(int argc, char ** argv) {
     }
     // ── Token-segmented prefill (legacy) ────────────────────────────────
     if (!layer_prefill) {
+    // Prefill only needs last-token logits to seed decode. Skip computing
+    // the full [vocab, ubatch] lm_head matmul — saves ~233MB scratch at
+    // ubatch=384 and eliminates a large matmul per prefill step.
     int prefill_ubatch_env = (prompt_len_auto > 2048) ? 384 : 16;
     if (const char * s = std::getenv("DFLASH27B_PREFILL_UBATCH")) {
         prefill_ubatch_env = std::max(1, std::atoi(s));
@@ -3209,6 +3214,26 @@ int main(int argc, char ** argv) {
     std::vector<float>    pf_logits_buf;
     const int prompt_len     = (int)prompt.size();
     const int prefill_start  = cache.cur_pos;   // 0 for fresh cache; >0 after snapshot restore
+
+    // Pre-reserve gallocr: build a max-size graph so gallocr allocates its
+    // buffer upfront, preventing reallocations as the mask grows during prefill.
+    // With fa_window, the mask is capped at ~fa_window+ubatch regardless of
+    // prompt length, so the reserve is always small.
+    if (prompt_len > PREFILL_UBATCH) {
+        // Use kv_start near the end so the mask reaches its maximum windowed size.
+        const int reserve_kv = std::max(prompt_len - PREFILL_UBATCH, PREFILL_UBATCH);
+        if (!build_target_step(sg, w, cache, backend,
+                                /*kv_start=*/reserve_kv,
+                                /*n_tokens=*/PREFILL_UBATCH,
+                                /*with_mask=*/true, /*capture=*/true,
+                                /*capture_delta_intermediate=*/false,
+                                /*fa_window=*/g_fa_window,
+                                /*last_token_logits_only=*/true)) {
+            std::fprintf(stderr, "prefill gallocr pre-reserve failed\n"); return 1;
+        }
+        // gallocr is now reserved at peak size; subsequent builds will reuse it.
+    }
+
     for (int start = prefill_start; start < prompt_len; start += PREFILL_UBATCH) {
         int n_tokens = std::min(PREFILL_UBATCH, prompt_len - start);
 
@@ -3245,7 +3270,10 @@ int main(int argc, char ** argv) {
         const bool pf_with_mask = (g_kq_stride_pad > KQ_MASK_PAD) || (n_tokens > 1);
         if (!build_target_step(sg, w, cache, backend,
                                 /*kv_start=*/start, /*n_tokens=*/n_tokens,
-                                /*with_mask=*/pf_with_mask, /*capture=*/true)) {
+                                /*with_mask=*/pf_with_mask, /*capture=*/true,
+                                /*capture_delta_intermediate=*/false,
+                                /*fa_window=*/g_fa_window,
+                                /*last_token_logits_only=*/true)) {
             std::fprintf(stderr, "prefill build @%d\n", start); return 1;
         }
 
@@ -3272,7 +3300,11 @@ int main(int argc, char ** argv) {
         // is active (which pads kv_len to 256 and needs -inf on the padding
         // positions even for a single query).
         if (pf_with_mask) {
-            build_causal_mask(pf_mask_buf, kv_len, n_tokens, /*kv_start=*/start);
+            const int pf_win_start = (g_fa_window > 0 && start > g_fa_window)
+                                         ? (start - g_fa_window) : 0;
+            const int pf_win_len = kv_len - pf_win_start;
+            build_causal_mask(pf_mask_buf, pf_win_len, n_tokens,
+                              /*kv_start=*/start, /*win_start=*/pf_win_start);
             ggml_backend_tensor_set(sg.attn_mask, pf_mask_buf.data(), 0,
                                     sizeof(uint16_t) * pf_mask_buf.size());
         }
@@ -3280,10 +3312,9 @@ int main(int argc, char ** argv) {
         auto st = ggml_backend_graph_compute(backend, sg.gf);
         if (st != GGML_STATUS_SUCCESS) { std::fprintf(stderr, "prefill compute @%d\n", start); return 1; }
 
-        // Only need the last position's logits to seed decode.
+        // Logits are [vocab, 1] (last_token_logits_only), read from offset 0.
         pf_logits_buf.assign(vocab, 0.0f);
-        const size_t last_row_off = (size_t)(n_tokens - 1) * vocab * sizeof(float);
-        ggml_backend_tensor_get(sg.logits, pf_logits_buf.data(), last_row_off,
+        ggml_backend_tensor_get(sg.logits, pf_logits_buf.data(), 0,
                                 sizeof(float) * vocab);
         last_tok = (g_sampler.temp > 0.0f)
             ? sample_logits(pf_logits_buf.data(), vocab, g_sampler, out_all, g_sampler_rng)
