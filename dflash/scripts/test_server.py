@@ -561,3 +561,32 @@ def test_responses_developer_role_mapped_to_system(mock_os_read, mock_pipe,
     calls = mock_tokenizer.apply_chat_template.call_args_list
     msgs = calls[-1][0][0]
     assert msgs[0]["role"] == "system"
+
+
+@patch("server.os.pipe")
+@patch("server.os.read")
+def test_responses_instructions_and_developer_merged(mock_os_read, mock_pipe,
+                                                      mock_tokenizer, app):
+    """Instructions + developer messages merge into one system message."""
+    mock_pipe.return_value = (1, 2)
+    mock_os_read.side_effect = [struct.pack("<i", 10), struct.pack("<i", -1)]
+
+    client = TestClient(app)
+    response = client.post("/v1/responses", json={
+        "model": MODEL_NAME,
+        "instructions": "Top-level instructions.",
+        "input": [
+            {"type": "message", "role": "developer",
+             "content": "Developer context."},
+            {"type": "message", "role": "user", "content": "hi"},
+        ],
+    })
+
+    assert response.status_code == 200
+    calls = mock_tokenizer.apply_chat_template.call_args_list
+    msgs = calls[-1][0][0]
+    # Should be exactly one system message containing both
+    system_msgs = [m for m in msgs if m["role"] == "system"]
+    assert len(system_msgs) == 1
+    assert "Top-level instructions." in system_msgs[0]["content"]
+    assert "Developer context." in system_msgs[0]["content"]

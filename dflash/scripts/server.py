@@ -1338,9 +1338,13 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         """Map Responses API input → ChatMessage list + ToolDef list."""
         messages: list[ChatMessage] = []
 
-        # instructions → system message
+        # Collect all system-level content (instructions + developer messages)
+        # and merge into a single system message at position 0, since
+        # Qwen's chat template requires the system message at the beginning.
+        system_parts: list[str] = []
+
         if req.instructions:
-            messages.append(ChatMessage(role="system", content=req.instructions))
+            system_parts.append(req.instructions)
 
         # Parse input items
         input_items = req.input
@@ -1354,8 +1358,6 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
 
                 if item_type == "message":
                     role = item.get("role", "user")
-                    if role == "developer":
-                        role = "system"
                     content = item.get("content", "")
                     if isinstance(content, list):
                         # Extract text from content parts
@@ -1365,7 +1367,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                                 if part.get("type") in ("output_text", "text", "input_text"):
                                     text_parts.append(part.get("text", ""))
                         content = "".join(text_parts)
-                    messages.append(ChatMessage(role=role, content=content))
+                    if role == "developer" or role == "system":
+                        system_parts.append(content)
+                    else:
+                        messages.append(ChatMessage(role=role, content=content))
 
                 elif item_type == "function_call":
                     tc = ToolCall(
@@ -1390,6 +1395,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
 
                 # Ignore reasoning, local_shell_call, etc. — we just
                 # need the message/function_call/output items for the model.
+
+        # Prepend merged system message
+        if system_parts:
+            messages.insert(0, ChatMessage(
+                role="system", content="\n\n".join(system_parts)))
 
         # Map tools
         tools: list[ToolDef] | None = None
