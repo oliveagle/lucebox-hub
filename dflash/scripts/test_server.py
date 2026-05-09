@@ -369,6 +369,34 @@ def test_responses_non_streaming_string_input(mock_os_read, mock_pipe,
 
 @patch("server.os.pipe")
 @patch("server.os.read")
+def test_responses_non_streaming_started_in_thinking(mock_os_read, mock_pipe,
+                                                      mock_tokenizer, app):
+    """When prompt ends with <think>, reasoning without tags is not misclassified as content."""
+    mock_pipe.return_value = (1, 2)
+    mock_os_read.side_effect = [struct.pack("<i", 10), struct.pack("<i", -1)]
+
+    # Simulate a chat template that prefills <think>\n
+    mock_tokenizer.apply_chat_template.return_value = "prompt<think>\n"
+    # Model output has no <think> tags — it's a continuation of the prefilled block
+    mock_tokenizer.decode.return_value = "internal reasoning</think>\nactual answer"
+
+    client = TestClient(app)
+    response = client.post("/v1/responses", json={
+        "model": MODEL_NAME,
+        "input": [{"type": "message", "role": "user", "content": "hello"}],
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["object"] == "response"
+    # The "actual answer" part should be the output text, not the reasoning
+    assert "actual answer" in data["output_text"]
+    # The reasoning should NOT leak into the output text
+    assert "internal reasoning" not in data["output_text"]
+
+
+@patch("server.os.pipe")
+@patch("server.os.read")
 def test_responses_with_instructions(mock_os_read, mock_pipe,
                                       mock_tokenizer, app):
     """Instructions are mapped to system message."""

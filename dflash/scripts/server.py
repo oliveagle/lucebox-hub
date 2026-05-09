@@ -1448,11 +1448,13 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         else:
             return await _responses_non_stream(
                 chat_req, prompt_bin, prompt_ids, raw_msgs,
-                response_id, msg_item_id, created_at, prompt_len)
+                started_in_thinking, response_id, msg_item_id,
+                created_at, prompt_len)
 
     async def _responses_non_stream(
             chat_req, prompt_bin, prompt_ids, raw_msgs,
-            response_id, msg_item_id, created_at, prompt_len):
+            started_in_thinking, response_id, msg_item_id,
+            created_at, prompt_len):
         """Non-streaming Responses API handler."""
         async with daemon_lock:
             full_snap_prep_ref = [None]
@@ -1464,6 +1466,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 cur_bin = Path(cached_cur_bin)
                 cur_ids = None
                 prompt_len = cached_cur_ids_len
+                started_in_thinking = False  # cached: no think prefill
                 gen_len = _gen_len_for(prompt_len, chat_req.max_tokens)
                 if gen_len <= 0:
                     try: prompt_bin.unlink()
@@ -1522,7 +1525,9 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         if chat_req.chat_template_kwargs:
             thinking_enabled = chat_req.chat_template_kwargs.get("enable_thinking", True)
         cleaned, tool_calls = parse_tool_calls(text, tools=chat_req.tools)
-        cleaned, reasoning = parse_reasoning(cleaned, thinking_enabled=thinking_enabled)
+        cleaned, reasoning = parse_reasoning(
+            cleaned, thinking_enabled=thinking_enabled,
+            started_in_thinking=started_in_thinking)
 
         # Build output items
         output: list[dict] = []
