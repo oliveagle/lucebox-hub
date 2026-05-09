@@ -15,6 +15,7 @@ Streams tokens as Server-Sent Events using the OpenAI delta format.
 """
 import argparse
 import json
+import logging
 import os
 import re
 import struct
@@ -25,6 +26,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator
+
+log = logging.getLogger("dflash.server")
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware          # FIX 1: add CORS
@@ -778,6 +781,18 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         prompt_bin, prompt_ids, raw_msgs, started_in_thinking = _tokenize_prompt(req)
         completion_id = "chatcmpl-" + uuid.uuid4().hex[:24]
         created = int(time.time())
+        prompt_len = len(prompt_ids)
+
+        role_counts: dict[str, int] = {}
+        for m in req.messages:
+            role_counts[m.role] = role_counts.get(m.role, 0) + 1
+        n_tools = len(req.tools) if req.tools else 0
+        log.info(
+            "chat %s  stream=%s  msgs=%d %s  tools=%d  "
+            "prompt_tokens=%d  max_tokens=%d  max_ctx=%d  model=%s",
+            completion_id, req.stream, len(req.messages), dict(role_counts),
+            n_tools, prompt_len, req.max_tokens, max_ctx, req.model,
+        )
 
         if req.stream:
             async def sse() -> AsyncIterator[str]:
@@ -1450,6 +1465,20 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         prompt_bin, prompt_ids, raw_msgs, started_in_thinking = _tokenize_prompt(chat_req)
         prompt_len = len(prompt_ids)
 
+        # Summarise roles for the log line
+        role_counts: dict[str, int] = {}
+        for m in messages:
+            role_counts[m.role] = role_counts.get(m.role, 0) + 1
+        n_tools = len(tools) if tools else 0
+        log.info(
+            "responses %s  stream=%s  msgs=%d %s  tools=%d  "
+            "prompt_tokens=%d  max_output=%d  max_ctx=%d  "
+            "thinking=%s  model=%s",
+            response_id, bool(req.stream), len(messages), dict(role_counts),
+            n_tools, prompt_len, chat_req.max_tokens, max_ctx,
+            enable_thinking, chat_req.model,
+        )
+
         if req.stream:
             return await _responses_stream(
                 chat_req, prompt_bin, prompt_ids, raw_msgs,
@@ -1479,6 +1508,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 started_in_thinking = False  # cached: no think prefill
                 gen_len = _gen_len_for(prompt_len, chat_req.max_tokens)
                 if gen_len <= 0:
+                    log.warning(
+                        "responses FAILED %s: prompt too long "
+                        "(prompt=%d, max_ctx=%d, cached_slot=%d)",
+                        response_id, prompt_len, max_ctx, slot)
                     try: prompt_bin.unlink()
                     except Exception: pass
                     return JSONResponse({
@@ -1494,6 +1527,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 prompt_len = len(cur_ids)
                 gen_len = _gen_len_for(prompt_len, chat_req.max_tokens)
                 if gen_len <= 0:
+                    log.warning(
+                        "responses FAILED %s: prompt too long "
+                        "(prompt=%d, max_ctx=%d)",
+                        response_id, prompt_len, max_ctx)
                     try: cur_bin.unlink()
                     except Exception: pass
                     return JSONResponse({
@@ -1560,6 +1597,12 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 "content": [{"type": "output_text", "text": cleaned, "annotations": []}],
             })
 
+        out_types = [o.get("type") for o in output]
+        log.info(
+            "responses DONE %s  in=%d out=%d  output=%s  text_len=%d",
+            response_id, prompt_len, len(tokens),
+            out_types, len(cleaned),
+        )
         return JSONResponse({
             "id": response_id,
             "object": "response",
@@ -1596,6 +1639,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     started_in_thinking = False
                     gen_len = _gen_len_for(prompt_len, chat_req.max_tokens)
                     if gen_len <= 0:
+                        log.warning(
+                            "responses FAILED %s: prompt too long "
+                            "(prompt=%d, max_ctx=%d, cached_slot=%d)",
+                            response_id, prompt_len, max_ctx, slot)
                         try: prompt_bin.unlink()
                         except Exception: pass
                         yield _resp_sse("response.failed", {
@@ -1610,6 +1657,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     prompt_len = len(cur_ids)
                     gen_len = _gen_len_for(prompt_len, chat_req.max_tokens)
                     if gen_len <= 0:
+                        log.warning(
+                            "responses FAILED %s: prompt too long "
+                            "(prompt=%d, max_ctx=%d)",
+                            response_id, prompt_len, max_ctx)
                         try: cur_bin.unlink()
                         except Exception: pass
                         yield _resp_sse("response.failed", {
@@ -1803,6 +1854,12 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     "output_tokens": completion_tokens,
                     "total_tokens": prompt_len + completion_tokens,
                 }
+                out_types = [o.get("type") for o in final_output]
+                log.info(
+                    "responses DONE %s  in=%d out=%d  output=%s  text_len=%d",
+                    response_id, prompt_len, completion_tokens,
+                    out_types, len(accumulated_text),
+                )
                 yield _resp_sse("response.completed", {"response": shell})
 
         return StreamingResponse(sse(), media_type="text/event-stream")
@@ -1919,6 +1976,11 @@ def main():
                     arch=arch)
 
     import uvicorn
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     print(f"Luce DFlash OpenAI server on http://{args.host}:{args.port}")
     print(f"  arch      = {arch}")
     print(f"  target    = {args.target}")
