@@ -410,7 +410,7 @@ class ResponsesCreateRequest(BaseModel):
     input: Any  # str or list[InputItem dicts]
     instructions: str | None = None
     tools: list[dict] | None = None
-    tool_choice: str | None = "auto"
+    tool_choice: Any | None = "auto"
     parallel_tool_calls: bool | None = None
     stream: bool | None = None
     max_output_tokens: int | None = None

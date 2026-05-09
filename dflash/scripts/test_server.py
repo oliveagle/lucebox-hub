@@ -454,6 +454,32 @@ def test_responses_with_tools(mock_os_read, mock_pipe, mock_tokenizer, app):
 
 @patch("server.os.pipe")
 @patch("server.os.read")
+def test_responses_object_tool_choice(mock_os_read, mock_pipe,
+                                       mock_tokenizer, app):
+    """POST /v1/responses with object-style tool_choice must not 422."""
+    mock_pipe.return_value = (1, 2)
+    mock_os_read.side_effect = [struct.pack("<i", 10), struct.pack("<i", -1)]
+
+    client = TestClient(app)
+    response = client.post("/v1/responses", json={
+        "model": MODEL_NAME,
+        "input": [{"type": "message", "role": "user", "content": "read file.txt"}],
+        "tools": [
+            {"type": "function", "name": "read_file",
+             "description": "Read a file",
+             "parameters": {"type": "object",
+                           "properties": {"path": {"type": "string"}}}}
+        ],
+        "tool_choice": {"type": "function", "name": "read_file"},
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["object"] == "response"
+
+
+@patch("server.os.pipe")
+@patch("server.os.read")
 def test_responses_function_call_output(mock_os_read, mock_pipe,
                                          mock_tokenizer, app):
     """Responses API maps function_call + function_call_output items."""
