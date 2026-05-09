@@ -69,3 +69,6 @@ checkpoints/
 .env.local
 *.pem
 *.key
+
+# Temporary files
+tmp/

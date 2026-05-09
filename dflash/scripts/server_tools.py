@@ -26,6 +26,7 @@ Run:
 """
 import argparse
 import json
+import logging
 import os
 import re
 import struct
@@ -33,6 +34,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -57,6 +59,7 @@ DEFAULT_TARGET = Path(os.environ.get(
 ))
 DEFAULT_DRAFT_ROOT = ROOT / "models" / "draft"
 DEFAULT_BIN = ROOT / "build" / "test_dflash"
+DEFAULT_PREFILL_DRAFTER = ROOT / "models" / "Qwen3-0.6B-BF16.gguf"
 DEFAULT_BUDGET = 22
 MODEL_NAME = "luce-dflash"
 
@@ -322,8 +325,10 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
               prefix_cache_slots: int = 4,
               prefill_cache_slots: int = 4) -> FastAPI:
     import asyncio
+    import logging
     app = FastAPI(title="Luce DFlash OpenAI server (tool-aware)")
     daemon_lock = asyncio.Lock()
+    logger = logging.getLogger("server_tools")
 
     r_pipe, w_pipe = os.pipe()
     cmd = [str(bin_path), str(target), str(draft), "--daemon",
@@ -1162,6 +1167,38 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
     return app
 
 
+def setup_logging(log_file: str | None = None):
+    """配置日志系统，输出到文件和终端"""
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
+
+    handlers = []
+
+    # 文件日志
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter(log_format, date_format))
+        handlers.append(file_handler)
+
+    # 终端日志
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(log_format, date_format))
+    handlers.append(console_handler)
+
+    # 配置根日志记录器
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format=log_format,
+        datefmt=date_format,
+        handlers=handlers
+    )
+    return logging.getLogger("server_tools")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="0.0.0.0")
@@ -1170,6 +1207,8 @@ def main():
     ap.add_argument("--draft",  type=Path, default=DEFAULT_DRAFT_ROOT)
     ap.add_argument("--bin",    type=Path, default=DEFAULT_BIN)
     ap.add_argument("--budget", type=int,  default=DEFAULT_BUDGET)
+    ap.add_argument("--log-file", type=str, default=None,
+                    help="日志文件路径 (默认: logs/server_YYYYMMDD_HHMMSS.log)")
     # Attention compute currently scales with --max-ctx, not the actual
     # prompt+gen length (see issue #10). Default 16384 fits most API
     # workloads without the 20×+ slowdown users hit with --max-ctx=131072
@@ -1203,7 +1242,7 @@ def main():
                          "Only active when --prefill-compression is enabled. "
                          "prefix-cache-slots + prefill-cache-slots must not exceed 8.")
     args = ap.parse_args()
-    prefill_cfg = config_from_args(args)
+    prefill_cfg = config_from_args(args, DEFAULT_PREFILL_DRAFTER)
 
     # Auto-enable TQ3_0 KV cache when the requested context exceeds what F16 fits.
     # setdefault so an explicit user DFLASH27B_KV_TQ3=0 still wins.
@@ -1248,12 +1287,28 @@ def main():
         drafter_tokenizer = AutoTokenizer.from_pretrained(
             prefill_cfg.drafter_tokenizer_id, trust_remote_code=True)
 
-    app = build_app(args.target, draft, args.bin, args.budget, args.max_ctx,
-                    tokenizer, stop_ids,
-                    prefill_cfg=prefill_cfg if prefill_cfg.enabled else None,
-                    drafter_tokenizer=drafter_tokenizer,
-                    prefix_cache_slots=args.prefix_cache_slots,
-                    prefill_cache_slots=args.prefill_cache_slots)
+    # 配置日志文件
+    if args.log_file is None:
+        # 默认日志文件路径
+        logs_dir = ROOT / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        args.log_file = str(logs_dir / f"server_{timestamp}.log")
+
+    logger = setup_logging(args.log_file)
+    logger.info("=== Luce DFlash Server 启动 ===")
+    logger.info(f"日志文件: {args.log_file}")
+    logger.info(f"target = {args.target}")
+    logger.info(f"draft  = {draft}")
+    logger.info(f"bin    = {args.bin}")
+    logger.info(f"budget = {args.budget}")
+    logger.info(f"max_ctx= {args.max_ctx}")
+    logger.info(f"tokenizer = {args.tokenizer}")
+    if prefill_cfg.enabled:
+        logger.info(f"pflash = {prefill_cfg.mode} · threshold={prefill_cfg.threshold} "
+                    f"keep={prefill_cfg.keep_ratio} drafter={prefill_cfg.drafter_gguf}")
+    else:
+        logger.info("pflash = off")
 
     import uvicorn
     print(f"Luce DFlash OpenAI server (tool-aware) on http://{args.host}:{args.port}")
@@ -1268,6 +1323,7 @@ def main():
               f"keep={prefill_cfg.keep_ratio} drafter={prefill_cfg.drafter_gguf}")
     else:
         print("  pflash = off")
+    print(f"  日志文件: {args.log_file}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

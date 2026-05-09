@@ -47,6 +47,7 @@ DEFAULT_TARGET = Path(os.environ.get(
 ))
 DEFAULT_DRAFT_ROOT = ROOT / "models" / "draft"
 DEFAULT_BIN = ROOT / "build" / ("test_dflash" + (".exe" if sys.platform == "win32" else ""))
+DEFAULT_PREFILL_DRAFTER = ROOT / "models" / "Qwen3-0.6B-BF16.gguf"
 DEFAULT_BUDGET = 22
 MODEL_NAME = "luce-dflash"
 
@@ -1011,7 +1012,7 @@ def main():
     ap.add_argument("--daemon", action="store_true")
     add_cli_flags(ap)
     args = ap.parse_args()
-    prefill_cfg = config_from_args(args)
+    prefill_cfg = config_from_args(args, DEFAULT_PREFILL_DRAFTER)
 
     if args.cache_type_k:
         os.environ["DFLASH27B_KV_K"] = args.cache_type_k

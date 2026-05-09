@@ -74,18 +74,17 @@ class PrefillConfig:
 
 
 def add_cli_flags(ap) -> None:
-    """Attach --prefill-* flags to an argparse.ArgumentParser."""
     ap.add_argument("--prefill-compression",
-                    choices=["off", "auto", "always"], default="off",
+                    choices=["off", "auto", "always"], default="auto",
                     help="Speculative-prefill mode. 'auto' compresses when the "
                          "prompt token count reaches --prefill-threshold; "
                          "'always' compresses every request.")
-    ap.add_argument("--prefill-threshold", type=int, default=32000,
+    ap.add_argument("--prefill-threshold", type=int, default=8192,
                     help="Token threshold above which 'auto' mode triggers "
-                         "compression (default 32000).")
-    ap.add_argument("--prefill-keep-ratio", type=float, default=0.05,
+                         "compression (default 8192).")
+    ap.add_argument("--prefill-keep-ratio", type=float, default=0.1,
                     help="Fraction of source tokens to keep after compression "
-                         "(default 0.05; bench setting).")
+                         "(default 0.1).")
     ap.add_argument("--prefill-drafter", type=Path, default=None,
                     help="Path to the drafter Qwen3-0.6B BF16 GGUF used by "
                          "the daemon's compress command. Required when "
@@ -93,14 +92,16 @@ def add_cli_flags(ap) -> None:
     ap.add_argument("--prefill-drafter-tokenizer", default="Qwen/Qwen3-0.6B",
                     help="HF repo ID for the drafter tokenizer "
                          "(default Qwen/Qwen3-0.6B).")
-    ap.add_argument("--prefill-skip-park", action="store_true", default=False,
+    ap.add_argument("--prefill-skip-park", action="store_true", default=True,
                     help="Skip park/unpark/free-drafter on GPUs with enough VRAM "
                          "to hold target + draft + scorer simultaneously (e.g. "
                          "RTX 5090 32 GB). Keeps scorer resident for fast "
                          "subsequent compressions.")
 
 
-def config_from_args(args) -> PrefillConfig:
+def config_from_args(args, default_drafter: Path | None = None) -> PrefillConfig:
+    if args.prefill_compression != "off" and args.prefill_drafter is None:
+        args.prefill_drafter = default_drafter
     if args.prefill_compression != "off" and args.prefill_drafter is None:
         raise SystemExit(
             "--prefill-compression != off requires --prefill-drafter "
