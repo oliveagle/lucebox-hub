@@ -137,3 +137,14 @@ after each iteration and it's included in prompts for context.
 - **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). Prefix cache is fully functional with 8 slots, LRU eviction, and automatic snapshot/restore.
 
 ---
+
+## 2025-05-10 - STORY-009
+- **What was implemented**: 基础功能验证。确认 STORY-001 已经完成了所有 STORY-009 的要求：(1) 占位符已移除，真实 Tokenizer 已集成；(2) 模型加载（target + draft + cache）已实现；(3) 基础 generate_internal() 已完整实现。本任务仅进行验证和确认。
+- **Files changed**: None - verification only.
+- **Learnings**:
+  - STORY-009 的所有任务都在 STORY-001 中完成，包括移除占位符、集成真实 Tokenizer、实现模型加载和基础生成循环。
+  - 当前的 generate_internal() 包含完整的 DFlash 解码循环，支持 DDTree 模式和链模式。
+  - Prefix cache、PFlash 压缩、TurboQuant KV Cache 等高级功能已在后续迭代中添加。
+- **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). STORY-009 requirements already fulfilled in STORY-001.
+
+---

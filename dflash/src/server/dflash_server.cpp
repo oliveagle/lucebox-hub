@@ -6,8 +6,10 @@
 #include "dflash_server.h"
 #include "internal.h"
 #include "parsers.h"
+#include "sampler.h"
 #include "tokenizer.h"
 #include "kv_quant.h"
+#include "sampler.h"
 #include "ggml.h"
 #include "ggml-backend.h"
 #include "ggml-cuda.h"
@@ -18,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -33,6 +36,52 @@
 using json = nlohmann::json;
 
 namespace dflash27b {
+
+// ─── Logging Infrastructure ────────────────────────────────────────────────────
+
+enum class LogLevel {
+    DEBUG,
+    INFO,
+    WARNING,
+    ERROR
+};
+
+static const char* log_level_to_string(LogLevel level) {
+    switch (level) {
+        case LogLevel::DEBUG:   return "DEBUG";
+        case LogLevel::INFO:    return "INFO";
+        case LogLevel::WARNING: return "WARNING";
+        case LogLevel::ERROR:   return "ERROR";
+        default: return "UNKNOWN";
+    }
+}
+
+static void log_message(LogLevel level, const std::string& message) {
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()) % 1000;
+
+    char time_buf[64];
+    std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
+                  std::localtime(&time_t));
+
+    std::ostringstream oss;
+    oss << "[" << time_buf << "." << std::setfill('0') << std::setw(3) << ms.count() << "]"
+        << "[" << log_level_to_string(level) << "] "
+        << message;
+
+    if (level >= LogLevel::ERROR) {
+        std::cerr << oss.str() << std::endl;
+    } else {
+        std::cout << oss.str() << std::endl;
+    }
+}
+
+#define LOG_DEBUG(msg)   log_message(LogLevel::DEBUG,   msg)
+#define LOG_INFO(msg)    log_message(LogLevel::INFO,    msg)
+#define LOG_WARNING(msg) log_message(LogLevel::WARNING, msg)
+#define LOG_ERROR(msg)   log_message(LogLevel::ERROR,   msg)
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
@@ -1241,13 +1290,13 @@ bool DFlashServer::initialize(const ServerConfig& config) {
     // Create HTTP server
     http_server_ = std::make_unique<httplib::Server>();
     http_server_->set_logger([](const httplib::Request& req, const httplib::Response& res) {
-        std::cout << "[" << req.method << "] " << req.path << " -> " << res.status << std::endl;
+        LOG_INFO(std::string("[") + req.method + "] " + req.path + " -> " + std::to_string(res.status));
     });
 
     // Initialize tokenizer
     tokenizer_ = std::make_unique<Tokenizer>();
     if (!tokenizer_->load_from_gguf(config.target_path)) {
-        std::cerr << "Failed to load tokenizer: " << tokenizer_->last_error() << std::endl;
+        LOG_ERROR("Failed to load tokenizer: " + tokenizer_->last_error());
         return false;
     }
 
@@ -1436,33 +1485,96 @@ void DFlashServer::handle_chat_completions(const httplib::Request& req, httplib:
         // Build response
         ChatResponse chat_resp = build_chat_response(tokens, chat_req);
 
+        // Set usage
+        chat_resp.usage.prompt_tokens = static_cast<int>(prompt_tokens.size());
+        chat_resp.usage.completion_tokens = static_cast<int>(tokens.size());
+        chat_resp.usage.total_tokens = static_cast<int>(prompt_tokens.size() + tokens.size());
+
         // Convert to JSON
         json response = {
             {"id", chat_resp.id},
             {"object", chat_resp.object},
             {"created", chat_resp.created},
             {"model", chat_resp.model},
-            {"choices", {
-                {
-                    {"index", 0},
-                    {"message", {
-                        {"role", "assistant"},
-                        {"content", tokenizer_->decode(tokens)}
-                    }},
-                    {"finish_reason", "stop"}
+            {"choices", json::array()}
+        };
+
+        // Build choices array
+        for (const auto& choice : chat_resp.choices) {
+            json choice_json = {
+                {"index", choice.index},
+                {"message", {
+                    {"role", choice.message.role},
+                    {"content", choice.message.content}
+                }},
+                {"finish_reason", choice.finish_reason}
+            };
+
+            // Add tool_calls if present
+            if (choice.message.tool_calls.has_value() && !choice.message.tool_calls->empty()) {
+                choice_json["message"]["tool_calls"] = json::array();
+                for (const auto& tc : choice.message.tool_calls.value()) {
+                    choice_json["message"]["tool_calls"].push_back({
+                        {"id", tc.id},
+                        {"type", tc.type},
+                        {"function", {
+                            {"name", tc.function.name},
+                            {"arguments", tc.function.arguments}
+                        }}
+                    });
                 }
-            }},
-            {"usage", {
-                {"prompt_tokens", static_cast<int>(prompt_tokens.size())},
-                {"completion_tokens", static_cast<int>(tokens.size())},
-                {"total_tokens", static_cast<int>(prompt_tokens.size() + tokens.size())}
-            }}
+            }
+
+            // Add name if present
+            if (choice.message.name.has_value()) {
+                choice_json["message"]["name"] = choice.message.name.value();
+            }
+
+            response["choices"].push_back(choice_json);
+        }
+
+        response["usage"] = {
+            {"prompt_tokens", chat_resp.usage.prompt_tokens},
+            {"completion_tokens", chat_resp.usage.completion_tokens},
+            {"total_tokens", chat_resp.usage.total_tokens}
         };
 
         res.set_content(response.dump(), "application/json");
 
+    } catch (const json::exception& e) {
+        // JSON parsing error
+        LOG_ERROR("JSON parsing error: " + std::string(e.what()));
+        json error = {
+            {"error", {
+                {"message", std::string("Invalid JSON: ") + e.what()},
+                {"type", "invalid_request_error"},
+                {"code", "invalid_json"}
+            }}
+        };
+        res.status = 400;
+        res.set_content(error.dump(), "application/json");
     } catch (const std::exception& e) {
-        json error = {{"error", {{"message", e.what()}}}};
+        // General error
+        LOG_ERROR("Internal error: " + std::string(e.what()));
+        json error = {
+            {"error", {
+                {"message", e.what()},
+                {"type", "internal_error"},
+                {"code", "internal_error"}
+            }}
+        };
+        res.status = 500;
+        res.set_content(error.dump(), "application/json");
+    } catch (...) {
+        // Unknown error
+        LOG_ERROR("Unknown error occurred");
+        json error = {
+            {"error", {
+                {"message", "Unknown error occurred"},
+                {"type", "internal_error"},
+                {"code", "unknown_error"}
+            }}
+        };
         res.status = 500;
         res.set_content(error.dump(), "application/json");
     }
@@ -1583,8 +1695,40 @@ void DFlashServer::handle_chat_completions_stream(const httplib::Request& req, h
             }
         );
 
+    } catch (const json::exception& e) {
+        // JSON parsing error
+        LOG_ERROR("Stream JSON parsing error: " + std::string(e.what()));
+        json error = {
+            {"error", {
+                {"message", std::string("Invalid JSON: ") + e.what()},
+                {"type", "invalid_request_error"},
+                {"code", "invalid_json"}
+            }}
+        };
+        res.status = 400;
+        res.set_content(error.dump(), "application/json");
     } catch (const std::exception& e) {
-        json error = {{"error", {{"message", e.what()}}}};
+        // General error
+        LOG_ERROR("Stream internal error: " + std::string(e.what()));
+        json error = {
+            {"error", {
+                {"message", e.what()},
+                {"type", "internal_error"},
+                {"code", "internal_error"}
+            }}
+        };
+        res.status = 500;
+        res.set_content(error.dump(), "application/json");
+    } catch (...) {
+        // Unknown error
+        LOG_ERROR("Stream unknown error occurred");
+        json error = {
+            {"error", {
+                {"message", "Unknown error occurred"},
+                {"type", "internal_error"},
+                {"code", "unknown_error"}
+            }}
+        };
         res.status = 500;
         res.set_content(error.dump(), "application/json");
     }
@@ -1598,6 +1742,53 @@ ChatRequest DFlashServer::parse_chat_request(const httplib::Request& req) {
     req_data.stream = body.value("stream", false);
     req_data.max_tokens = body.value("max_tokens", 50000);
 
+    // Parse temperature
+    if (body.contains("temperature")) {
+        req_data.temperature = body["temperature"];
+    }
+
+    // Parse top_p
+    if (body.contains("top_p")) {
+        req_data.top_p = body["top_p"];
+    }
+
+    // Parse top_k
+    if (body.contains("top_k")) {
+        req_data.top_k = body["top_k"];
+    }
+
+    // Parse stop
+    if (body.contains("stop")) {
+        req_data.stop = body["stop"];
+    }
+
+    // Parse stream_options
+    if (body.contains("stream_options")) {
+        req_data.stream_options = body["stream_options"];
+    }
+
+    // Parse chat_template_kwargs
+    if (body.contains("chat_template_kwargs")) {
+        req_data.chat_template_kwargs = body["chat_template_kwargs"];
+    }
+
+    // Parse tools
+    if (body.contains("tools")) {
+        req_data.tools = std::vector<ToolDef>{};
+        for (const auto& tool : body["tools"]) {
+            ToolDef tdef;
+            tdef.type = tool.value("type", "function");
+            tdef.function = tool["function"];
+            req_data.tools->push_back(tdef);
+        }
+    }
+
+    // Parse tool_choice
+    if (body.contains("tool_choice")) {
+        req_data.tool_choice = body["tool_choice"];
+    }
+
+    // Parse messages
     if (body.contains("messages")) {
         for (const auto& msg : body["messages"]) {
             ChatMessage m;
@@ -1606,12 +1797,29 @@ ChatRequest DFlashServer::parse_chat_request(const httplib::Request& req) {
                 if (msg["content"].is_string()) {
                     m.content = msg["content"];
                 }
+                // TODO: Handle content as array (for multimodal)
+            }
+            if (msg.contains("name")) {
+                m.name = msg["name"];
+            }
+            if (msg.contains("tool_call_id")) {
+                m.tool_call_id = msg["tool_call_id"];
+            }
+            if (msg.contains("tool_calls")) {
+                m.tool_calls = std::vector<ToolCall>{};
+                for (const auto& tc : msg["tool_calls"]) {
+                    ToolCall tool_call;
+                    tool_call.id = tc["id"];
+                    tool_call.type = tc.value("type", "function");
+                    tool_call.function.name = tc["function"]["name"];
+                    tool_call.function.arguments = tc["function"]["arguments"];
+                    m.tool_calls->push_back(tool_call);
+                }
             }
             req_data.messages.push_back(m);
         }
     }
 
-    // Parse other fields...
     return req_data;
 }
 
@@ -1625,15 +1833,44 @@ ChatResponse DFlashServer::build_chat_response(
     resp.created = std::time(nullptr);
     resp.model = req.model;
 
+    // Decode tokens to text
+    std::string text = tokenizer_->decode(tokens);
+
+    // Parse tool calls if tools were provided
+    std::string content = text;
+    std::vector<ToolCall> tool_calls;
+    if (req.tools.has_value() && !req.tools->empty()) {
+        ToolCallParseResult tc_result = parse_tool_calls(text, &req.tools.value());
+        content = tc_result.cleaned_content;
+
+        // Convert parsed tool calls to OpenAI format
+        for (const auto& pt : tc_result.tool_calls) {
+            ToolCall tc;
+            tc.id = pt.id;
+            tc.type = pt.type;
+            tc.function.name = pt.function.name;
+            tc.function.arguments = pt.function.arguments;
+            tool_calls.push_back(std::move(tc));
+        }
+    }
+
     ChatResponse::Choice choice;
     choice.message.role = "assistant";
-    choice.message.content = tokenizer_->decode(tokens);
-    choice.finish_reason = "stop";
+    choice.message.content = content;
+
+    // Add tool calls if present
+    if (!tool_calls.empty()) {
+        choice.message.tool_calls = std::move(tool_calls);
+        choice.finish_reason = "tool_calls";
+    } else {
+        choice.finish_reason = "stop";
+    }
+
     resp.choices.push_back(choice);
 
-    resp.usage.prompt_tokens = 0;  // TODO
+    resp.usage.prompt_tokens = 0;  // Will be set by caller
     resp.usage.completion_tokens = tokens.size();
-    resp.usage.total_tokens = 0;  // TODO
+    resp.usage.total_tokens = 0;  // Will be set by caller
 
     return resp;
 }
@@ -1885,15 +2122,62 @@ AnthropicMessagesResponse DFlashServer::build_anthropic_response(
         }
     }
 
-    // Create text content block
-    AnthropicContentBlock block;
-    block.type = "text";
-    block.text = content_text;
-    resp.content.push_back(block);
+    // Check if tools were requested and parse tool calls
+    bool has_tool_calls = areq.tools.has_value() && !areq.tools->empty();
 
-    // Set stop_reason
-    resp.stop_reason = "end_turn";  // Default
-    // TODO: Determine actual stop_reason from generation
+    if (has_tool_calls) {
+        // Convert Anthropic tools to OpenAI format for parsing
+        std::vector<ToolDef> openai_tools;
+        for (const auto& atool : areq.tools.value()) {
+            ToolDef tdef;
+            tdef.type = "function";
+            tdef.function = {
+                {"name", atool.name},
+                {"description", atool.description},
+                {"parameters", atool.input_schema}
+            };
+            openai_tools.push_back(tdef);
+        }
+
+        // Parse tool calls from text
+        ToolCallParseResult tc_result = parse_tool_calls(text, &openai_tools);
+
+        if (!tc_result.tool_calls.empty()) {
+            // Add tool_use content blocks
+            for (const auto& tc : tc_result.tool_calls) {
+                AnthropicContentBlock block;
+                block.type = "tool_use";
+                block.id = tc.id;
+                block.text = tc.function.name;  // Store name in text field
+                block.input_json = tc.function.arguments;
+                resp.content.push_back(block);
+            }
+
+            // Add text content if non-empty
+            if (!tc_result.cleaned_content.empty()) {
+                AnthropicContentBlock text_block;
+                text_block.type = "text";
+                text_block.text = tc_result.cleaned_content;
+                resp.content.insert(resp.content.begin(), text_block);
+            }
+
+            resp.stop_reason = "tool_use";
+        } else {
+            // No tool calls found, return text only
+            AnthropicContentBlock block;
+            block.type = "text";
+            block.text = content_text;
+            resp.content.push_back(block);
+            resp.stop_reason = "end_turn";
+        }
+    } else {
+        // No tools requested, return text only
+        AnthropicContentBlock block;
+        block.type = "text";
+        block.text = content_text;
+        resp.content.push_back(block);
+        resp.stop_reason = "end_turn";
+    }
 
     // Set usage
     resp.usage.input_tokens = 0;  // TODO: Get from prompt
@@ -1969,13 +2253,38 @@ void DFlashServer::handle_anthropic_messages(
             handle_anthropic_messages_impl(areq, res);
         }
 
+    } catch (const json::exception& e) {
+        // JSON parsing error
+        LOG_ERROR("Anthropic JSON parsing error: " + std::string(e.what()));
+        json error = {
+            {"type", "error"},
+            {"error", {
+                {"type", "invalid_request_error"},
+                {"message", std::string("Invalid JSON: ") + e.what()}
+            }}
+        };
+        res.status = 400;
+        res.set_content(error.dump(), "application/json");
     } catch (const std::exception& e) {
-        // Return Anthropic-style error
+        // General error
+        LOG_ERROR("Anthropic internal error: " + std::string(e.what()));
         json error = {
             {"type", "error"},
             {"error", {
                 {"type", "internal_error"},
                 {"message", std::string("Internal error: ") + e.what()}
+            }}
+        };
+        res.status = 500;
+        res.set_content(error.dump(), "application/json");
+    } catch (...) {
+        // Unknown error
+        LOG_ERROR("Anthropic unknown error occurred");
+        json error = {
+            {"type", "error"},
+            {"error", {
+                {"type", "internal_error"},
+                {"message", "Unknown error occurred"}
             }}
         };
         res.status = 500;
@@ -1999,6 +2308,10 @@ void DFlashServer::handle_anthropic_messages_impl(
 
     // Build Anthropic response
     AnthropicMessagesResponse aresp = build_anthropic_response(tokens, areq);
+
+    // Set usage
+    aresp.usage.input_tokens = static_cast<int>(prompt_tokens.size());
+    aresp.usage.output_tokens = static_cast<int>(tokens.size());
 
     // Convert to JSON
     json response_json = anthropic_response_to_json(aresp);

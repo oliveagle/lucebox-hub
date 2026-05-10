@@ -92,6 +92,7 @@ struct ChatRequest {
     int max_tokens = 50000;
     std::optional<float> temperature;
     std::optional<float> top_p;
+    std::optional<float> top_k;
     std::optional<std::vector<ToolDef>> tools;
     std::optional<nlohmann::json> tool_choice;
     std::optional<nlohmann::json> chat_template_kwargs;
@@ -255,12 +256,6 @@ public:
         const std::string& reasoning = ""
     );
 
-    // Tool call parsing
-    std::string parse_tool_calls(
-        const std::string& text,
-        const std::vector<ToolDef>* tools
-    );
-
     // Reasoning extraction
     std::pair<std::string, std::string> extract_reasoning(const std::string& text);
 
@@ -358,6 +353,10 @@ public:
     StepGraph draft_sg_;
     StepGraph proj_sg_;
     DraftFeatureMirror feature_mirror_;
+
+    // Sampling state
+    std::mt19937_64 rng_;
+    std::vector<int32_t> token_history_;  // For repetition penalty
 
     // Thread safety
     std::mutex generation_mutex_;
