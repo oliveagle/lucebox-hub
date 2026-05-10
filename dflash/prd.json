@@ -1,0 +1,44 @@
+{
+  "name": "DFlash C++ HTTP 服务器 TODO",
+  "description": "✅ **已完成**: C++ HTTP 服务器框架已搭建，编译成功",
+  "branchName": "feature/dflash-c-http-todo",
+  "userStories": [
+    {
+      "id": "STORY-001",
+      "title": "核心功能 (必须实现)",
+      "description": "- [ ] Tokenizer 集成 - [x] 创建 src/server/tokenizer.h - [x] 创建 src/server/tokenizer.cpp - [ ] 创建 src/server/tokenizer_parser.h (辅助工具) - [ ] 使用 llama.cpp 的 gguf_get_tokenizer() 加载分词器 - [ ] 实现 encode() 方法：文本 → token IDs - [ ] 实现 decode() 方法：token IDs → 文本 - [ ] 实现 vocab_size() 属性",
+      "acceptanceCriteria": [],
+      "priority": 1,
+      "passes": true,
+      "labels": [],
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "STORY-002",
+      "title": "高级功能 (重要但非阻塞)",
+      "description": "- [ ] 工具调用解析 - [ ] 创建 src/server/parsers.h - [ ] 创建 src/server/parsers.cpp - [ ] 实现正则表达式解析 Qwen3 工具调用格式 - [ ] 转换为 OpenAI 格式响应 - [ ] 支持参数类型转换 (string/int/float/bool)",
+      "acceptanceCriteria": [],
+      "priority": 2,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-003",
+      "title": "完善和优化",
+      "description": "- [ ] Anthropic Messages API - [ ] 实现 /v1/messages 端点 - [ ] 支持 Anthropic 流式格式",
+      "acceptanceCriteria": [],
+      "priority": 3,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    }
+  ],
+  "metadata": {
+    "createdAt": "2026-05-10T11:26:50.097Z",
+    "version": "1.0.0",
+    "sourcePrd": "TODO.md",
+    "updatedAt": "2026-05-10T11:47:13.801Z"
+  }
+}

@@ -338,3 +338,89 @@ if(DFLASH27B_TESTS)
         endif()
     endif()
 endif()
+
+# ─── HTTP Server (standalone, replaces Python server_tools.py) ───────
+option(DFLASH27B_HTTP_SERVER "Build standalone HTTP server" OFF)
+
+if(DFLASH27B_HTTP_SERVER)
+    # Build llama.cpp library for tokenizer support
+    # We only need the core library, not examples/tools
+    set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_WEBUI OFF CACHE BOOL "" FORCE)
+    set(LLAMA_STANDALONE OFF CACHE BOOL "" FORCE)
+    add_subdirectory(deps/llama.cpp)
+
+    # cpp-httplib header-only (from llama.cpp/vendor)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/vendor/cpp-httplib/httplib.h")
+        set(HTTPLIB_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/vendor/cpp-httplib")
+    else()
+        message(FATAL_ERROR "cpp-httplib not found. Update submodules: git submodule update --init --recursive")
+    endif()
+
+    # Check for nlohmann/json (header-only, in llama.cpp/vendor)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/vendor/nlohmann/json.hpp")
+        set(NLOHMANN_JSON_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/vendor")
+    else()
+        message(FATAL_ERROR "nlohmann/json not found. Update submodules: git submodule update --init --recursive")
+    endif()
+
+    message(STATUS "Using cpp-httplib from: ${HTTPLIB_INC_DIR}")
+    message(STATUS "Using nlohmann/json from: ${NLOHMANN_JSON_INC_DIR}")
+
+    add_executable(dflash_server
+        src/server/dflash_server.cpp
+        src/server/tokenizer.cpp
+        src/server/tokenizer_parser.cpp
+        ${HTTPLIB_INC_DIR}/httplib.cpp
+    )
+
+    set_target_properties(dflash_server PROPERTIES
+        CUDA_ARCHITECTURES "${_dflash27b_archs}"
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+    )
+
+    target_compile_definitions(dflash_server PRIVATE
+        CPPHTTPLIB_HEADER_ONLY=ON
+    )
+
+    target_include_directories(dflash_server PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${HTTPLIB_INC_DIR}
+        ${NLOHMANN_JSON_INC_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/common
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/ggml/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/ggml/src
+        ${CUDAToolkit_INCLUDE_DIRS}
+    )
+
+    # cpp-httplib is header-only but needs OS-specific includes
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(dflash_server PRIVATE pthread)
+    endif()
+
+    target_link_libraries(dflash_server PRIVATE
+        dflash27b
+        ggml
+        ggml-cuda
+        ggml-base
+        llama
+        CUDA::cudart
+    )
+
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(dflash_server PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+
+    # Install target
+    install(TARGETS dflash_server DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    message(STATUS "HTTP server enabled. Build with: cmake --build build --target dflash_server")
+    message(STATUS "Run with: ./build/dflash_server --target models/Qwen3.6-27B-Q4_K_M.gguf --draft models/draft/model.safetensors")
+endif()

@@ -38,8 +38,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware import Middleware
+from fastapi.middleware.cors import CORSMiddleware
 
 from _prefill_hook import (
     PrefillConfig, add_cli_flags, config_from_args,
@@ -100,7 +102,7 @@ class ChatRequest(BaseModel):
     model: str = MODEL_NAME
     messages: list[ChatMessage]
     stream: bool = False
-    max_tokens: int = 512
+    max_tokens: int = 50000
     temperature: float | None = None
     top_p: float | None = None
     tools: list[ToolDef] | None = None
@@ -323,7 +325,8 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
               prefill_cfg: PrefillConfig | None = None,
               drafter_tokenizer: AutoTokenizer | None = None,
               prefix_cache_slots: int = 4,
-              prefill_cache_slots: int = 4) -> FastAPI:
+              prefill_cache_slots: int = 4,
+              reasoning_reserve: int = 8000) -> FastAPI:
     import asyncio
     import logging
     app = FastAPI(title="Luce DFlash OpenAI server (tool-aware)")
@@ -336,8 +339,21 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
            f"--max-ctx={max_ctx}",
            f"--stream-fd={w_pipe}"]
     daemon_proc = subprocess.Popen(cmd, pass_fds=(w_pipe,), stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE, bufsize=0)
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
     os.close(w_pipe)
+
+    # 启动一个后台线程读取 daemon stderr 并记录
+    import threading
+    def _log_stderr():
+        import sys
+        while True:
+            line = daemon_proc.stderr.readline()
+            if not line:
+                break
+            line_str = line.decode('utf-8', errors='replace').rstrip('\n\r')
+            print(f"[DAEMON STDERR] {line_str}", flush=True)
+            logger.warning(f"[DAEMON STDERR] {line_str}")
+    threading.Thread(target=_log_stderr, daemon=True).start()
 
     bus = DaemonStdoutBus(daemon_proc.stdout)
     # Mirror server.py: resolve effective KV-K type + FA window from env so
@@ -374,6 +390,76 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
         bus.start(asyncio.get_running_loop())
         await prefix_cache.startup_sync()
 
+    # 请求日志中间件
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        import time
+        import json
+        start_time = time.time()
+        path = request.url.path
+        method = request.method
+
+        # 记录请求基本信息
+        logger.info(f"→ {method} {path} from {request.client.host if request.client else 'unknown'}")
+
+        # 对于 POST 请求，尝试记录请求体（非流式）
+        if method == "POST":
+            try:
+                body = await request.body()
+                if body:
+                    # 尝试解析 JSON，如果失败则记录原始内容
+                    try:
+                        body_json = json.loads(body.decode())
+                        # 记录关键字段
+                        msgs = body_json.get("messages", [])
+                        logger.info(f"  Request: model={body_json.get('model')}, "
+                                   f"messages={len(msgs)}, stream={body_json.get('stream')}, "
+                                   f"max_tokens={body_json.get('max_tokens')}")
+                        # 记录最后一条消息的长度
+                        if msgs:
+                            last_msg = msgs[-1]
+                            content_len = len(last_msg.get("content", ""))
+                            logger.info(f"  Last message: role={last_msg.get('role')}, content_length={content_len}")
+                    except:
+                        logger.info(f"  Request body: {body[:500]}")
+            except Exception as e:
+                logger.info(f"  (Failed to read body: {e})")
+
+        try:
+            response = await call_next(request)
+            duration = time.time() - start_time
+            # 记录响应状态
+            log_msg = f"← {method} {path} - Status: {response.status_code} - {duration:.3f}s"
+            if response.status_code >= 400:
+                logger.warning(log_msg)
+            else:
+                logger.info(log_msg)
+            return response
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"✗ {method} {path} - Error: {e} - {duration:.3f}s")
+            raise
+
+    # 全局异常处理器
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        import traceback
+        logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}\n{traceback.format_exc()}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": f"Internal server error: {str(exc)}"},
+        )
+
+    from fastapi.exceptions import RequestValidationError
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        logger.error(f"Validation error on {request.method} {request.url.path}: {exc}")
+        return JSONResponse(
+            status_code=422,
+            content={"detail": exc.errors()},
+        )
+
     @app.get("/v1/models")
     def list_models():
         return {"object": "list",
@@ -398,6 +484,13 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
         if last_user is None or not isinstance(last_user.content, str):
             return prompt_bin, prompt_len, started_in_thinking
 
+        # ── 额外检查：用户消息太短则不压缩 ────────────────────────────
+        # 避免压缩太短的消息导致 drafter 返回空结果或垃圾数据
+        user_msg_tokens = len(drafter_tokenizer.encode(last_user.content, add_special_tokens=False))
+        MIN_USER_MSG_TOKENS = 100
+        if user_msg_tokens < MIN_USER_MSG_TOKENS:
+            return prompt_bin, prompt_len, started_in_thinking
+
         compressed_text = compress_text_via_daemon(
             daemon_stdin=daemon_proc.stdin,
             r_pipe=r_pipe,
@@ -406,6 +499,13 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
             prompt_text=last_user.content,
             skip_park=prefill_cfg.skip_park,
         )
+
+        # ── 诊断：检查压缩结果 ─────────────────────────────────
+        if not compressed_text or not compressed_text.strip():
+            logger.warning(f"[Prefill] compression returned empty! "
+                          f"original_len={len(last_user.content)}, compressed_len={len(compressed_text)}")
+            print(f"[PREFILL WARNING] compression returned empty, using original prompt")
+            return prompt_bin, prompt_len, started_in_thinking
 
         new_msgs = []
         compressed_emitted = False
@@ -517,6 +617,22 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
 
     @app.post("/v1/chat/completions")
     async def chat_completions(req: ChatRequest):
+        # 记录请求摘要
+        msgs_count = len(req.messages) if req.messages else 0
+        separator = "=" * 60
+        print(f"\n{separator}")
+        print(f"[CHAT REQUEST] model={req.model or 'default'}, messages={msgs_count}, "
+              f"max_tokens={req.max_tokens}, stream={req.stream}, tools={len(req.tools) if req.tools else 0}")
+        # 记录每条消息的 role 和内容长度
+        if req.messages:
+            for i, m in enumerate(req.messages):
+                content_len = len(m.content) if m.content else 0
+                preview = m.content[:100] if m.content else ""
+                print(f"  msg[{i}] role={m.role}, content_len={content_len}, preview={preview!r}")
+        print(f"{separator}")
+        logger.info(f"[Chat Request] model={req.model or 'default'}, messages={msgs_count}, "
+                    f"max_tokens={req.max_tokens}, stream={req.stream}, tools={len(req.tools) if req.tools else 0}")
+
         prompt_bin, started_in_thinking = _tokenize_prompt(req)
         prompt_len = prompt_bin.stat().st_size // 4
 
@@ -548,8 +664,9 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
                 started_in_thinking = False  # cached result: no think prefill
             else:
                 # pflash compress hook (no-op when off / has tools)
-                new_bin, prompt_len, started_in_thinking = await asyncio.to_thread(
-                    _maybe_compress_tool_chat, req, prompt_bin, prompt_len, started_in_thinking)
+                # ── 必须在锁内同步执行压缩，避免竞态条件 ─────────────────
+                new_bin, prompt_len, started_in_thinking = _maybe_compress_tool_chat(
+                    req, prompt_bin, prompt_len, started_in_thinking)
                 compression_fired = (new_bin != prompt_bin)
                 cur_bin = new_bin
                 if compression_fired:
@@ -563,7 +680,28 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
 
         available_gen = max_ctx - prompt_len - 20
         gen_len = min(req.max_tokens, available_gen)
+
+        # ── 智能调整：thinking 模式下自动增加 gen_len ───────────────────
+        # 检查是否启用 thinking 模式
+        thinking_enabled = True
+        if req.chat_template_kwargs:
+            thinking_enabled = req.chat_template_kwargs.get("enable_thinking", True)
+
+        if thinking_enabled and started_in_thinking:
+            # 在 thinking 模式下，为推理预留额外 token
+            # 如果用户设置的 max_tokens 太小，自动增加
+            min_for_thinking = reasoning_reserve
+            if gen_len < min_for_thinking:
+                new_gen_len = min(min_for_thinking, available_gen)
+                if new_gen_len > gen_len:
+                    print(f"[AUTO-ADJUST] thinking mode: gen_len {gen_len} -> {new_gen_len} "
+                          f"(reserved={reasoning_reserve}, available={available_gen})")
+                    logger.info(f"[Auto-Adjust] thinking mode: gen_len {gen_len} -> {new_gen_len}, "
+                                f"reserved={reasoning_reserve}")
+                    gen_len = new_gen_len
         if gen_len <= 0:
+            print(f"[400] Prompt too long: prompt_len={prompt_len}, max_ctx={max_ctx}, available_gen={available_gen}, req.max_tokens={req.max_tokens}")
+            logger.warning(f"Prompt too long: prompt_len={prompt_len}, max_ctx={max_ctx}, available_gen={available_gen}, req.max_tokens={req.max_tokens}")
             if full_hit is None:
                 try: cur_bin.unlink()
                 except Exception: pass
@@ -589,6 +727,7 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
 
         # Non-streaming: collect, parse, return.
         async with daemon_lock:
+            print(f"[DEBUG] chat_completions: prompt_len={prompt_len}, gen_len={gen_len}, full_hit={full_hit is not None}")
             if full_hit is not None:
                 cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}\n"
                 snap_prep = None
@@ -629,23 +768,105 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
             try: prompt_bin.unlink()
             except Exception: pass
 
+        print(f"[DEBUG] tokens from daemon: {len(tokens)} tokens")
         text = tokenizer.decode(tokens, skip_special_tokens=True)
+
+        # ── 诊断：记录原始解码文本的特征 ──────────────────────────
+        has_think_open = "<think>" in text
+        has_think_close = "</think>" in text
+        think_open_pos = text.find("<think>")
+        think_close_pos = text.find("</think>")
+        # 如果只有 <think> 没有 </think>，说明推理被截断
+        truncated_reasoning = has_think_open and not has_think_close
+        # 如果 </think> 在文本末尾附近，可能刚结束推理就耗尽了 token
+        think_near_end = has_think_close and (len(text) - think_close_pos < 50)
+        text_len = len(text)
+        print(f"[DIAG] raw_text: len={text_len}, has_think_open={has_think_open}, "
+              f"has_think_close={has_think_close}, truncated_reasoning={truncated_reasoning}, "
+              f"think_near_end={think_near_end}")
+        if has_think_close:
+            after_think = text[think_close_pos + len("</think>"):]
+            print(f"[DIAG] after </think>: len={len(after_think)}, content={after_think[:500]!r}")
+        if truncated_reasoning:
+            # 截断时记录推理文本最后部分
+            print(f"[DIAG] TRUNCATED REASONING - last 200 chars of raw: {text[-200:]!r}")
+        logger.info(f"[Diagnostic] raw_text_len={text_len}, has_think_open={has_think_open}, "
+                    f"has_think_close={has_think_close}, truncated_reasoning={truncated_reasoning}, "
+                    f"think_near_end={think_near_end}")
+
         # User-supplied stop sequences: trim at first match.
         stops = normalize_stop(req.stop)
         if stops:
             i = first_stop_match(text, stops)
             if i != -1:
                 text = text[:i]
-        # Respect enable_thinking from chat_template_kwargs when deciding how
-        # to treat a `</think>`-less response (see parse_reasoning docstring).
-        thinking_enabled = True
-        if req.chat_template_kwargs:
-            thinking_enabled = req.chat_template_kwargs.get("enable_thinking", True)
+        # thinking_enabled was already set in the auto-adjust block above
         cleaned, tool_calls = parse_tool_calls(text, tools=req.tools)
         cleaned, reasoning = parse_reasoning(cleaned, thinking_enabled=thinking_enabled)
 
-        msg: dict = {"role": "assistant"}
+        # ── 诊断：parse_reasoning 结果 ──────────────────────────
+        print(f"[DIAG] parse_reasoning result: reasoning_len={len(reasoning) if reasoning else 0}, "
+              f"content_len={len(cleaned) if cleaned else 0}")
+        if reasoning and not cleaned:
+            # 有推理无内容时需要额外关注
+            # 检查是否是模板没有添加 <think> 标签
+            print(f"[DIAG] WARNING: reasoning present but NO content generated!")
+            print(f"[DIAG] reasoning (last 500 chars): {reasoning[-500:]!r}")
+            logger.warning(f"[Diagnostic] reasoning_only: reasoning_len={len(reasoning)}, "
+                          f"content_empty=True, finish_reason will be 'reasoning_stop'")
+
+        # Determine finish_reason
         finish_reason = "stop"
+        if reasoning:
+            finish_reason = "end_turn"
+
+        # 记录完整响应文本
+        separator = "=" * 60
+        print(f"\n{separator}")
+        print(f"[CHAT RESPONSE] prompt_len={prompt_len}, gen_tokens={len(tokens)}, "
+              f"reasoning_len={len(reasoning) if reasoning else 0}, "
+              f"content_len={len(cleaned) if cleaned else 0}, "
+              f"tool_calls={len(tool_calls) if tool_calls else 0}")
+        if reasoning:
+            print(f"[CHAT RESPONSE] reasoning: {reasoning[:500]}")
+        if cleaned:
+            print(f"[CHAT RESPONSE] content: {cleaned[:500]}")
+        if tool_calls:
+            for tc in tool_calls:
+                print(f"[CHAT RESPONSE] tool_call: {tc.get('function', {}).get('name', '?')} args={tc.get('function', {}).get('arguments', '')[:200]}")
+        print(f"{separator}\n")
+
+        logger.info(f"[Response] prompt_len={prompt_len}, gen_tokens={len(tokens)}, "
+                    f"reasoning_len={len(reasoning) if reasoning else 0}, "
+                    f"content_len={len(cleaned) if cleaned else 0}, "
+                    f"tool_calls={len(tool_calls) if tool_calls else 0}, "
+                    f"finish_reason={finish_reason if not reasoning else 'reasoning_stop'}")
+        if reasoning:
+            logger.info(f"[Response] reasoning_content (truncated): {reasoning[:500]}")
+        if cleaned:
+            logger.info(f"[Response] content (truncated): {cleaned[:500]}")
+        if tool_calls:
+            for tc in tool_calls:
+                logger.info(f"[Response] tool_call: {tc.get('function', {}).get('name', '?')} args={tc.get('function', {}).get('arguments', '')[:200]}")
+
+        # ── 诊断：无 content 时输出解决方案 ──────────────────────────
+        if reasoning and not cleaned and not tool_calls:
+            logger.warning(f"[DIAGNOSTIC] Model returned reasoning but NO content or tool_calls!")
+            logger.warning(f"[DIAGNOSTIC] gen_tokens={len(tokens)}, reasoning_len={len(reasoning)}")
+            logger.warning(f"[DIAGNOSTIC] If reasoning consumed all gen_tokens, increase max_tokens")
+            logger.warning(f"[DIAGNOSTIC] To disable thinking: add chat_template_kwargs={{\"enable_thinking\": false}} to request")
+            print(f"\n[DIAGNOSTIC] === No content returned, only reasoning ===")
+            print(f"  gen_tokens: {len(tokens)}")
+            print(f"  reasoning_len: {len(reasoning)} tokens")
+            print(f"  content_len: 0")
+            print(f"  SUGGESTIONS:")
+            print(f"    1. Client-side: increase max_tokens (current={req.max_tokens})")
+            print(f"    2. Client-side: disable thinking with chat_template_kwargs={{'enable_thinking': false}}")
+            print(f"    3. Check if reasoning output is too long (last 200 chars: {reasoning[-200:]!r})")
+            print(f"========================================\n")
+
+        msg: dict = {"role": "assistant"}
+        # finish_reason already initialized above, remove redundant assignment
         if reasoning:
             msg["reasoning_content"] = reasoning
         if tool_calls:
@@ -687,6 +908,7 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
                                   "finish_reason": finish}]}
 
         async def sse() -> AsyncIterator[str]:
+            print(f"[DEBUG] stream: prompt_len={prompt_len}, gen_len={gen_len}")
             async with lock:
                 if full_hit is not None:
                     # Full-cache hit: RESTORE with cached cur_bin.
@@ -862,6 +1084,24 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
                 elif snap_prep:
                     prefix_cache.confirm_inline_snap(*snap_prep, prompt_ids)
 
+                # 记录流式响应完成
+                separator = "=" * 60
+                print(f"\n{separator}")
+                print(f"[STREAM RESPONSE] prompt_len={prompt_len}, completion_tokens={completion_tokens}, "
+                      f"finish_reason={finish_reason}, mode={mode if mode else 'unknown'}")
+                # ── 诊断：流式结束在 reasoning 模式 ──────────────────────────
+                if mode == "reasoning" and not window:
+                    # 流式结束时还在 reasoning 模式，且没有剩余内容
+                    print(f"[DIAGNOSTIC] Stream ended in reasoning mode with no content!")
+                    print(f"  completion_tokens: {completion_tokens}")
+                    print(f"  SUGGESTIONS:")
+                    print(f"    1. Increase max_tokens (current={req.max_tokens})")
+                    print(f"    2. Disable thinking: chat_template_kwargs={{'enable_thinking': false}}")
+                    logger.warning(f"[Stream Diagnostic] Ended in reasoning mode, tokens={completion_tokens}")
+                print(f"{separator}\n")
+                logger.info(f"[Stream Response] prompt_len={prompt_len}, completion_tokens={completion_tokens}, "
+                            f"finish_reason={finish_reason}, mode={mode if mode else 'unknown'}")
+
                 yield f"data: {json.dumps(chunk({}, finish=finish_reason))}\n\n"
                 if include_usage:
                     usage_chunk = {
@@ -967,6 +1207,20 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
 
     @app.post("/v1/messages")
     async def anthropic_messages(req: AnthropicMessagesRequest):
+        # 记录请求摘要
+        msgs_count = len(req.messages) if req.messages else 0
+        last_msg = req.messages[-1] if req.messages else None
+        last_content = ""
+        if last_msg:
+            if isinstance(last_msg.content, str):
+                last_content = last_msg.content[:200]
+            elif isinstance(last_msg.content, list):
+                last_content = str(last_msg.content[:2])
+        logger.info(f"[Anthropic Request] model={req.model}, messages={msgs_count}, "
+                    f"max_tokens={req.max_tokens}, stream={req.stream}")
+        if last_msg:
+            logger.info(f"[Anthropic Request] last_msg: role={last_msg.role}, content={last_content!r}")
+
         prompt_bin, prompt_len, raw_msgs = _tokenize_anthropic(req)
 
         # Read raw prompt_ids BEFORE compression (for full-cache key).
@@ -988,8 +1242,8 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
                 cur_ids = None
                 prompt_len = cached_cur_ids_len
             else:
-                new_bin, new_len = await asyncio.to_thread(
-                    _maybe_compress_anthropic, prompt_bin, prompt_len, raw_msgs)
+                # ── 必须在锁内同步执行压缩，避免竞态条件 ─────────────────
+                new_bin, new_len = _maybe_compress_anthropic(prompt_bin, prompt_len, raw_msgs)
                 compression_fired = (new_bin != prompt_bin)
                 cur_bin = new_bin
                 prompt_len = new_len
@@ -1004,6 +1258,8 @@ def build_app(target: Path, draft: Path, bin_path: Path, budget: int,
         available_gen = max_ctx - prompt_len - 20
         gen_len = min(req.max_tokens, available_gen)
         if gen_len <= 0:
+            print(f"[400] Prompt too long: prompt_len={prompt_len}, max_ctx={max_ctx}, available_gen={available_gen}, req.max_tokens={req.max_tokens}")
+            logger.warning(f"Prompt too long: prompt_len={prompt_len}, max_ctx={max_ctx}, available_gen={available_gen}, req.max_tokens={req.max_tokens}")
             if full_hit is None:
                 try: cur_bin.unlink()
                 except Exception: pass
@@ -1213,12 +1469,12 @@ def main():
     # prompt+gen length (see issue #10). Default 16384 fits most API
     # workloads without the 20×+ slowdown users hit with --max-ctx=131072
     # on short requests. Bump via --max-ctx for long-context serving.
-    ap.add_argument("--max-ctx", type=int, default=16384,
-                    help="Maximum context length (default: 16384; oversizing "
+    ap.add_argument("--max-ctx", type=int, default=131072,
+                    help="Maximum context length (default: 131072; oversizing "
                          "this, e.g. 131072 on short prompts, can slow "
                          "attention 20×+ until issue #10 is fixed)")
     ap.add_argument("--kv-f16", action="store_true",
-                    help="Force F16 KV cache. When --max-ctx > 6144 the server "
+                    help="Force F16 KV cache. When --max-ctx > 48K the server "
                          "auto-enables TQ3_0 KV to fit; pass --kv-f16 to opt out.")
     ap.add_argument("--cache-type-k", "--ctk", dest="cache_type_k", default=None,
                     choices=["f16","bf16","q4_0","q4_1","q5_0","q5_1","q8_0","tq3_0"],
@@ -1241,6 +1497,11 @@ def main():
                     help="Number of full-compress-result cache slots (Option 3). "
                          "Only active when --prefill-compression is enabled. "
                          "prefix-cache-slots + prefill-cache-slots must not exceed 8.")
+    ap.add_argument("--reasoning-reserve", type=int, default=8000,
+                    help="Extra tokens to reserve when thinking is enabled. "
+                    "If enable_thinking=true and max_tokens < reasoning_reserve, "
+                    "server will auto-increase max_tokens by this amount. "
+                    "Default: 8000 (prevents reasoning-only responses).")
     args = ap.parse_args()
     prefill_cfg = config_from_args(args, DEFAULT_PREFILL_DRAFTER)
 
@@ -1250,7 +1511,8 @@ def main():
         os.environ["DFLASH27B_KV_K"] = args.cache_type_k
     if args.cache_type_v:
         os.environ["DFLASH27B_KV_V"] = args.cache_type_v
-    if args.max_ctx > 6144 and not args.kv_f16 and not args.cache_type_k and not args.cache_type_v:
+    # TQ3_0 threshold: enable when max_ctx > 48K (F16 fits ~48K with current memory)
+    if args.max_ctx > 49152 and not args.kv_f16 and not args.cache_type_k and not args.cache_type_v:
         os.environ.setdefault("DFLASH27B_KV_TQ3", "1")
 
     if args.fa_window is not None:
@@ -1292,7 +1554,7 @@ def main():
         # 默认日志文件路径
         logs_dir = ROOT / "logs"
         logs_dir.mkdir(exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H")
         args.log_file = str(logs_dir / f"server_{timestamp}.log")
 
     logger = setup_logging(args.log_file)
@@ -1324,6 +1586,18 @@ def main():
     else:
         print("  pflash = off")
     print(f"  日志文件: {args.log_file}")
+    app = build_app(bin_path=args.bin,
+                     target=args.target,
+                     draft=draft,
+                     budget=args.budget,
+                     max_ctx=args.max_ctx,
+                     tokenizer=tokenizer,
+                     stop_ids=stop_ids,
+                     prefill_cfg=prefill_cfg,
+                     drafter_tokenizer=drafter_tokenizer,
+                     prefix_cache_slots=args.prefix_cache_slots,
+                     prefill_cache_slots=args.prefill_cache_slots,
+                     reasoning_reserve=args.reasoning_reserve)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

@@ -66,6 +66,11 @@ class PrefillConfig:
         return self.mode != "off"
 
     def should_compress(self, prompt_token_count: int) -> bool:
+        # ── 最小压缩阈值：避免压缩太短的请求 ────────────────────────
+        # 压缩需要至少 100 tokens，否则 drafter 无法有效工作
+        MIN_TOKENS_FOR_COMPRESS = 100
+        if prompt_token_count < MIN_TOKENS_FOR_COMPRESS:
+            return False
         if self.mode == "always":
             return True
         if self.mode == "auto":
@@ -147,6 +152,11 @@ def compress_text_via_daemon(
     if isinstance(drafter_ids[0], list):  # some tokenizers return [[...]]
         drafter_ids = drafter_ids[0]
 
+    import logging
+    logger = logging.getLogger("server_tools")
+    logger.info(f"[Prefill] compressing: input_len={len(prompt_text)} chars, "
+                f"drafter_tokens={len(drafter_ids)}, keep_ratio={cfg.keep_ratio}")
+
     # 2) write drafter ids to a tempfile
     fd, path = tempfile.mkstemp(suffix=".bin")
     try:
@@ -166,6 +176,9 @@ def compress_text_via_daemon(
         daemon_stdin.flush()
         compressed_ids = _drain_until_sentinel(r_pipe)
 
+        logger.info(f"[Prefill] compress result: {len(compressed_ids)} tokens "
+                    f"(ratio={len(compressed_ids)/len(drafter_ids) if drafter_ids else 0:.2%})")
+
         if not skip_park:
             # 5) free drafter weights + BSA scratch, then restore target + draft
             _send_and_ack(daemon_stdin, r_pipe, "free drafter\n")
@@ -176,4 +189,9 @@ def compress_text_via_daemon(
         except Exception: pass
 
     # 6) decode compressed drafter ids back to text for re-tokenisation by target
-    return drafter_tokenizer.decode(compressed_ids, skip_special_tokens=True)
+    compressed_text = drafter_tokenizer.decode(compressed_ids, skip_special_tokens=True)
+    logger.info(f"[Prefill] decoded: {len(compressed_text)} chars")
+    if not compressed_text or not compressed_text.strip():
+        logger.warning(f"[Prefill] WARNING: compressed text is empty! "
+                      f"compressed_ids={len(compressed_ids)}")
+    return compressed_text
