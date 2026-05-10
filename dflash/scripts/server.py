@@ -687,7 +687,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             pass
         return new_bin, new_ids
 
-    def _token_stream(r, n_gen):
+    def _token_stream(r, n_gen, timing=None):
         generated = 0
         hit_stop = False
         while True:
@@ -697,6 +697,8 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             tok_id = struct.unpack("<i", b)[0]
             if tok_id == -1:
                 break
+            if timing and timing.get("t_first_tok") is None:
+                timing["t_first_tok"] = time.monotonic()
             if hit_stop:
                 continue
             if tok_id in stop_ids:
@@ -706,6 +708,8 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             yield tok_id
             if generated >= n_gen:
                 hit_stop = True
+        if timing:
+            timing["t_last_tok"] = time.monotonic()
 
     # FIX 6: _collect_tokens_sync — non-streaming paths previously called
     # list(_token_stream(...)) directly (blocking the event loop) or used
@@ -713,11 +717,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
     # (risking a deadlock if the threadpool stalled). Using run_in_executor
     # offloads the blocking os.read loop to a thread without holding any
     # asyncio primitive across the thread boundary.
-    async def _collect_tokens_sync(r, n_gen) -> list[int]:
+    async def _collect_tokens_sync(r, n_gen, timing=None) -> list[int]:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: list(_token_stream(r, n_gen)))
+        return await loop.run_in_executor(None, lambda: list(_token_stream(r, n_gen, timing)))
 
-    async def _astream_tokens(r, n_gen):
+    async def _astream_tokens(r, n_gen, timing=None):
         generated = 0
         hit_stop = False
         loop = asyncio.get_running_loop()
@@ -728,6 +732,8 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             tok_id = struct.unpack("<i", b)[0]
             if tok_id == -1:
                 break
+            if timing and timing.get("t_first_tok") is None:
+                timing["t_first_tok"] = time.monotonic()
             if hit_stop:
                 continue
             if tok_id in stop_ids:
@@ -737,28 +743,59 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             yield tok_id
             if generated >= n_gen:
                 hit_stop = True
+        if timing:
+            timing["t_last_tok"] = time.monotonic()
 
     # FIX 7: _write_cmd helper — centralises stdin write+flush and guards
     # against a dead daemon so callers get a clean 503 instead of a hang.
-    def _write_cmd(cmd_line: str):
+    def _write_cmd(cmd_line: str, timing=None):
         if daemon_proc.poll() is not None:
             raise RuntimeError("dflash daemon has exited unexpectedly")
         if lazy_draft:
             log.debug("lazy-draft: unpark draft before generate")
+            t = time.monotonic()
             daemon_proc.stdin.write(b"unpark draft\n")
             daemon_proc.stdin.flush()
             _drain_until_sentinel(r_pipe)
+            if timing is not None:
+                timing["unpark"] = time.monotonic() - t
         daemon_proc.stdin.write(cmd_line.encode("utf-8"))
         daemon_proc.stdin.flush()
+        if timing is not None:
+            timing["t_cmd_sent"] = time.monotonic()
 
-    def _park_draft_if_lazy():
+    def _park_draft_if_lazy(timing=None):
         """Park decode draft to free ~3.3 GB VRAM. Call after tokens consumed."""
         if not lazy_draft:
             return
         log.debug("lazy-draft: park draft after generate")
+        t = time.monotonic()
         daemon_proc.stdin.write(b"park draft\n")
         daemon_proc.stdin.flush()
         _drain_until_sentinel(r_pipe)
+        if timing is not None:
+            timing["park"] = time.monotonic() - t
+
+    def _timing_summary(timing: dict, out_tokens: int) -> str:
+        """Format timing breakdown for log lines."""
+        parts = []
+        if "compress" in timing:
+            parts.append(f"compress={timing['compress']:.1f}s")
+        if "unpark" in timing:
+            parts.append(f"unpark={timing['unpark']:.1f}s")
+        t_cmd = timing.get("t_cmd_sent")
+        t_first = timing.get("t_first_tok")
+        t_last = timing.get("t_last_tok")
+        if t_cmd and t_first:
+            parts.append(f"prefill={t_first - t_cmd:.1f}s")
+        if t_first and t_last and out_tokens > 1:
+            decode_s = t_last - t_first
+            decode_toks = out_tokens - 1  # first token is end of prefill
+            dtps = decode_toks / decode_s if decode_s > 0 else 0.0
+            parts.append(f"decode={decode_s:.1f}s({dtps:.1f}tok/s)")
+        if "park" in timing:
+            parts.append(f"park={timing['park']:.1f}s")
+        return "  ".join(parts)
 
     def _build_cmd_line(req, cur_bin, cur_ids, gen_len, prefix_cache,
                         prompt_ids, full_snap_prep_ref: list,
@@ -819,6 +856,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             async def sse() -> AsyncIterator[str]:
                 nonlocal started_in_thinking
                 async with daemon_lock:
+                    timing = {}
                     full_snap_prep_ref = [None]
                     snap_prep = None
 
@@ -841,9 +879,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                             return
                         cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}" + _samp_suffix(req) + "\n"
                     else:
+                        t_compress = time.monotonic()
                         cur_bin, cur_ids = await asyncio.to_thread(
                             _maybe_compress, raw_msgs, prompt_bin, prompt_ids,
                             req.chat_template_kwargs)
+                        timing["compress"] = time.monotonic() - t_compress
                         prompt_len = len(cur_ids)
                         gen_len = _gen_len_for(prompt_len, req.max_tokens)
                         if gen_len <= 0:
@@ -863,7 +903,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
 
                     # FIX 7: guard against dead daemon
                     try:
-                        _write_cmd(cmd_line)
+                        _write_cmd(cmd_line, timing)
                     except RuntimeError as e:
                         yield f"data: {json.dumps({'error': str(e)})}\n\n"
                         yield "data: [DONE]\n\n"
@@ -904,7 +944,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         return f"data: {json.dumps(chunk({kind: text}))}\n\n"
 
                     try:
-                        async for tok_id in _astream_tokens(r_pipe, gen_len):
+                        async for tok_id in _astream_tokens(r_pipe, gen_len, timing):
                             completion_tokens += 1
                             piece = tokenizer.decode([tok_id])
                             window += piece
@@ -982,7 +1022,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                             if full_hit is None:
                                 try: cur_bin.unlink()
                                 except Exception: pass
-                            _park_draft_if_lazy()
+                            _park_draft_if_lazy(timing)
                             return
 
                         # Flush remaining
@@ -1027,7 +1067,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
                     elif snap_prep:
                         prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
-                    _park_draft_if_lazy()
+                    _park_draft_if_lazy(timing)
 
                     yield f"data: {json.dumps(chunk({}, finish=finish_reason))}\n\n"
                     if include_usage:
@@ -1043,9 +1083,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     elapsed = time.monotonic() - t0
                     tok_s = completion_tokens / elapsed if elapsed > 0 else 0.0
                     log.info(
-                        "chat DONE %s  in=%d out=%d  %.1fs  %.1f tok/s  finish=%s",
+                        "chat DONE %s  in=%d out=%d  %.1fs  %.1f tok/s  finish=%s  %s",
                         completion_id, prompt_len, completion_tokens,
                         elapsed, tok_s, finish_reason,
+                        _timing_summary(timing, completion_tokens),
                     )
                     yield "data: [DONE]\n\n"
 
@@ -1053,6 +1094,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
 
         # Non-streaming
         async with daemon_lock:
+            timing = {}
             full_snap_prep_ref = [None]
             snap_prep = None
 
@@ -1071,9 +1113,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         status_code=400)
                 cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}" + _samp_suffix(req) + "\n"
             else:
+                t_compress = time.monotonic()
                 cur_bin, cur_ids = await asyncio.to_thread(
                     _maybe_compress, raw_msgs, prompt_bin, prompt_ids,
                             req.chat_template_kwargs)
+                timing["compress"] = time.monotonic() - t_compress
                 prompt_len = len(cur_ids)
                 gen_len = _gen_len_for(prompt_len, req.max_tokens)
                 if gen_len <= 0:
@@ -1088,12 +1132,12 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     prompt_ids, full_snap_prep_ref, compression_fired)
 
             try:
-                _write_cmd(cmd_line)
+                _write_cmd(cmd_line, timing)
             except RuntimeError as e:
                 return JSONResponse({"detail": str(e)}, status_code=503)
 
             # FIX 6: use run_in_executor instead of list() blocking event loop
-            tokens = await _collect_tokens_sync(r_pipe, gen_len)
+            tokens = await _collect_tokens_sync(r_pipe, gen_len, timing)
 
             full_snap_prep = full_snap_prep_ref[0]
             if full_snap_prep is not None:
@@ -1101,7 +1145,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
             elif snap_prep:
                 prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
-            _park_draft_if_lazy()
+            _park_draft_if_lazy(timing)
 
         if full_hit is None:
             try: cur_bin.unlink()
@@ -1142,9 +1186,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         elapsed = time.monotonic() - t0
         tok_s = len(tokens) / elapsed if elapsed > 0 else 0.0
         log.info(
-            "chat DONE %s  in=%d out=%d  %.1fs  %.1f tok/s  finish=%s",
+            "chat DONE %s  in=%d out=%d  %.1fs  %.1f tok/s  finish=%s  %s",
             completion_id, prompt_len, len(tokens),
             elapsed, tok_s, finish_reason,
+            _timing_summary(timing, len(tokens)),
         )
         return JSONResponse({
             "id": completion_id,
@@ -1184,6 +1229,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             async def sse() -> AsyncIterator[str]:
                 nonlocal started_in_thinking
                 async with daemon_lock:
+                    timing = {}
                     full_snap_prep_ref = [None]
                     snap_prep = None
 
@@ -1204,9 +1250,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                             return
                         cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}" + _samp_suffix(req) + "\n"
                     else:
+                        t_compress = time.monotonic()
                         cur_bin, cur_ids = await asyncio.to_thread(
                             _maybe_compress, raw_msgs, prompt_bin, prompt_ids,
                             req.chat_template_kwargs)
+                        timing["compress"] = time.monotonic() - t_compress
                         prompt_len = len(cur_ids)
                         gen_len = min(req.max_tokens, max_ctx - prompt_len - 20)
                         if gen_len <= 0:
@@ -1234,7 +1282,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
 
                     try:
-                        _write_cmd(cmd_line)
+                        _write_cmd(cmd_line, timing)
                     except RuntimeError as e:
                         yield f"event: error\ndata: {json.dumps({'type':'error','error':{'type':'server_error','message':str(e)}})}\n\n"
                         return
@@ -1250,7 +1298,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         block["text"] = ""
                     yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': block_index, 'content_block': block})}\n\n"
                     try:
-                        async for tok_id in _astream_tokens(r_pipe, gen_len):
+                        async for tok_id in _astream_tokens(r_pipe, gen_len, timing):
                             out_tokens += 1
                             outputs, window, mode = consume_stream_piece(
                                 window, mode, tokenizer.decode([tok_id]))
@@ -1290,7 +1338,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
                     elif snap_prep:
                         prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
-                    _park_draft_if_lazy()
+                    _park_draft_if_lazy(timing)
 
                     yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': block_index})}\n\n"
                     msg_delta = {
@@ -1305,6 +1353,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
 
         # Non-streaming Anthropic
         async with daemon_lock:
+            timing = {}
             full_snap_prep_ref = [None]
             snap_prep = None
 
@@ -1324,9 +1373,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         status_code=400)
                 cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}" + _samp_suffix(req) + "\n"
             else:
+                t_compress = time.monotonic()
                 cur_bin, cur_ids = await asyncio.to_thread(
                     _maybe_compress, raw_msgs, prompt_bin, prompt_ids,
                             req.chat_template_kwargs)
+                timing["compress"] = time.monotonic() - t_compress
                 prompt_len = len(cur_ids)
                 gen_len = min(req.max_tokens, max_ctx - prompt_len - 20)
                 if gen_len <= 0:
@@ -1342,13 +1393,13 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     prompt_ids, full_snap_prep_ref, compression_fired)
 
             try:
-                _write_cmd(cmd_line)
+                _write_cmd(cmd_line, timing)
             except RuntimeError as e:
                 return JSONResponse({"type": "error", "error": {"type": "server_error",
                                      "message": str(e)}}, status_code=503)
 
             # FIX 6: use run_in_executor — same fix as OpenAI non-streaming path
-            tokens = await _collect_tokens_sync(r_pipe, gen_len)
+            tokens = await _collect_tokens_sync(r_pipe, gen_len, timing)
 
             full_snap_prep = full_snap_prep_ref[0]
             if full_snap_prep is not None:
@@ -1356,7 +1407,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
             elif snap_prep:
                 prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
-            _park_draft_if_lazy()
+            _park_draft_if_lazy(timing)
 
         if full_hit is None:
             try: cur_bin.unlink()
@@ -1536,6 +1587,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             created_at, prompt_len, t0):
         """Non-streaming Responses API handler."""
         async with daemon_lock:
+            timing = {}
             full_snap_prep_ref = [None]
             snap_prep = None
 
@@ -1561,9 +1613,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     }, status_code=400)
                 cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}" + _samp_suffix(chat_req) + "\n"
             else:
+                t_compress = time.monotonic()
                 cur_bin, cur_ids = await asyncio.to_thread(
                     _maybe_compress, raw_msgs, prompt_bin, prompt_ids,
                     chat_req.chat_template_kwargs)
+                timing["compress"] = time.monotonic() - t_compress
                 prompt_len = len(cur_ids)
                 gen_len = _gen_len_for(prompt_len, chat_req.max_tokens)
                 if gen_len <= 0:
@@ -1584,14 +1638,14 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     prompt_ids, full_snap_prep_ref, compression_fired)
 
             try:
-                _write_cmd(cmd_line)
+                _write_cmd(cmd_line, timing)
             except RuntimeError as e:
                 return JSONResponse({
                     "type": "error",
                     "error": {"type": "server_error", "message": str(e)}
                 }, status_code=503)
 
-            tokens = await _collect_tokens_sync(r_pipe, gen_len)
+            tokens = await _collect_tokens_sync(r_pipe, gen_len, timing)
 
             full_snap_prep = full_snap_prep_ref[0]
             if full_snap_prep is not None:
@@ -1599,7 +1653,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
             elif snap_prep:
                 prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
-            _park_draft_if_lazy()
+            _park_draft_if_lazy(timing)
 
         if full_hit is None:
             try: cur_bin.unlink()
@@ -1642,9 +1696,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         elapsed = time.monotonic() - t0
         tok_s = len(tokens) / elapsed if elapsed > 0 else 0.0
         log.info(
-            "responses DONE %s  in=%d out=%d  %.1fs  %.1f tok/s  output=%s  text_len=%d",
+            "responses DONE %s  in=%d out=%d  %.1fs  %.1f tok/s  output=%s  text_len=%d  %s",
             response_id, prompt_len, len(tokens),
             elapsed, tok_s, out_types, len(cleaned),
+            _timing_summary(timing, len(tokens)),
         )
         return JSONResponse({
             "id": response_id,
@@ -1671,6 +1726,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             nonlocal prompt_len, started_in_thinking
 
             async with daemon_lock:
+                timing = {}
                 full_snap_prep_ref = [None]
                 snap_prep = None
 
@@ -1694,9 +1750,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         return
                     cmd_line = f"RESTORE {slot} {cached_cur_bin} {gen_len}" + _samp_suffix(chat_req) + "\n"
                 else:
+                    t_compress = time.monotonic()
                     cur_bin, cur_ids = await asyncio.to_thread(
                         _maybe_compress, raw_msgs, prompt_bin, prompt_ids,
                         chat_req.chat_template_kwargs)
+                    timing["compress"] = time.monotonic() - t_compress
                     prompt_len = len(cur_ids)
                     gen_len = _gen_len_for(prompt_len, chat_req.max_tokens)
                     if gen_len <= 0:
@@ -1716,7 +1774,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         prompt_ids, full_snap_prep_ref, compression_fired)
 
                 try:
-                    _write_cmd(cmd_line)
+                    _write_cmd(cmd_line, timing)
                 except RuntimeError as e:
                     yield _resp_sse("error", {
                         "error": {"type": "server_error", "message": str(e)}})
@@ -1751,7 +1809,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 tool_call_active = False
 
                 try:
-                    async for tok_id in _astream_tokens(r_pipe, gen_len):
+                    async for tok_id in _astream_tokens(r_pipe, gen_len, timing):
                         completion_tokens += 1
                         piece = tokenizer.decode([tok_id])
                         window += piece
@@ -1827,7 +1885,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
                 elif snap_prep:
                     prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
-                _park_draft_if_lazy()
+                _park_draft_if_lazy(timing)
 
                 # Build final output items
                 final_output: list[dict] = []
@@ -1902,9 +1960,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 elapsed = time.monotonic() - t0
                 tok_s = completion_tokens / elapsed if elapsed > 0 else 0.0
                 log.info(
-                    "responses DONE %s  in=%d out=%d  %.1fs  %.1f tok/s  output=%s  text_len=%d",
+                    "responses DONE %s  in=%d out=%d  %.1fs  %.1f tok/s  output=%s  text_len=%d  %s",
                     response_id, prompt_len, completion_tokens,
                     elapsed, tok_s, out_types, len(accumulated_text),
+                    _timing_summary(timing, completion_tokens),
                 )
                 yield _resp_sse("response.completed", {"response": shell})
 
