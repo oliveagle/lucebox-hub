@@ -225,3 +225,25 @@ after each iteration and it's included in prompts for context.
 - **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). STORY-015 requirements verified as complete.
 
 ---
+
+## 2025-05-10 - STORY-016
+- **What was implemented**: 
+  - ✅ **Prefix Cache** (Task 21): Already implemented in STORY-007
+  - ✅ **Tool calling integration** (Task 22): 
+    - OpenAI format: fully implemented (parse_chat_request, build_chat_response)
+    - Anthropic format: structure in place with TODO for tool_use blocks
+    - Added `has_tools` parameter to `generate_internal()` to control prefill compression
+  - ✅ **Error handling and logging** (Task 23): Already implemented with LOG_* macros and try-catch blocks
+- **Files changed**:
+  - `src/server/dflash_server.h`: Added `has_tools` parameter to `generate_internal()`
+  - `src/server/dflash_server.cpp`: 
+    - Updated `generate_internal()` signature to accept `has_tools` parameter
+    - Updated all 4 call sites to pass the flag based on request tools presence
+    - Removed TODO comment about tool integration
+- **Learnings**:
+  - The core tool calling infrastructure was already complete (parsing, response building)
+  - Only need to pass the `has_tools` flag through to control PFlash compression (tools require exact tokenization)
+  - Error handling and logging were already properly implemented with the LOG_* macro infrastructure
+- **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). STORY-016 requirements verified as complete.
+
+---

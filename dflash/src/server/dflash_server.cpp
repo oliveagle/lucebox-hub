@@ -1104,7 +1104,8 @@ public:
 std::vector<int32_t> DFlashServer::generate_internal(
     const std::vector<int32_t>& prompt_tokens,
     int n_gen,
-    std::function<void(int32_t)> on_token) {
+    std::function<void(int32_t)> on_token,
+    bool has_tools) {
 
     std::lock_guard<std::mutex> lock(generation_mutex_);
 
@@ -1147,8 +1148,7 @@ std::vector<int32_t> DFlashServer::generate_internal(
     std::vector<int32_t> working_tokens = prompt_tokens;
 
     if (!cache_hit) {
-        const bool has_tools = false;  // Tool integration will be added in STORY-008
-
+        // Don't compress requests with tools (tool calling requires exact tokenization)
         if (prefill_ && prefill_->should_compress((int)prompt_tokens.size(), has_tools)) {
             std::cout << "[PFlash] Compression triggered for " << prompt_tokens.size() << " tokens" << std::endl;
 
@@ -1480,7 +1480,9 @@ void DFlashServer::handle_chat_completions(const httplib::Request& req, httplib:
         std::vector<int32_t> prompt_tokens;
         // TODO: Apply chat template and tokenize
 
-        std::vector<int32_t> tokens = generate_internal(prompt_tokens, chat_req.max_tokens);
+        // Check if tools are present (affects prefill compression)
+        bool has_tools = chat_req.tools.has_value() && !chat_req.tools->empty();
+        std::vector<int32_t> tokens = generate_internal(prompt_tokens, chat_req.max_tokens, nullptr, has_tools);
 
         // Build response
         ChatResponse chat_resp = build_chat_response(tokens, chat_req);
@@ -1645,7 +1647,8 @@ void DFlashServer::handle_chat_completions_stream(const httplib::Request& req, h
                 };
 
                 // Generate tokens with streaming callback
-                generate_internal(prompt_tokens, chat_req.max_tokens, on_token);
+                bool has_tools = chat_req.tools.has_value() && !chat_req.tools->empty();
+                generate_internal(prompt_tokens, chat_req.max_tokens, on_token, has_tools);
 
                 // Send final chunk with finish_reason
                 json final_chunk = {
@@ -2303,8 +2306,11 @@ void DFlashServer::handle_anthropic_messages_impl(
     std::vector<int32_t> prompt_tokens;
     // TODO: Apply chat template and tokenize
 
+    // Check if tools are present (affects prefill compression)
+    bool has_tools = areq.tools.has_value() && !areq.tools->empty();
+
     // Generation is handled internally with prefix cache support
-    std::vector<int32_t> tokens = generate_internal(prompt_tokens, areq.max_tokens);
+    std::vector<int32_t> tokens = generate_internal(prompt_tokens, areq.max_tokens, nullptr, has_tools);
 
     // Build Anthropic response
     AnthropicMessagesResponse aresp = build_anthropic_response(tokens, areq);
@@ -2414,7 +2420,8 @@ void DFlashServer::handle_anthropic_messages_stream_impl(
             };
 
             // Generate tokens with streaming callback
-            generate_internal(prompt_tokens, creq.max_tokens, on_token);
+            bool has_tools = areq.tools.has_value() && !areq.tools->empty();
+            generate_internal(prompt_tokens, creq.max_tokens, on_token, has_tools);
 
             // Send content_block_stop event
             json block_stop_event = {

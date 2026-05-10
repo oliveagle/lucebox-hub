@@ -245,7 +245,8 @@ public:
     std::vector<int32_t> generate_internal(
         const std::vector<int32_t>& prompt_tokens,
         int n_gen,
-        std::function<void(int32_t)> on_token = nullptr
+        std::function<void(int32_t)> on_token = nullptr,
+        bool has_tools = false
     );
 
     // Request parsing
