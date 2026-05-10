@@ -382,6 +382,28 @@ def test_chat_completions_non_streaming_with_tool_call(mock_os_read, mock_pipe,
 
 @patch("server.os.pipe")
 @patch("server.os.read")
+def test_zero_token_prompt_is_rejected_before_daemon(
+        mock_os_read, mock_pipe, mock_tokenizer, app):
+    mock_pipe.return_value = (1, 2)
+    mock_tokenizer.encode.return_value = []
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json={
+        "model": MODEL_NAME,
+        "messages": [],
+        "stream": False,
+    })
+
+    assert response.status_code == 400
+    data = response.json()
+    assert data["error"]["type"] == "invalid_request_error"
+    assert data["error"]["param"] == "messages"
+    assert "zero tokens" in data["error"]["message"]
+    mock_os_read.assert_not_called()
+
+
+@patch("server.os.pipe")
+@patch("server.os.read")
 def test_chat_completions_streaming(mock_os_read, mock_pipe, mock_tokenizer, app):
     mock_pipe.return_value = (1, 2)
     mock_tokenizer.apply_chat_template.return_value = "<think>\n"

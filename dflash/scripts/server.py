@@ -43,6 +43,18 @@ from _prefill_hook import (
 from prefix_cache import DaemonStdoutBus, PrefixCache
 
 
+class OpenAICompatError(Exception):
+    def __init__(self, message: str, status_code: int = 400,
+                 error_type: str = "invalid_request_error",
+                 param: str | None = None, code: str | None = None):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.error_type = error_type
+        self.param = param
+        self.code = code
+
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TARGET = Path(os.environ.get(
     "DFLASH_TARGET",
@@ -573,6 +585,15 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
     import asyncio
     app = FastAPI(title="Luce DFlash OpenAI server")
 
+    @app.exception_handler(OpenAICompatError)
+    async def _openai_compat_error_handler(_request: Request, exc: OpenAICompatError):
+        error = {"message": exc.message, "type": exc.error_type}
+        if exc.param is not None:
+            error["param"] = exc.param
+        if exc.code is not None:
+            error["code"] = exc.code
+        return JSONResponse({"error": error}, status_code=exc.status_code)
+
     # FIX 1: CORS middleware so Open WebUI / browser frontends on other ports
     # can reach this server without being blocked by the browser.
     app.add_middleware(
@@ -739,6 +760,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         prompt = tokenizer.apply_chat_template(msgs_list, **tpl_kwargs)
         started_in_thinking = bool(re.search(r"<think>\s*$", prompt))
         ids = tokenizer.encode(prompt, add_special_tokens=False)
+        if not ids:
+            raise OpenAICompatError(
+                "Chat prompt tokenized to zero tokens",
+                param="messages")
         return _ids_to_bin(ids), ids, prompt
 
     def _tokenize_prompt(req: ChatRequest) -> tuple[Path, list[int], list[dict], bool]:
