@@ -198,6 +198,7 @@ struct StepGraph {
     ggml_tensor * inp_embed = nullptr;    // [hidden, n_tokens, 1] f32
     ggml_tensor * positions = nullptr;    // [4*n_tokens] i32
     ggml_tensor * attn_mask = nullptr;    // [kv_pad, q_pad] f16
+    ggml_tensor * parent_ids = nullptr;   // [n_tokens] i32 (DDTree only)
     ggml_tensor * logits = nullptr;       // [vocab, n_tokens] f32
     ggml_tensor * argmax_tokens = nullptr; // [n_tokens] i32
     ggml_tensor * hidden_states = nullptr; // [hidden, n_tokens] f32 (draft)
@@ -318,6 +319,7 @@ public:
                            bool with_mask, bool capture,
                            bool capture_delta_intermediate = false,
                            int fa_window = 0);
+    bool build_target_step_tree(StepGraph& sg, int kv_start, int n_tokens, int fa_window = 0);
     bool build_draft_step(StepGraph& sg, int draft_ctx,
                           DraftFeatureMirror* mirror, int committed);
     bool build_lm_head_projection_step(StepGraph& sg, int q_len);

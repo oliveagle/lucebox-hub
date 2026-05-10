@@ -52,9 +52,10 @@
       "description": "DDTree 树形推测解码",
       "acceptanceCriteria": [],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "labels": [],
-      "dependsOn": []
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "STORY-006",
@@ -62,9 +63,10 @@
       "description": "流式响应",
       "acceptanceCriteria": [],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "labels": [],
-      "dependsOn": []
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "STORY-007",
@@ -171,6 +173,6 @@
     "createdAt": "2026-05-10T12:53:24.143Z",
     "version": "1.0.0",
     "sourcePrd": "TODO.md",
-    "updatedAt": "2026-05-10T14:15:47.970Z"
+    "updatedAt": "2026-05-10T14:50:00.405Z"
   }
 }

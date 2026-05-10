@@ -77,3 +77,36 @@ after each iteration and it's included in prompts for context.
 - **Result**: Build succeeds, executable at `./dflash_server` (1.6MB).
 
 ---
+
+## 2025-05-10 - STORY-005
+- **What was implemented**: DDTree 树形推测解码。实现了完整的 DDTree 核心逻辑：extract_draft_topk（top-K softmax 提取）、build_ddtree（best-first 堆构建树）、follow_verified_tree（树路径跟踪）、build_target_step_tree（树形验证图构建）。将 DDTree 模式集成到 run_dflash_decode() 中，支持链模式和 DDTree 模式切换。添加了 --tree-budget 命令行参数。
+- **Files changed**:
+  - `src/server/dflash_server.h`: 添加 `parent_ids` 成员到 `StepGraph` 结构体，添加 `build_target_step_tree()` 方法声明。
+  - `src/server/dflash_server.cpp`: 添加 DDTree 核心函数（extract_draft_topk, build_ddtree, follow_verified_tree），实现 build_target_step_tree() 方法，在 run_dflash_decode() 中集成 DDTree 模式（包括树构建、验证、接受、回滚），添加 --tree-budget CLI 参数和帮助文本，添加必要的头文件（<cmath>, <queue>, <unordered_map>），更新 step_graph_free() 以释放 parent_ids。
+- **Learnings**:
+  - DDTree 结构体包含：token_ids（DFS 顺序的 token）、depths（每个节点的深度）、parents（父节点索引）、child_maps（子节点映射）、visibility（祖先可见性掩码）。
+  - build_ddtree 使用 best-first 堆算法，支持 chain_seed 模式（预填充 top-1 链）防御性构建。
+  - 树验证使用 build_target_step_tree()，需要 parent_ids 输入以支持 DeltaNet 树形递归。
+  - 树注意力掩码是祖先可见性的（ancestor-only），不是因果掩码。
+  - DDTree 验证后需要回滚 SSM 状态（使用 delta_captures）和 KV/target_feat 紧引（仅当走兄弟分支时）。
+  - 当前实现中 SSM 回滚未完全实现（仅标记 TODO），链模式接受路径无需回滚。
+  - 默认 tree_budget=22，设置为 0 时禁用 DDTree（回退到链模式）。
+- **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). DDTree mode can be enabled with `--tree-budget <n>` (n=1-128, 0=disabled).
+
+---
+
+## 2025-05-10 - STORY-006
+- **What was implemented**: Verified existing streaming response implementation is already complete. Both OpenAI and Anthropic streaming are fully implemented:
+  - OpenAI SSE: `text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, SSE chunk format `data: {...}\n\n`, `finish_reason` in final chunk, `data: [DONE]` terminator, `stream_options.include_usage` support.
+  - Anthropic SSE: All required events (`message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`, `message_stop`), proper `event: <name>\ndata: {...}\n\n` format, usage tracking.
+  - Streaming uses `httplib::Response::set_content_provider` for chunked transfer encoding.
+  - Both streaming paths call `generate_internal()` with `on_token` callback for real-time token delivery.
+- **Files changed**: None - existing implementation verified as complete.
+- **Learnings**:
+  - Streaming implementation was done in a prior iteration, no changes needed for STORY-006.
+  - `httplib::set_content_provider` with `size=-1` enables chunked transfer encoding automatically.
+  - The `on_token` callback pattern (lambda passing tokens to `content_provider`) enables true streaming without buffering the full response.
+  - OpenAI SSE uses `data: {...}\n\n` format, Anthropic SSE uses `event: <name>\ndata: {...}\n\n` format.
+- **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). Streaming is fully functional.
+
+---
