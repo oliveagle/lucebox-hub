@@ -709,11 +709,50 @@ bool DFlashServer::initialize(const ServerConfig& config) {
         .drafter_path = config.prefill_drafter
     };
 
-    // Resolve KV cache types from environment variables
+    // Resolve KV cache types (config values override environment variables)
     ggml_type kv_k_type, kv_v_type;
+
+    // First resolve from environment variables (defaults)
     dflash::resolve_kv_types(kv_k_type, kv_v_type);
+
+    // Then override with config values if explicitly set
+    // We set environment variables so create_target_cache() also uses them
+    if (!config.kv_k_type.empty()) {
+        ggml_type parsed = dflash::parse_kv_type(config.kv_k_type.c_str());
+        if (parsed == GGML_TYPE_COUNT) {
+            std::cerr << "Invalid --kv-k-type: " << config.kv_k_type << std::endl;
+            return false;
+        }
+        kv_k_type = parsed;
+        setenv("DFLASH27B_KV_K", config.kv_k_type.c_str(), 1);
+    }
+    if (!config.kv_v_type.empty()) {
+        ggml_type parsed = dflash::parse_kv_type(config.kv_v_type.c_str());
+        if (parsed == GGML_TYPE_COUNT) {
+            std::cerr << "Invalid --kv-v-type: " << config.kv_v_type << std::endl;
+            return false;
+        }
+        kv_v_type = parsed;
+        setenv("DFLASH27B_KV_V", config.kv_v_type.c_str(), 1);
+    }
+
+    // Validate the resolved pair
+    if (!dflash::is_supported_kv_pair(kv_k_type, kv_v_type)) {
+        std::cerr << "KV pair (K=" << dflash::kv_type_name(kv_k_type)
+                  << ", V=" << dflash::kv_type_name(kv_v_type)
+                  << ") not supported" << std::endl;
+        return false;
+    }
+
     std::cout << "KV cache types: K=" << dflash::kv_type_name(kv_k_type)
               << ", V=" << dflash::kv_type_name(kv_v_type) << std::endl;
+
+    // Log TurboQuant status
+    if (kv_k_type == GGML_TYPE_TQ3_0 || kv_v_type == GGML_TYPE_TQ3_0) {
+        std::cout << "TurboQuant enabled: TQ3_0 quantization in use" << std::endl;
+    } else if (kv_k_type != GGML_TYPE_F16 || kv_v_type != GGML_TYPE_F16) {
+        std::cout << "KV quantization enabled with K-rotation: kv_k_rotated=true" << std::endl;
+    }
 
     // Create GPU backend for model loading
     ggml_backend_t backend = ggml_backend_cuda_init(0);
@@ -1460,6 +1499,12 @@ int main(int argc, char** argv) {
             config.prefill_drafter = argv[++i];
         } else if (arg == "--prefill-always") {
             config.prefill_mode = "always";
+        } else if (arg == "--kv-k-type" && i + 1 < argc) {
+            config.kv_k_type = argv[++i];
+        } else if (arg == "--kv-v-type" && i + 1 < argc) {
+            config.kv_v_type = argv[++i];
+        } else if (arg == "--fa-window" && i + 1 < argc) {
+            config.fa_window = std::atoi(argv[++i]);
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: " << argv[0] << " --target <gguf> --draft <safetensors> [options]\n"
                       << "\nOptions:\n"
@@ -1468,6 +1513,9 @@ int main(int argc, char** argv) {
                       << "  --host <addr>      Server host (default: 0.0.0.0)\n"
                       << "  --port <port>      Server port (default: 8000)\n"
                       << "  --max-ctx <n>      Max context length (default: 131072)\n"
+                      << "  --kv-k-type <type> KV cache K type (f16/bf16/q4_0/q8_0/tq3_0, default: q8_0)\n"
+                      << "  --kv-v-type <type> KV cache V type (f16/bf16/q4_0/q8_0/tq3_0, default: q8_0)\n"
+                      << "  --fa-window <n>    Flash attention sliding window (0=full, default: 2048)\n"
                       << "  --prefill-mode     off/auto/always (default: auto)\n"
                       << "  --prefill-threshold <n>  Min tokens for auto mode (default: 8192)\n"
                       << "  --prefill-keep-ratio <f> Compression ratio (default: 0.1)\n"

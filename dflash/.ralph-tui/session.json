@@ -3,10 +3,10 @@
   "sessionId": "8c372803-907a-4081-96ce-520a55886f9f",
   "status": "running",
   "startedAt": "2026-05-10T12:53:40.639Z",
-  "updatedAt": "2026-05-10T13:59:55.782Z",
-  "currentIteration": 2,
+  "updatedAt": "2026-05-10T14:15:47.971Z",
+  "currentIteration": 3,
   "maxIterations": 50,
-  "tasksCompleted": 1,
+  "tasksCompleted": 2,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -34,6 +34,16 @@
       "durationMs": 706411,
       "startedAt": "2026-05-10T13:10:12.478Z",
       "endedAt": "2026-05-10T13:21:58.889Z"
+    },
+    {
+      "iteration": 3,
+      "status": "completed",
+      "taskId": "STORY-003",
+      "taskTitle": "PFlash 压缩集成",
+      "taskCompleted": true,
+      "durationMs": 2275756,
+      "startedAt": "2026-05-10T13:22:00.019Z",
+      "endedAt": "2026-05-10T13:59:55.775Z"
     }
   ],
   "skippedTaskIds": [],

@@ -63,3 +63,17 @@ after each iteration and it's included in prompts for context.
 - **Result**: Build succeeds, executable at `./dflash_server` (1.6MB).
 
 ---
+
+## 2025-05-10 - STORY-004
+- **What was implemented**: TurboQuant KV Cache functionality. Fixed command-line argument handling for `--kv-k-type` and `--kv-v-type` (they were parsed but not applied to cache creation). Added `setenv()` calls to propagate config values to `create_target_cache()` which reads from environment variables. Added logging for TurboQuant status. Verified `--fa-window` argument was already functional.
+- **Files changed**:
+  - `src/server/dflash_server.cpp`: Modified KV type resolution to use config values when set, added `setenv()` calls to propagate types to `create_target_cache()`, added TurboQuant status logging, added command-line arguments for `--kv-k-type`, `--kv-v-type`, `--fa-window` in help text.
+- **Learnings**:
+  - `create_target_cache()` internally calls `dflash::resolve_kv_types()` (qwen35_target_graph.cpp:88) which reads from environment variables, so config values must be set via `setenv()` to take effect.
+  - TurboQuant is enabled automatically when `kv_k_type == GGML_TYPE_TQ3_0` - no extra configuration needed.
+  - `kv_k_rotated` is set to `false` for TQ3_0 (line 95 of qwen35_target_graph.cpp) because TQ3_0 applies WHT during quantization.
+  - All supported quant types: F16, BF16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, TQ3_0.
+  - The `--fa-window` argument was already implemented and functional in the codebase.
+- **Result**: Build succeeds, executable at `./dflash_server` (1.6MB).
+
+---
