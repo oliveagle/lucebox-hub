@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -16,15 +17,23 @@
 #include "cpp-httplib/httplib.h"
 #include "nlohmann/json.hpp"
 
+// ggml types (forward declarations)
+struct ggml_context;
+struct ggml_cgraph;
+struct ggml_tensor;
+struct ggml_gallocr;
+
 namespace dflash27b {
 
 // Forward declarations
 struct TargetWeights;
 struct DraftWeights;
 struct TargetCache;
+struct DeltaNetCapture;
 class Tokenizer;
 class PrefixCache;
 class PrefillCoordinator;
+struct DrafterContext;
 
 // ─── Configuration ─────────────────────────────────────────────────────
 
@@ -179,6 +188,30 @@ struct AnthropicMessagesResponse {
     } usage;
 };
 
+// ─── Graph State ──────────────────────────────────────────────────────────
+
+// StepGraph: persistent graph state reused across forward calls
+struct StepGraph {
+    ggml_context * ctx = nullptr;
+    ggml_cgraph * gf = nullptr;
+    ggml_gallocr * alloc = nullptr;
+    ggml_tensor * inp_embed = nullptr;    // [hidden, n_tokens, 1] f32
+    ggml_tensor * positions = nullptr;    // [4*n_tokens] i32
+    ggml_tensor * attn_mask = nullptr;    // [kv_pad, q_pad] f16
+    ggml_tensor * logits = nullptr;       // [vocab, n_tokens] f32
+    ggml_tensor * argmax_tokens = nullptr; // [n_tokens] i32
+    ggml_tensor * hidden_states = nullptr; // [hidden, n_tokens] f32 (draft)
+    ggml_tensor * hidden_input = nullptr;   // [hidden, n_tokens] f32 (lm_head proj)
+    std::vector<dflash27b::DeltaNetCapture> delta_captures;
+};
+
+// DraftFeatureMirror: rolling buffer of captured target features
+struct DraftFeatureMirror {
+    ggml_tensor * target_feat = nullptr;  // [N*hidden, cap] bf16
+    int cap = 0;
+    int offset = 0;  // target_cache.target_feat offset
+};
+
 // ─── Main Server Class ─────────────────────────────────────────────────
 
 class DFlashServer {
@@ -266,6 +299,38 @@ public:
         httplib::Response& res
     );
 
+    // ─── PFlash Compression ────────────────────────────────────────────────
+
+    // Load the PFlash drafter model (lazy loading, called on first compress)
+    bool load_drafter();
+
+    // Free the PFlash drafter to free VRAM
+    void free_drafter();
+
+    // Compress prompt tokens using PFlash drafter
+    // Returns compressed token IDs (drafter vocab)
+    std::vector<int32_t> compress_prefill(const std::vector<int32_t>& prompt_tokens);
+
+    // ─── DFlash Generation ─────────────────────────────────────────────
+
+    // Graph step builders
+    bool build_target_step(StepGraph& sg, int kv_start, int n_tokens,
+                           bool with_mask, bool capture,
+                           bool capture_delta_intermediate = false,
+                           int fa_window = 0);
+    bool build_draft_step(StepGraph& sg, int draft_ctx,
+                          DraftFeatureMirror* mirror, int committed);
+    bool build_lm_head_projection_step(StepGraph& sg, int q_len);
+    void step_graph_destroy(StepGraph& sg);
+
+    // DFlash decode loop
+    bool run_dflash_decode(
+        const std::vector<int32_t>& prompt,
+        int n_gen,
+        int last_tok,
+        std::function<void(int32_t)> on_token,
+        int& n_generated);
+
     // Configuration
     ServerConfig config_;
 
@@ -281,6 +346,16 @@ public:
     std::unique_ptr<TargetWeights> target_weights_;
     std::unique_ptr<DraftWeights> draft_weights_;
     std::unique_ptr<TargetCache> cache_;
+
+    // PFlash drafter (for prefill compression)
+    std::unique_ptr<DrafterContext> drafter_ctx_;
+    bool drafter_loaded_ = false;
+
+    // DFlash graph steps (reused across calls)
+    StepGraph target_sg_;
+    StepGraph draft_sg_;
+    StepGraph proj_sg_;
+    DraftFeatureMirror feature_mirror_;
 
     // Thread safety
     std::mutex generation_mutex_;
