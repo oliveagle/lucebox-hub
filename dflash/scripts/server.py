@@ -751,6 +751,18 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
     def _write_cmd(cmd_line: str, timing=None):
         if daemon_proc.poll() is not None:
             raise RuntimeError("dflash daemon has exited unexpectedly")
+        # Validate prompt .bin file before sending (catch stale/deleted files)
+        parts = cmd_line.split()
+        bin_idx = 2 if parts[0] == "RESTORE" else 0  # RESTORE <slot> <path> ...
+        if bin_idx < len(parts):
+            bin_path = Path(parts[bin_idx])
+            if bin_path.suffix == ".bin":
+                if not bin_path.exists():
+                    log.warning("prompt .bin missing before send: %s", bin_path)
+                else:
+                    sz = bin_path.stat().st_size
+                    if sz == 0:
+                        log.warning("prompt .bin is 0 bytes: %s", bin_path)
         if lazy_draft:
             log.debug("lazy-draft: unpark draft before generate")
             t = time.monotonic()
@@ -827,6 +839,28 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             if snap_prep:
                 cmd_line += f" snap={snap_prep[1]}:{snap_prep[0]}"
             return cmd_line + _samp_suffix(req) + "\n", snap_prep
+
+    def _confirm_or_abort_snap(n_tokens: int, full_snap_prep, snap_prep,
+                                  prompt_ids, cur_bin, cur_ids):
+        """Confirm prefix-cache snapshots only when the daemon actually
+        generated tokens.  When the daemon returns 0 tokens (e.g. empty
+        prompt / file read failure), confirming would register a snapshot
+        slot that was never written, corrupting future RESTORE commands."""
+        if n_tokens > 0:
+            if full_snap_prep is not None:
+                fslot, _ = full_snap_prep
+                prefix_cache.confirm_full_snap(
+                    fslot, prompt_ids, cur_bin, len(cur_ids))
+            elif snap_prep:
+                prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
+        else:
+            # Abort: release the reservation without registering.
+            if full_snap_prep is not None:
+                fslot, _ = full_snap_prep
+                prefix_cache.abort_full_snap(fslot)
+            elif snap_prep:
+                prefix_cache.abort_inline_snap(snap_prep[0])
+            log.warning("0 output tokens — aborted snapshot reservation")
 
     def _gen_len_for(prompt_len: int, max_tokens: int) -> int:
         return min(max_tokens, max_ctx - prompt_len - 20)
@@ -1061,12 +1095,9 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                             try: prompt_bin.unlink()
                             except Exception: pass
 
-                    full_snap_prep = full_snap_prep_ref[0]
-                    if full_snap_prep is not None:
-                        fslot, _ = full_snap_prep
-                        prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
-                    elif snap_prep:
-                        prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
+                    _confirm_or_abort_snap(
+                        completion_tokens, full_snap_prep_ref[0], snap_prep,
+                        prompt_ids, cur_bin, cur_ids)
                     _park_draft_if_lazy(timing)
 
                     yield f"data: {json.dumps(chunk({}, finish=finish_reason))}\n\n"
@@ -1139,12 +1170,9 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             # FIX 6: use run_in_executor instead of list() blocking event loop
             tokens = await _collect_tokens_sync(r_pipe, gen_len, timing)
 
-            full_snap_prep = full_snap_prep_ref[0]
-            if full_snap_prep is not None:
-                fslot, _ = full_snap_prep
-                prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
-            elif snap_prep:
-                prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
+            _confirm_or_abort_snap(
+                len(tokens), full_snap_prep_ref[0], snap_prep,
+                prompt_ids, cur_bin, cur_ids)
             _park_draft_if_lazy(timing)
 
         if full_hit is None:
@@ -1332,12 +1360,9 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                             try: prompt_bin.unlink()
                             except Exception: pass
 
-                    full_snap_prep = full_snap_prep_ref[0]
-                    if full_snap_prep is not None:
-                        fslot, _ = full_snap_prep
-                        prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
-                    elif snap_prep:
-                        prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
+                    _confirm_or_abort_snap(
+                        out_tokens, full_snap_prep_ref[0], snap_prep,
+                        prompt_ids, cur_bin, cur_ids)
                     _park_draft_if_lazy(timing)
 
                     yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': block_index})}\n\n"
@@ -1401,12 +1426,9 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
             # FIX 6: use run_in_executor — same fix as OpenAI non-streaming path
             tokens = await _collect_tokens_sync(r_pipe, gen_len, timing)
 
-            full_snap_prep = full_snap_prep_ref[0]
-            if full_snap_prep is not None:
-                fslot, _ = full_snap_prep
-                prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
-            elif snap_prep:
-                prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
+            _confirm_or_abort_snap(
+                len(tokens), full_snap_prep_ref[0], snap_prep,
+                prompt_ids, cur_bin, cur_ids)
             _park_draft_if_lazy(timing)
 
         if full_hit is None:
@@ -1647,12 +1669,9 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
 
             tokens = await _collect_tokens_sync(r_pipe, gen_len, timing)
 
-            full_snap_prep = full_snap_prep_ref[0]
-            if full_snap_prep is not None:
-                fslot, _ = full_snap_prep
-                prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
-            elif snap_prep:
-                prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
+            _confirm_or_abort_snap(
+                len(tokens), full_snap_prep_ref[0], snap_prep,
+                prompt_ids, cur_bin, cur_ids)
             _park_draft_if_lazy(timing)
 
         if full_hit is None:
@@ -1879,12 +1898,9 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         try: prompt_bin.unlink()
                         except Exception: pass
 
-                full_snap_prep = full_snap_prep_ref[0]
-                if full_snap_prep is not None:
-                    fslot, _ = full_snap_prep
-                    prefix_cache.confirm_full_snap(fslot, prompt_ids, cur_bin, len(cur_ids))
-                elif snap_prep:
-                    prefix_cache.confirm_inline_snap(*snap_prep, cur_ids)
+                _confirm_or_abort_snap(
+                    completion_tokens, full_snap_prep_ref[0], snap_prep,
+                    prompt_ids, cur_bin, cur_ids)
                 _park_draft_if_lazy(timing)
 
                 # Build final output items
