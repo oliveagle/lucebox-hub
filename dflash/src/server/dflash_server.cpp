@@ -6,6 +6,11 @@
 #include "dflash_server.h"
 #include "internal.h"
 #include "parsers.h"
+#include "tokenizer.h"
+#include "kv_quant.h"
+#include "ggml.h"
+#include "ggml-backend.h"
+#include "ggml-cuda.h"
 
 #include <chrono>
 #include <cstdint>
@@ -24,41 +29,8 @@ using json = nlohmann::json;
 
 namespace dflash27b {
 
-// ─── Tokenizer Wrapper (using llama.cpp) ───────────────────────────────
-
-class Tokenizer {
-public:
-    bool load_from_gguf(const std::string& gguf_path) {
-        // TODO: Use llama.cpp's tokenizer
-        // For now, placeholder
-        return true;
-    }
-
-    std::vector<int32_t> encode(const std::string& text) {
-        // TODO: Implement using llama.cpp
-        return {};
-    }
-
-    std::string decode(const std::vector<int32_t>& tokens) {
-        // TODO: Implement using llama.cpp
-        return "";
-    }
-};
-
-// ─── Chat Template Engine ───────────────────────────────────────────────
-
-class ChatTemplate {
-public:
-    bool load_from_gguf(const std::string& gguf_path) {
-        // TODO: Use llama.cpp's Jinja2 runtime
-        return true;
-    }
-
-    std::string apply(const std::vector<ChatMessage>& messages) {
-        // TODO: Implement using llama.cpp's jinja engine
-        return "";
-    }
-};
+// Use the real Tokenizer implementation from tokenizer.h
+// It's in the dflash27b namespace, so we can use it directly
 
 // ─── Prefix Cache ───────────────────────────────────────────────────────
 
@@ -149,14 +121,7 @@ bool DFlashServer::initialize(const ServerConfig& config) {
     // Initialize tokenizer
     tokenizer_ = std::make_unique<Tokenizer>();
     if (!tokenizer_->load_from_gguf(config.target_path)) {
-        std::cerr << "Failed to load tokenizer" << std::endl;
-        return false;
-    }
-
-    // Initialize chat template
-    chat_template_ = std::make_unique<ChatTemplate>();
-    if (!chat_template_->load_from_gguf(config.target_path)) {
-        std::cerr << "Failed to load chat template" << std::endl;
+        std::cerr << "Failed to load tokenizer: " << tokenizer_->last_error() << std::endl;
         return false;
     }
 
@@ -173,8 +138,61 @@ bool DFlashServer::initialize(const ServerConfig& config) {
         .drafter_path = config.prefill_drafter
     };
 
-    // TODO: Load target and draft models
-    // TODO: Initialize KV cache
+    // Resolve KV cache types from environment variables
+    ggml_type kv_k_type, kv_v_type;
+    dflash::resolve_kv_types(kv_k_type, kv_v_type);
+    std::cout << "KV cache types: K=" << dflash::kv_type_name(kv_k_type)
+              << ", V=" << dflash::kv_type_name(kv_v_type) << std::endl;
+
+    // Create GPU backend for model loading
+    ggml_backend_t backend = ggml_backend_cuda_init(0);
+    if (!backend) {
+        std::cerr << "Failed to create CUDA backend" << std::endl;
+        return false;
+    }
+    std::cout << "Created CUDA backend" << std::endl;
+
+    // Load target model (GGUF)
+    target_weights_ = std::make_unique<TargetWeights>();
+    if (!load_target_gguf(config.target_path, backend, *target_weights_)) {
+        std::cerr << "Failed to load target model from: " << config.target_path << std::endl;
+        ggml_backend_free(backend);
+        return false;
+    }
+    std::cout << "Loaded target model: " << target_weights_->n_embd << " dims, "
+              << target_weights_->n_layer << " layers" << std::endl;
+
+    // Load draft model (safetensors or GGUF)
+    draft_weights_ = std::make_unique<DraftWeights>();
+    bool is_gguf = config.draft_path.size() >= 5 &&
+                   config.draft_path.substr(config.draft_path.size() - 5) == ".gguf";
+
+    if (is_gguf) {
+        if (!load_draft_gguf(config.draft_path, backend, *draft_weights_)) {
+            std::cerr << "Failed to load draft model from: " << config.draft_path << std::endl;
+            ggml_backend_free(backend);
+            return false;
+        }
+    } else {
+        if (!load_draft_safetensors(config.draft_path, backend, *draft_weights_)) {
+            std::cerr << "Failed to load draft model from: " << config.draft_path << std::endl;
+            ggml_backend_free(backend);
+            return false;
+        }
+    }
+    std::cout << "Loaded draft model: " << draft_weights_->n_embd << " dims, "
+              << draft_weights_->n_layer << " layers" << std::endl;
+
+    // Create target KV cache
+    cache_ = std::make_unique<TargetCache>();
+    int max_verify_tokens = config.ddtree_budget + 1;  // For DDTree
+    if (!create_target_cache(*target_weights_, config.max_ctx, max_verify_tokens,
+                             backend, *cache_)) {
+        std::cerr << "Failed to create target cache" << std::endl;
+        ggml_backend_free(backend);
+        return false;
+    }
+    std::cout << "Created target cache: max_ctx=" << cache_->max_ctx << std::endl;
 
     setup_routes();
 
@@ -789,6 +807,13 @@ void DFlashServer::stop() {
     if (http_server_) {
         http_server_->stop();
     }
+}
+
+// ─── Helper Functions ───────────────────────────────────────────────────
+
+std::string tokens_to_text(const std::vector<int32_t>& tokens, Tokenizer* tokenizer) {
+    if (!tokenizer || tokens.empty()) return "";
+    return tokenizer->decode(tokens);
 }
 
 // ─── Main Entry Point ───────────────────────────────────────────────────

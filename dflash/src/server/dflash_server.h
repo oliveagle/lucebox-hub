@@ -23,7 +23,6 @@ struct TargetWeights;
 struct DraftWeights;
 struct TargetCache;
 class Tokenizer;
-class ChatTemplate;
 class PrefixCache;
 class PrefillCoordinator;
 
@@ -275,7 +274,6 @@ public:
 
     // Core components
     std::unique_ptr<Tokenizer> tokenizer_;
-    std::unique_ptr<ChatTemplate> chat_template_;
     std::unique_ptr<PrefixCache> prefix_cache_;
     std::unique_ptr<PrefillCoordinator> prefill_;
 
@@ -293,13 +291,5 @@ public:
 
 // Convert tokens to text using tokenizer
 std::string tokens_to_text(const std::vector<int32_t>& tokens, Tokenizer* tokenizer);
-
-// Apply chat template to get prompt tokens
-std::vector<int32_t> apply_chat_template(
-    const std::vector<ChatMessage>& messages,
-    ChatTemplate* chat_template,
-    Tokenizer* tokenizer,
-    bool add_generation_prompt = true
-);
 
 } // namespace dflash27b
