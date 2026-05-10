@@ -150,6 +150,10 @@ TOOL_CALL_PARAMETER_RE = re.compile(
     r"<parameter=(.*?)(?:</parameter>|(?=<parameter=)|(?=</function>)|$)",
     re.DOTALL,
 )
+BARE_FUNCTION_XML_RE = re.compile(
+    r"<function=([A-Za-z_][\w.-]*)>(.*?)</function>(?:\s*</tool_call>)?",
+    re.DOTALL,
+)
 FUNCTION_SIGNATURE_RE = re.compile(
     r"<function=([A-Za-z_][\w.-]*)\((.*?)\)</function>", re.DOTALL)
 TOOL_CODE_RE = re.compile(r"<tool_code>(.*?)</tool_code>", re.DOTALL)
@@ -325,17 +329,7 @@ def parse_tool_calls(text: str, tools=None) -> tuple[str, list[dict]]:
         })
         removals.append((start, end))
 
-    for m in TOOL_CALL_COMPLETE_RE.finditer(text):
-        body = m.group(1)
-        fn_match = TOOL_CALL_FUNCTION_RE.search(body)
-        if not fn_match:
-            continue
-        fn_text = fn_match.group(1) or fn_match.group(2) or ""
-        end_idx = fn_text.find(">")
-        if end_idx == -1:
-            continue
-        function_name = fn_text[:end_idx].strip()
-        params_region = fn_text[end_idx + 1:]
+    def parse_xml_function(function_name: str, params_region: str) -> dict:
         param_config = _find_tool_properties(tools, function_name)
         args: dict = {}
         for match_text in TOOL_CALL_PARAMETER_RE.findall(params_region):
@@ -347,9 +341,31 @@ def parse_tool_calls(text: str, tools=None) -> tuple[str, list[dict]]:
             if v.startswith("\n"): v = v[1:]
             if v.endswith("\n"): v = v[:-1]
             args[k] = _convert_param_value(v, k, param_config, function_name)
-        add_call(function_name, args, m.start(), m.end())
+        return args
+
+    for m in TOOL_CALL_COMPLETE_RE.finditer(text):
+        body = m.group(1)
+        fn_match = TOOL_CALL_FUNCTION_RE.search(body)
+        if not fn_match:
+            continue
+        fn_text = fn_match.group(1) or fn_match.group(2) or ""
+        end_idx = fn_text.find(">")
+        if end_idx == -1:
+            continue
+        function_name = fn_text[:end_idx].strip()
+        params_region = fn_text[end_idx + 1:]
+        add_call(function_name, parse_xml_function(function_name, params_region),
+                 m.start(), m.end())
+
+    for m in BARE_FUNCTION_XML_RE.finditer(text):
+        if any(lo <= m.start() < hi for lo, hi in removals):
+            continue
+        add_call(m.group(1), parse_xml_function(m.group(1), m.group(2)),
+                 m.start(), m.end())
 
     for m in FUNCTION_SIGNATURE_RE.finditer(text):
+        if any(lo <= m.start() < hi for lo, hi in removals):
+            continue
         args = _parse_function_signature_args(m.group(2))
         if args is not None:
             add_call(m.group(1), args, m.start(), m.end())

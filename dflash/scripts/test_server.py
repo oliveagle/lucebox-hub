@@ -150,6 +150,29 @@ class TestParseToolCalls:
         assert args["path"] == "out.txt"
         assert args["content"] == "hello world"
 
+    def test_bare_qwen_xml_function_call(self):
+        text = (
+            '<function=read>\n'
+            '<parameter=path>\n'
+            '~/.npm-global/lib/node_modules/openclaw/skills/weather/SKILL.md\n'
+            '</parameter>\n'
+            '</function>\n'
+            '</tool_call>'
+        )
+        cleaned, calls = parse_tool_calls(text, tools=[{
+            "type": "function",
+            "function": {"name": "read", "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+            }},
+        }])
+        assert cleaned == ""
+        assert len(calls) == 1
+        assert calls[0]["function"]["name"] == "read"
+        assert json.loads(calls[0]["function"]["arguments"]) == {
+            "path": "~/.npm-global/lib/node_modules/openclaw/skills/weather/SKILL.md"
+        }
+
     def test_tool_call_id_format(self):
         text = "<tool_call><function=f><parameter=x>1</parameter></function></tool_call>"
         _, calls = parse_tool_calls(text, tools=None)
