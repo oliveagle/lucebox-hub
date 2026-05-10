@@ -482,3 +482,12 @@ ggml_tensor * build_qwen35_layer(
     int                   fa_window = 0);
 
 } // namespace dflash27b
+
+#if defined(GGML_USE_CUDA)
+#include <cuda_runtime.h>
+// Host-staged copy between CUDA devices (no peer access required).
+// When stream is nullptr, uses the per-device default stream and synchronizes.
+bool dflash_cuda_copy_between_devices(int src_dev, const void * src,
+                                      int dst_dev, void * dst, size_t nbytes,
+                                      cudaStream_t stream);
+#endif

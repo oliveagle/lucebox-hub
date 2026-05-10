@@ -108,6 +108,7 @@ find_package(CUDAToolkit REQUIRED)
 
 add_library(dflash27b STATIC
     src/errors.cpp
+    src/cuda_cross_device_copy.cpp
     src/gguf_target_loader.cpp
     src/gguf_draft_loader.cpp
     src/safetensors_draft.cpp
@@ -326,15 +327,33 @@ if(DFLASH27B_TESTS)
         add_executable(test_dflash test/test_dflash.cpp)
         target_include_directories(test_dflash PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_link_libraries(test_dflash PRIVATE dflash27b ggml ggml-cuda)
-        # test_dflash uses cudaMemcpyAsync / cudaMemcpy2DAsync directly for the
-        # --fast-rollback path (per-step SSM intermediate state commit). Needs
-        # the CUDA runtime on its own link line.
-        find_package(CUDAToolkit REQUIRED)
-        target_link_libraries(test_dflash PRIVATE CUDA::cudart)
         # OpenMP for parallel CPU top-K extraction in the ddtree path.
         find_package(OpenMP)
         if(OpenMP_CXX_FOUND)
             target_link_libraries(test_dflash PRIVATE OpenMP::OpenMP_CXX)
         endif()
     endif()
+
+    # internal.h includes <cuda_runtime.h> when GGML_USE_CUDA is set; link
+    # CUDA::cudart so the toolkit headers are on the compile line (same as
+    # test_dflash historically had alone).
+    set(_dflash_internal_h_cuda_tests
+        smoke_load_draft
+        smoke_draft_graph
+        test_vs_oracle
+        smoke_load_target
+        smoke_load_target_laguna
+        smoke_laguna_forward
+        bench_laguna_ttft
+        bench_laguna_pflash
+        bench_laguna_generate
+        smoke_target_forward
+        test_generate
+        test_dflash
+    )
+    foreach(_t IN LISTS _dflash_internal_h_cuda_tests)
+        if(TARGET ${_t})
+            target_link_libraries(${_t} PRIVATE CUDA::cudart)
+        endif()
+    endforeach()
 endif()

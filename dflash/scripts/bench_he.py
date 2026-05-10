@@ -318,6 +318,8 @@ def main():
                     help="Use paper's pure best-first (no chain pre-seed)")
     ap.add_argument("--draft-feature-mirror", action="store_true",
                     help="Use the draft-side target feature mirror path")
+    ap.add_argument("--peer-access", action="store_true",
+                    help="Prefer CUDA P2P memcpy between GPUs when available (else host-staged copy)")
     ap.add_argument("--target-gpu", type=int, default=None,
                     help="Visible CUDA device id for the target backend")
     ap.add_argument("--draft-gpu", type=int, default=None,
@@ -381,6 +383,8 @@ def main():
     extra_args = []
     if args.draft_feature_mirror:
         extra_args.append("--draft-feature-mirror")
+    if args.peer_access:
+        extra_args.append("--peer-access")
     if args.target_gpu is not None:
         extra_args.append(f"--target-gpu={args.target_gpu}")
     if args.draft_gpu is not None:

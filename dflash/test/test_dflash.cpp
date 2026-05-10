@@ -83,6 +83,9 @@ to_fp32_cuda_t ggml_get_to_fp32_cuda(ggml_type type);
 
 using namespace dflash27b;
 
+static SamplerCfg      g_sampler;
+static std::mt19937_64 g_sampler_rng{std::random_device{}()};
+
 // True iff `tok` matches one of the model's declared end-of-output ids
 // (loaded into TargetWeights from GGUF tokenizer metadata). Replaces the
 // previous hardcoded `tok == 248045` check at the spec-decode commit
@@ -111,6 +114,21 @@ static bool write_int32_file(const std::string & path, const std::vector<int32_t
     if (!f) return false;
     f.write((const char *)v.data(), v.size() * sizeof(int32_t));
     return (bool)f;
+}
+
+static void stream_emit_fd(int stream_fd, int32_t tok) {
+    if (stream_fd < 0) return;
+#if defined(_WIN32)
+    DWORD written = 0;
+    const int32_t v = tok;
+    WriteFile((HANDLE)(intptr_t)stream_fd, &v, sizeof(v), &written, nullptr);
+#else
+    const int32_t v = tok;
+    const ssize_t n = ::write(stream_fd, &v, sizeof(v));
+    if (n < 0) {
+        // Best-effort stream path; daemon loop handles downstream EOF/termination.
+    }
+#endif
 }
 
 static int argmax_f32(const float * x, int n) {
@@ -538,6 +556,44 @@ static bool enable_peer_access_pair(int a, int b) {
     return ab && ba;
 }
 
+// Set from argv: opt into cudaMemcpyPeerAsync for cross-device copies when P2P works.
+static bool g_peer_access_opt_in = false;
+static std::unordered_map<std::uint64_t, bool> g_peer_pair_ok_cache;
+
+static std::uint64_t peer_pair_key(int a, int b) {
+    const int lo = std::min(a, b);
+    const int hi = std::max(a, b);
+    return (std::uint64_t)(unsigned)lo << 32 | (unsigned)hi;
+}
+
+static void log_staged_cross_gpu_once() {
+    static bool logged = false;
+    if (logged) {
+        return;
+    }
+    logged = true;
+    std::fprintf(stderr,
+                 "[dflash] Using safe (slower) cross-GPU copy via host staging "
+                 "(--peer-access not set or P2P unavailable for this device pair).\n");
+}
+
+static bool cross_device_peer_memcpy_ok(int src_device, int dst_device) {
+    if (src_device == dst_device) {
+        return true;
+    }
+    if (!g_peer_access_opt_in) {
+        return false;
+    }
+    const std::uint64_t k = peer_pair_key(src_device, dst_device);
+    const auto it = g_peer_pair_ok_cache.find(k);
+    if (it != g_peer_pair_ok_cache.end()) {
+        return it->second;
+    }
+    const bool ok = enable_peer_access_pair(src_device, dst_device);
+    g_peer_pair_ok_cache[k] = ok;
+    return ok;
+}
+
 static bool copy_peer_async(void * dst, int dst_device,
                             const void * src, int src_device,
                             size_t bytes,
@@ -548,12 +604,24 @@ static bool copy_peer_async(void * dst, int dst_device,
         err = cudaSetDevice(dst_device);
         if (err != cudaSuccess) return false;
         err = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToDevice, stream);
-    } else {
+        if (err != cudaSuccess) return false;
+        if (stream) {
+            return cudaStreamSynchronize(stream) == cudaSuccess;
+        }
+        return cudaDeviceSynchronize() == cudaSuccess;
+    }
+    if (cross_device_peer_memcpy_ok(src_device, dst_device)) {
         err = cudaSetDevice(dst_device);
         if (err != cudaSuccess) return false;
         err = cudaMemcpyPeerAsync(dst, dst_device, src, src_device, bytes, stream);
+        if (err != cudaSuccess) return false;
+        if (stream) {
+            return cudaStreamSynchronize(stream) == cudaSuccess;
+        }
+        return cudaDeviceSynchronize() == cudaSuccess;
     }
-    return err == cudaSuccess;
+    log_staged_cross_gpu_once();
+    return dflash_cuda_copy_between_devices(src_device, src, dst_device, dst, bytes, stream);
 }
 
 static bool ensure_bf16_staging(DraftFeatureMirror & mirror, size_t elems) {
@@ -1511,7 +1579,8 @@ static bool run_target_layer_split_dflash_decode(
         const std::vector<int32_t> & prompt,
         int n_gen,
         int last_tok,
-        const char * out_path) {
+        const char * out_path,
+        int stream_fd = -1) {
     if (shards.empty() || !feature_ring.target_feat) return false;
     const int hidden = DFLASH27B_TARGET_HIDDEN;
     const int vocab = DFLASH27B_TARGET_VOCAB;
@@ -1668,6 +1737,7 @@ static bool run_target_layer_split_dflash_decode(
         bool hit_eos = false;
         for (int i = 0; i < commit_n; i++) {
             out_all.push_back(replay_tok[i]);
+            stream_emit_fd(stream_fd, replay_tok[i]);
             if (IS_EOS_TOK(replay_tok[i], shards.front().weights)) hit_eos = true;
         }
         committed += commit_n;
@@ -1693,6 +1763,232 @@ static bool run_target_layer_split_dflash_decode(
     return true;
 }
 
+static bool run_target_layer_split_request(
+        std::vector<TargetLayerSplitShard> & shards,
+        DraftWeights * draft_weights,
+        ggml_backend_t draft_backend,
+        int draft_gpu,
+        DraftFeatureMirror * feature_ring,
+        const std::vector<int32_t> & prompt,
+        int n_gen,
+        int max_ctx,
+        bool run_dflash,
+        const char * out_path,
+        int stream_fd) {
+    if (shards.empty() || prompt.empty()) return false;
+    if ((int)prompt.size() + n_gen + 1 > max_ctx) {
+        std::fprintf(stderr, "target-split prompt (%zu) + gen (%d) exceeds max_ctx (%d)\n",
+                     prompt.size(), n_gen, max_ctx);
+        return false;
+    }
+
+    int ubatch = (prompt.size() > 2048) ? 384 : 16;
+    if (const char * s = std::getenv("DFLASH27B_PREFILL_UBATCH")) {
+        ubatch = std::max(1, std::atoi(s));
+    }
+    int last_tok = -1;
+    if (!run_target_layer_split_forward(shards, shards.front().weights,
+                                        prompt, 0, ubatch, last_tok,
+                                        feature_ring)) {
+        std::fprintf(stderr, "target-split prefill failed\n");
+        return false;
+    }
+
+    if (run_dflash && draft_weights && feature_ring && feature_ring->target_feat) {
+        const bool ok = run_target_layer_split_dflash_decode(
+            shards, *draft_weights, draft_backend, draft_gpu, *feature_ring,
+            prompt, n_gen, last_tok, out_path, stream_fd);
+        // End-of-stream marker for daemon readers.
+        stream_emit_fd(stream_fd, -1);
+        return ok;
+    }
+
+    std::vector<int32_t> out_all = prompt;
+    int generated = 0;
+    for (; generated < n_gen; generated++) {
+        std::vector<int32_t> one(1, last_tok);
+        int next_tok = -1;
+        if (!run_target_layer_split_forward(shards, shards.front().weights,
+                                            one, (int)out_all.size(), 1, next_tok,
+                                            feature_ring)) {
+            std::fprintf(stderr, "target-split decode failed at %d\n", generated);
+            stream_emit_fd(stream_fd, -1);
+            return false;
+        }
+        out_all.push_back(last_tok);
+        stream_emit_fd(stream_fd, last_tok);
+        if (IS_EOS_TOK(last_tok, shards.front().weights)) {
+            generated++;
+            break;
+        }
+        last_tok = next_tok;
+    }
+    if (out_path) write_int32_file(out_path, out_all);
+    stream_emit_fd(stream_fd, -1);
+    return true;
+}
+
+static int run_target_layer_split_daemon(
+        const char * target_path,
+        const char * draft_path,
+        const std::vector<int> & target_gpus,
+        const std::vector<double> & split_weights,
+        int draft_gpu,
+        bool load_draft,
+        bool run_dflash,
+        int max_ctx,
+        int max_verify_tokens,
+        bool peer_access,
+        int stream_fd) {
+    g_peer_access_opt_in = peer_access;
+    g_peer_pair_ok_cache.clear();
+    const int n_layer = inspect_target_layer_count(target_path);
+    if (n_layer <= 0) {
+        std::fprintf(stderr, "target-split could not read qwen35.block_count\n");
+        return 1;
+    }
+    const auto ranges = compute_layer_ranges(n_layer, (int)target_gpus.size(), split_weights);
+    if ((int)ranges.size() != (int)target_gpus.size()) {
+        std::fprintf(stderr, "bad --target-layer-split for %zu target GPUs and %d layers\n",
+                     target_gpus.size(), n_layer);
+        return 2;
+    }
+    std::vector<TargetLayerSplitShard> shards(target_gpus.size());
+    for (size_t i = 0; i < target_gpus.size(); i++) {
+        shards[i].gpu = target_gpus[i];
+        shards[i].layer_begin = ranges[i].first;
+        shards[i].layer_end = ranges[i].second;
+        shards[i].backend = ggml_backend_cuda_init(shards[i].gpu);
+        if (!shards[i].backend) {
+            std::fprintf(stderr, "target-split cuda init failed for gpu %d\n", shards[i].gpu);
+            free_target_layer_split_shards(shards);
+            return 1;
+        }
+    }
+    for (size_t i = 0; i < target_gpus.size(); i++) {
+        for (size_t j = i + 1; j < target_gpus.size(); j++) {
+            (void)enable_peer_access_pair(target_gpus[i], target_gpus[j]);
+        }
+    }
+    for (auto & shard : shards) {
+        TargetLoadPlan plan;
+        plan.layer_begin = shard.layer_begin;
+        plan.layer_end = shard.layer_end;
+        plan.load_output = (&shard == &shards.back());
+        if (!load_target_gguf_partial(target_path, shard.backend, plan, shard.weights) ||
+            !create_target_cache_partial(shard.weights, max_ctx, max_verify_tokens,
+                                         shard.backend, shard.cache,
+                                         /*prefill_only=*/!run_dflash,
+                                         shard.layer_begin, shard.layer_end,
+                                         /*allocate_target_feat=*/false)) {
+            std::fprintf(stderr, "target-split load/cache gpu=%d: %s\n",
+                         shard.gpu, dflash27b_last_error());
+            free_target_layer_split_shards(shards);
+            return 1;
+        }
+    }
+
+    ggml_backend_t draft_backend = nullptr;
+    DraftWeights draft_weights;
+    DraftFeatureMirror feature_ring;
+    bool draft_backend_owned = false;
+    if (load_draft) {
+        for (auto & shard : shards) if (shard.gpu == draft_gpu) draft_backend = shard.backend;
+        if (!draft_backend) {
+            draft_backend = ggml_backend_cuda_init(draft_gpu);
+            if (!draft_backend) {
+                free_target_layer_split_shards(shards);
+                return 1;
+            }
+            draft_backend_owned = true;
+        }
+        std::string dp(draft_path ? draft_path : "");
+        const bool is_gguf = (dp.size() >= 5 && dp.substr(dp.size() - 5) == ".gguf");
+        const bool draft_ok = is_gguf
+            ? load_draft_gguf(draft_path, draft_backend, draft_weights)
+            : load_draft_safetensors(draft_path, draft_backend, draft_weights);
+        if (!draft_ok) {
+            std::fprintf(stderr, "target-split draft load gpu=%d: %s\n",
+                         draft_gpu, dflash27b_last_error());
+            if (draft_backend_owned) ggml_backend_free(draft_backend);
+            free_target_layer_split_shards(shards);
+            return 1;
+        }
+        const int cap = std::min(max_ctx, 4096);
+        if (!draft_feature_mirror_init(feature_ring, draft_backend,
+                                       draft_gpu, draft_gpu, cap)) {
+            std::fprintf(stderr, "target-split feature ring init failed on gpu=%d\n", draft_gpu);
+            free_draft_weights(draft_weights);
+            if (draft_backend_owned) ggml_backend_free(draft_backend);
+            free_target_layer_split_shards(shards);
+            return 1;
+        }
+    }
+
+    std::printf("[daemon] ready\n");
+    std::fflush(stdout);
+    for (std::string line; std::getline(std::cin, line); ) {
+        g_sampler = SamplerCfg{};
+        if (parse_sampler_token(line, g_sampler) && g_sampler.seed != 0) {
+            g_sampler_rng.seed(g_sampler.seed);
+        }
+        if (line == "LIST_SLOTS") {
+            std::printf("[snap] slots=\n");
+            std::fflush(stdout);
+            continue;
+        }
+        if (line.rfind("FREE_SNAPSHOT ", 0) == 0) {
+            int slot = -1;
+            std::sscanf(line.c_str() + 14, "%d", &slot);
+            std::printf("[snap] freed slot=%d\n", slot);
+            std::fflush(stdout);
+            continue;
+        }
+        if (line.rfind("SNAPSHOT ", 0) == 0 ||
+            line.rfind("RESTORE ", 0) == 0 ||
+            line.rfind("RESTORE_CHAIN ", 0) == 0 ||
+            line.rfind("SNAPSHOT_THIN ", 0) == 0) {
+            std::fprintf(stderr,
+                         "[target-split] SNAPSHOT/RESTORE are unsupported in sharded daemon mode\n");
+            stream_emit_fd(stream_fd, -1);
+            continue;
+        }
+
+        char ppath[1024] = {0};
+        int n_gen = 0;
+        if (std::sscanf(line.c_str(), "%1023s %d", ppath, &n_gen) != 2) {
+            stream_emit_fd(stream_fd, -1);
+            continue;
+        }
+        auto prompt = read_int32_file(ppath);
+        if (prompt.empty()) {
+            std::fprintf(stderr, "target-split empty prompt\n");
+            stream_emit_fd(stream_fd, -1);
+            continue;
+        }
+
+        for (auto & shard : shards) {
+            reset_target_cache(shard.cache);
+        }
+        const bool ok = run_target_layer_split_request(
+            shards,
+            load_draft ? &draft_weights : nullptr,
+            draft_backend,
+            draft_gpu,
+            load_draft ? &feature_ring : nullptr,
+            prompt, n_gen, max_ctx, run_dflash,
+            /*out_path=*/nullptr,
+            stream_fd);
+        (void)ok;
+    }
+
+    draft_feature_mirror_free(feature_ring);
+    free_draft_weights(draft_weights);
+    if (draft_backend_owned && draft_backend) ggml_backend_free(draft_backend);
+    free_target_layer_split_shards(shards);
+    return 0;
+}
+
 static int run_target_layer_split_harness(
         const char * target_path,
         const char * draft_path,
@@ -1706,7 +2002,10 @@ static int run_target_layer_split_harness(
         bool run_draft_smoke,
         bool run_dflash,
         int max_ctx,
-        int max_verify_tokens) {
+        int max_verify_tokens,
+        bool peer_access) {
+    g_peer_access_opt_in = peer_access;
+    g_peer_pair_ok_cache.clear();
     if (!prompt_path || !out_path) {
         std::fprintf(stderr, "target layer split requires prompt/n_gen/out positional args\n");
         return 2;
@@ -1952,7 +2251,7 @@ static int run_target_layer_split_harness(
     if (run_dflash) {
         const bool ok = run_target_layer_split_dflash_decode(
             shards, draft_weights, draft_backend, draft_gpu, feature_ring,
-            prompt, n_gen, last_tok, out_path);
+            prompt, n_gen, last_tok, out_path, /*stream_fd=*/-1);
         draft_feature_mirror_free(feature_ring);
         free_draft_weights(draft_weights);
         if (draft_backend_owned) ggml_backend_free(draft_backend);
@@ -1996,9 +2295,6 @@ static int run_target_layer_split_harness(
 }
 
 // ─── Main ─────────────────────────────────────────────────────────
-
-static SamplerCfg     g_sampler;
-static std::mt19937_64 g_sampler_rng{std::random_device{}()};
 
 int main(int argc, char ** argv) {
     if (argc < 3) {
@@ -2128,6 +2424,9 @@ int main(int argc, char ** argv) {
         else if (std::strcmp(argv[i], "--test-window") == 0)      { test_window_mode = true; }
         else if (std::strcmp(argv[i], "--draft-feature-mirror") == 0) {
             draft_feature_mirror = true;
+        }
+        else if (std::strcmp(argv[i], "--peer-access") == 0) {
+            g_peer_access_opt_in = true;
         }
         else if (std::strcmp(argv[i], "--target-split-load-draft") == 0) {
             target_split_load_draft = true;
@@ -2288,10 +2587,11 @@ int main(int argc, char ** argv) {
     if (target_split_dflash) target_split_load_draft = true;
     if (target_gpus.empty()) target_gpus.push_back(target_gpu);
     if (target_gpus.size() == 1) target_gpu = target_gpus[0];
-    std::printf("[cfg] seq_verify=%d fast_rollback=%d ddtree=%d budget=%d temp=%.2f chain_seed=%d fa_window=%d draft_swa=%d draft_ctx_max=%d draft_feature_mirror=%d target_gpu=%d draft_gpu=%d\n",
+    std::printf("[cfg] seq_verify=%d fast_rollback=%d ddtree=%d budget=%d temp=%.2f chain_seed=%d fa_window=%d draft_swa=%d draft_ctx_max=%d draft_feature_mirror=%d peer_access=%d target_gpu=%d draft_gpu=%d\n",
                 (int)seq_verify, (int)fast_rollback, (int)ddtree_mode,
                 ddtree_budget, ddtree_temp, (int)ddtree_chain_seed, g_fa_window,
-                g_draft_swa_window, g_draft_ctx_max, (int)draft_feature_mirror, target_gpu, draft_gpu);
+                g_draft_swa_window, g_draft_ctx_max, (int)draft_feature_mirror,
+                (int)g_peer_access_opt_in, target_gpu, draft_gpu);
 
     int cuda_device_count = 0;
     cudaGetDeviceCount(&cuda_device_count);
@@ -2308,9 +2608,23 @@ int main(int argc, char ** argv) {
         return 2;
     }
     if (target_gpus.size() > 1) {
-        if (daemon_mode || test_window_mode || profile_scaling) {
-            std::fprintf(stderr, "--target-gpus multi-GPU harness currently supports non-daemon generation only\n");
+        if (test_window_mode || profile_scaling) {
+            std::fprintf(stderr, "--target-gpus path does not support test-window/profile-scaling modes\n");
             return 2;
+        }
+        if (daemon_mode) {
+            return run_target_layer_split_daemon(
+                target_path, draft_path,
+                target_gpus, target_split_weights,
+                draft_gpu,
+                target_split_load_draft,
+                target_split_dflash,
+                g_max_ctx_override > 0 ? g_max_ctx_override : 4096,
+                ddtree_mode
+                    ? std::max<int>(DFLASH27B_DRAFT_BLOCK_SIZE, ddtree_budget + 1)
+                    : DFLASH27B_DRAFT_BLOCK_SIZE,
+                g_peer_access_opt_in,
+                stream_fd);
         }
         if (target_split_dflash && fast_rollback) {
             std::fprintf(stderr,
@@ -2325,7 +2639,8 @@ int main(int argc, char ** argv) {
                                              g_max_ctx_override > 0 ? g_max_ctx_override : 4096,
                                              ddtree_mode
                                                  ? std::max<int>(DFLASH27B_DRAFT_BLOCK_SIZE, ddtree_budget + 1)
-                                                 : DFLASH27B_DRAFT_BLOCK_SIZE);
+                                                 : DFLASH27B_DRAFT_BLOCK_SIZE,
+                                             g_peer_access_opt_in);
     }
 
     const bool split_gpus = target_gpu != draft_gpu;
@@ -2336,10 +2651,13 @@ int main(int argc, char ** argv) {
         draft_backend = ggml_backend_cuda_init(draft_gpu);
         if (!draft_backend) { std::fprintf(stderr, "draft cuda init failed\n"); return 1; }
     }
-    if (split_gpus && !enable_peer_access_pair(target_gpu, draft_gpu)) {
-        std::fprintf(stderr,
-                     "warning: CUDA peer access is not fully enabled for target=%d draft=%d; split transfers may fail\n",
-                     target_gpu, draft_gpu);
+    if (split_gpus && g_peer_access_opt_in) {
+        if (!enable_peer_access_pair(target_gpu, draft_gpu)) {
+            std::fprintf(stderr,
+                         "warning: --peer-access requested but CUDA peer access could not be enabled "
+                         "for target=%d draft=%d; using staged host copies.\n",
+                         target_gpu, draft_gpu);
+        }
     }
     ggml_backend_t backend = target_backend; // legacy target-side alias
 
@@ -3521,31 +3839,68 @@ int main(int argc, char ** argv) {
                                 sizeof(float) * noise_embed_buf.size());
 
         if (!use_mirror_view) {
-            // target_hidden_cat: copy the draft-window slice of cache.target_feat
-            // (positions draft_start..committed) directly device-to-device.
-            // cache.target_feat is a ring of `target_feat_cap` bf16 slots, so
-            // positions map via `pos % cap`. If the draft window straddles the
-            // wrap boundary we split the bf16-to-f32 widen into two kernel calls.
-            const size_t fc_in    = (size_t)5 * hidden;
-            const int    cap      = cache.target_feat_cap;
-            const size_t elt_feat = ggml_element_size(cache.target_feat);
-            const int    slot0    = draft_start % cap;
-            const int    pre_n    = std::min(draft_ctx, cap - slot0);
-            const int    post_n   = draft_ctx - pre_n;
+            if (draft_feature_mirror) {
+                // Mirror ring is on the draft device; never read cache.target_feat (target VRAM)
+                // from the draft device when the ggml view is not contiguous.
+                if (!copy_feature_ring_range_to_tensor(feature_mirror, draft_sg.target_hidden_cat,
+                                                       draft_start, draft_ctx)) {
+                    std::fprintf(stderr, "draft mirror ring copy to target_hidden_cat failed\n");
+                    return 1;
+                }
+            } else {
+                // target_hidden_cat: widen BF16 cache.target_feat into draft-side F32.
+                // Same GPU: widen in place on the draft CUDA device.
+                // Split GPU: read BF16 rows from target via backend_get, convert on CPU,
+                // upload F32 to draft (no P2P required).
+                const size_t fc_in    = (size_t)5 * hidden;
+                const int    cap      = cache.target_feat_cap;
+                const size_t elt_feat = ggml_element_size(cache.target_feat);
+                const size_t row_bf16 = fc_in * elt_feat;
+                const int    slot0    = draft_start % cap;
+                const int    pre_n    = std::min(draft_ctx, cap - slot0);
+                const int    post_n   = draft_ctx - pre_n;
 
-            cudaSetDevice(draft_gpu);
-            auto bf16_to_f32 = ggml_get_to_fp32_cuda(GGML_TYPE_BF16);
-            bf16_to_f32(
-                (const char *)cache.target_feat->data + (size_t)slot0 * elt_feat * fc_in,
-                (float *)draft_sg.target_hidden_cat->data,
-                (int64_t)pre_n * fc_in,
-                nullptr);
-            if (post_n > 0) {
-                bf16_to_f32(
-                    (const char *)cache.target_feat->data,
-                    (float *)((char *)draft_sg.target_hidden_cat->data + (size_t)pre_n * fc_in * sizeof(float)),
-                    (int64_t)post_n * fc_in,
-                    nullptr);
+                if (!split_gpus) {
+                    cudaSetDevice(draft_gpu);
+                    auto bf16_to_f32 = ggml_get_to_fp32_cuda(GGML_TYPE_BF16);
+                    bf16_to_f32(
+                        (const char *)cache.target_feat->data + (size_t)slot0 * row_bf16,
+                        (float *)draft_sg.target_hidden_cat->data,
+                        (int64_t)pre_n * fc_in,
+                        nullptr);
+                    if (post_n > 0) {
+                        bf16_to_f32(
+                            (const char *)cache.target_feat->data,
+                            (float *)((char *)draft_sg.target_hidden_cat->data +
+                                      (size_t)pre_n * fc_in * sizeof(float)),
+                            (int64_t)post_n * fc_in,
+                            nullptr);
+                    }
+                } else {
+                    std::vector<uint16_t> bf16_lin((size_t)draft_ctx * fc_in);
+                    for (int i = 0; i < pre_n; i++) {
+                        const int    slot = slot0 + i;
+                        const size_t off  = (size_t)slot * row_bf16;
+                        ggml_backend_tensor_get(cache.target_feat,
+                                                bf16_lin.data() + (size_t)i * fc_in,
+                                                off, row_bf16);
+                    }
+                    for (int j = 0; j < post_n; j++) {
+                        const size_t off = (size_t)j * row_bf16;
+                        ggml_backend_tensor_get(cache.target_feat,
+                                                bf16_lin.data() + (size_t)(pre_n + j) * fc_in,
+                                                off, row_bf16);
+                    }
+                    std::vector<float> f32_lin((size_t)draft_ctx * fc_in);
+                    for (size_t k = 0; k < bf16_lin.size(); k++) {
+                        uint32_t bits = (uint32_t)bf16_lin[k] << 16;
+                        float    f;
+                        std::memcpy(&f, &bits, sizeof(f));
+                        f32_lin[k] = f;
+                    }
+                    ggml_backend_tensor_set(draft_sg.target_hidden_cat, f32_lin.data(), 0,
+                                            f32_lin.size() * sizeof(float));
+                }
             }
         }
         auto T_draft_copy = sync_us();
