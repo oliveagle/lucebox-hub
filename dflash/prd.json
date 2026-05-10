@@ -85,9 +85,10 @@
       "description": "高级功能",
       "acceptanceCriteria": [],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "labels": [],
-      "dependsOn": []
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "STORY-009",
@@ -181,6 +182,6 @@
     "createdAt": "2026-05-10T12:53:24.143Z",
     "version": "1.0.0",
     "sourcePrd": "TODO.md",
-    "updatedAt": "2026-05-10T16:34:18.882Z"
+    "updatedAt": "2026-05-10T18:23:55.241Z"
   }
 }

@@ -614,7 +614,8 @@ bool DFlashServer::run_dflash_decode(
     int n_gen,
     int last_tok,
     std::function<void(int32_t)> on_token,
-    int& n_generated) {
+    int& n_generated,
+    const SamplerCfg& sampler) {
 
     const int hidden = DFLASH27B_TARGET_HIDDEN;
     const int vocab = DFLASH27B_TARGET_VOCAB;
@@ -949,8 +950,27 @@ bool DFlashServer::run_dflash_decode(
             return false;
         }
 
-        ggml_backend_tensor_get(target_sg_.argmax_tokens, &replay_last_tok, 0, sizeof(int32_t));
-        last_tok = replay_last_tok;
+        // Sample or greedy decode for next token from replay logits
+        // (instead of using argmax directly)
+        std::vector<float> last_logits(vocab);
+        ggml_backend_tensor_get(target_sg_.logits, last_logits.data(),
+                                (size_t)(commit_n - 1) * vocab * sizeof(float),
+                                sizeof(float) * vocab);
+        if (sampler.temp > 0.0f) {
+            last_tok = sample_logits(last_logits.data(), vocab, sampler, token_history_, rng_);
+        } else {
+            last_tok = argmax_f32(last_logits.data(), vocab);
+        }
+
+        // Update token history for repetition penalty
+        for (int i = 0; i < commit_n; i++) {
+            token_history_.push_back(replay_tok[i]);
+        }
+        // Keep history bounded to rep_window
+        if ((int)token_history_.size() > sampler.rep_window) {
+            token_history_.erase(token_history_.begin(),
+                                 token_history_.end() - sampler.rep_window);
+        }
 
         // Emit tokens and check EOS
         bool hit_eos = false;
@@ -1105,7 +1125,8 @@ std::vector<int32_t> DFlashServer::generate_internal(
     const std::vector<int32_t>& prompt_tokens,
     int n_gen,
     std::function<void(int32_t)> on_token,
-    bool has_tools) {
+    bool has_tools,
+    const SamplerCfg& sampler) {
 
     std::lock_guard<std::mutex> lock(generation_mutex_);
 
@@ -1115,6 +1136,20 @@ std::vector<int32_t> DFlashServer::generate_internal(
         std::cerr << "generate_internal: models or cache not initialized" << std::endl;
         return result;
     }
+
+    // Resolve sampling config: use provided sampler or fall back to server defaults
+    SamplerCfg effective_sampler = sampler;
+    if (effective_sampler.temp == 0.0f && effective_sampler.top_p == 1.0f &&
+        effective_sampler.top_k == 0 && effective_sampler.rep_pen == 1.0f) {
+        effective_sampler = sampler_cfg_;  // Use server's resolved defaults
+    }
+    if (effective_sampler.seed == 0) {
+        effective_sampler.seed = std::random_device{}();
+    }
+    // Apply to class member so run_dflash_decode can use it
+    sampler_cfg_ = effective_sampler;
+    // Seed the RNG for this request (deterministic if seed was provided)
+    rng_.seed(effective_sampler.seed);
 
     const int hidden = DFLASH27B_TARGET_HIDDEN;
     const int vocab = DFLASH27B_TARGET_VOCAB;
@@ -1265,7 +1300,7 @@ std::vector<int32_t> DFlashServer::generate_internal(
 
     // Run DFlash decode loop
     int n_generated = 0;
-    if (!run_dflash_decode(working_tokens, n_gen, last_tok, on_token, n_generated)) {
+    if (!run_dflash_decode(working_tokens, n_gen, last_tok, on_token, n_generated, effective_sampler)) {
         std::cerr << "dflash decode failed" << std::endl;
         return result;
     }
@@ -1312,6 +1347,19 @@ bool DFlashServer::initialize(const ServerConfig& config) {
         .keep_ratio = config.prefill_keep_ratio,
         .drafter_path = config.prefill_drafter
     };
+
+    // Initialize sampling state
+    std::random_device rd;
+    rng_.seed(rd());
+    sampler_cfg_ = {
+        .temp = 0.0f,      // Default: greedy (argmax)
+        .top_p = 1.0f,
+        .top_k = 0,
+        .rep_pen = 1.0f,
+        .rep_window = 256,
+        .seed = 0
+    };
+    token_history_.reserve(1024);  // Pre-allocate for repetition penalty
 
     // Resolve KV cache types (config values override environment variables)
     ggml_type kv_k_type, kv_v_type;
@@ -1482,7 +1530,16 @@ void DFlashServer::handle_chat_completions(const httplib::Request& req, httplib:
 
         // Check if tools are present (affects prefill compression)
         bool has_tools = chat_req.tools.has_value() && !chat_req.tools->empty();
-        std::vector<int32_t> tokens = generate_internal(prompt_tokens, chat_req.max_tokens, nullptr, has_tools);
+
+        // Resolve sampling config from request parameters
+        SamplerCfg req_sampler;
+        if (chat_req.temperature.has_value()) req_sampler.temp = *chat_req.temperature;
+        if (chat_req.top_p.has_value()) req_sampler.top_p = *chat_req.top_p;
+        if (chat_req.top_k.has_value()) req_sampler.top_k = *chat_req.top_k;
+        if (chat_req.repetition_penalty.has_value()) req_sampler.rep_pen = *chat_req.repetition_penalty;
+        if (chat_req.seed.has_value()) req_sampler.seed = *chat_req.seed;
+
+        std::vector<int32_t> tokens = generate_internal(prompt_tokens, chat_req.max_tokens, nullptr, has_tools, req_sampler);
 
         // Build response
         ChatResponse chat_resp = build_chat_response(tokens, chat_req);
@@ -1646,9 +1703,17 @@ void DFlashServer::handle_chat_completions_stream(const httplib::Request& req, h
                     return true;  // Continue generation
                 };
 
+                // Resolve sampling config from request parameters
+                SamplerCfg req_sampler;
+                if (chat_req.temperature.has_value()) req_sampler.temp = *chat_req.temperature;
+                if (chat_req.top_p.has_value()) req_sampler.top_p = *chat_req.top_p;
+                if (chat_req.top_k.has_value()) req_sampler.top_k = *chat_req.top_k;
+                if (chat_req.repetition_penalty.has_value()) req_sampler.rep_pen = *chat_req.repetition_penalty;
+                if (chat_req.seed.has_value()) req_sampler.seed = *chat_req.seed;
+
                 // Generate tokens with streaming callback
                 bool has_tools = chat_req.tools.has_value() && !chat_req.tools->empty();
-                generate_internal(prompt_tokens, chat_req.max_tokens, on_token, has_tools);
+                generate_internal(prompt_tokens, chat_req.max_tokens, on_token, has_tools, req_sampler);
 
                 // Send final chunk with finish_reason
                 json final_chunk = {
@@ -1790,6 +1855,14 @@ ChatRequest DFlashServer::parse_chat_request(const httplib::Request& req) {
     if (body.contains("tool_choice")) {
         req_data.tool_choice = body["tool_choice"];
     }
+    // Parse seed (for reproducibility)
+    if (body.contains("seed")) {
+        req_data.seed = body["seed"].get<uint64_t>();
+    }
+    // Parse repetition penalty
+    if (body.contains("repetition_penalty")) {
+        req_data.repetition_penalty = body["repetition_penalty"];
+    }
 
     // Parse messages
     if (body.contains("messages")) {
@@ -1917,6 +1990,10 @@ AnthropicMessagesRequest DFlashServer::parse_anthropic_messages_request(
     }
     if (body.contains("top_k")) {
         areq.top_k = body["top_k"];
+    }
+    // Parse seed (OpenAI-compatible extension for reproducibility)
+    if (body.contains("seed")) {
+        areq.seed = body["seed"].get<uint64_t>();
     }
 
     // Parse system prompt
@@ -2306,11 +2383,18 @@ void DFlashServer::handle_anthropic_messages_impl(
     std::vector<int32_t> prompt_tokens;
     // TODO: Apply chat template and tokenize
 
+    // Resolve sampling config from request parameters
+    SamplerCfg req_sampler;
+    if (areq.temperature.has_value()) req_sampler.temp = *areq.temperature;
+    if (areq.top_p.has_value()) req_sampler.top_p = *areq.top_p;
+    if (areq.top_k.has_value()) req_sampler.top_k = *areq.top_k;
+    if (areq.seed.has_value()) req_sampler.seed = *areq.seed;
+
     // Check if tools are present (affects prefill compression)
     bool has_tools = areq.tools.has_value() && !areq.tools->empty();
 
     // Generation is handled internally with prefix cache support
-    std::vector<int32_t> tokens = generate_internal(prompt_tokens, areq.max_tokens, nullptr, has_tools);
+    std::vector<int32_t> tokens = generate_internal(prompt_tokens, areq.max_tokens, nullptr, has_tools, req_sampler);
 
     // Build Anthropic response
     AnthropicMessagesResponse aresp = build_anthropic_response(tokens, areq);
@@ -2419,9 +2503,16 @@ void DFlashServer::handle_anthropic_messages_stream_impl(
                 return true;  // Continue generation
             };
 
+            // Resolve sampling config from request parameters
+            SamplerCfg req_sampler;
+            if (areq.temperature.has_value()) req_sampler.temp = *areq.temperature;
+            if (areq.top_p.has_value()) req_sampler.top_p = *areq.top_p;
+            if (areq.top_k.has_value()) req_sampler.top_k = *areq.top_k;
+            if (areq.seed.has_value()) req_sampler.seed = *areq.seed;
+
             // Generate tokens with streaming callback
             bool has_tools = areq.tools.has_value() && !areq.tools->empty();
-            generate_internal(prompt_tokens, creq.max_tokens, on_token, has_tools);
+            generate_internal(prompt_tokens, creq.max_tokens, on_token, has_tools, req_sampler);
 
             // Send content_block_stop event
             json block_stop_event = {

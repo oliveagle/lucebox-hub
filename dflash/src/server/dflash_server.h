@@ -16,6 +16,7 @@
 // cpp-httplib is in llama.cpp/vendor
 #include "cpp-httplib/httplib.h"
 #include "nlohmann/json.hpp"
+#include "sampler.h"
 
 // ggml types (forward declarations)
 struct ggml_context;
@@ -98,6 +99,9 @@ struct ChatRequest {
     std::optional<nlohmann::json> chat_template_kwargs;
     std::optional<nlohmann::json> stop;
     std::optional<nlohmann::json> stream_options;
+    // Sampling parameters
+    std::optional<float> repetition_penalty;
+    std::optional<uint64_t> seed;
 };
 
 struct ChatResponse {
@@ -173,6 +177,8 @@ struct AnthropicMessagesRequest {
     std::optional<std::vector<std::string>> stop_sequences;
     std::optional<std::vector<AnthropicTool>> tools;
     std::optional<AnthropicToolChoice> tool_choice;
+    // Sampling parameters (for compatibility with OpenAI-style sampling)
+    std::optional<uint64_t> seed;
 };
 
 // Anthropic Messages API response (non-streaming)
@@ -245,8 +251,9 @@ public:
     std::vector<int32_t> generate_internal(
         const std::vector<int32_t>& prompt_tokens,
         int n_gen,
-        std::function<void(int32_t)> on_token = nullptr,
-        bool has_tools = false
+        std::function<void(int32_t)> on_token,
+        bool has_tools,
+        const SamplerCfg& sampler
     );
 
     // Request parsing
@@ -327,7 +334,14 @@ public:
         int n_gen,
         int last_tok,
         std::function<void(int32_t)> on_token,
-        int& n_generated);
+        int& n_generated,
+        const SamplerCfg& sampler
+    );
+
+    // Sampling state
+    std::mt19937_64 rng_;
+    SamplerCfg sampler_cfg_;          // Resolved from request + server defaults
+    std::vector<int32_t> token_history_;  // For repetition penalty
 
     // Configuration
     ServerConfig config_;
@@ -354,10 +368,6 @@ public:
     StepGraph draft_sg_;
     StepGraph proj_sg_;
     DraftFeatureMirror feature_mirror_;
-
-    // Sampling state
-    std::mt19937_64 rng_;
-    std::vector<int32_t> token_history_;  // For repetition penalty
 
     // Thread safety
     std::mutex generation_mutex_;
