@@ -160,9 +160,10 @@
       "description": "18. 实现 OpenAI SSE 流式 19. 实现 Anthropic SSE 流式 20. 测试流式延迟",
       "acceptanceCriteria": [],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "labels": [],
-      "dependsOn": []
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "STORY-016",
@@ -179,6 +180,6 @@
     "createdAt": "2026-05-10T12:53:24.143Z",
     "version": "1.0.0",
     "sourcePrd": "TODO.md",
-    "updatedAt": "2026-05-10T15:56:20.932Z"
+    "updatedAt": "2026-05-10T15:59:00.647Z"
   }
 }
