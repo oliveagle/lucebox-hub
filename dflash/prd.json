@@ -1,45 +1,173 @@
 {
-  "name": "DFlash C++ HTTP 服务器 TODO",
-  "description": "✅ **已完成**: C++ HTTP 服务器框架已搭建，编译成功",
+  "name": "DFlash C++ HTTP 服务器完整实现 TODO",
+  "description": "✅ **已完成**: C++ HTTP 服务器框架已搭建，编译成功 📍 **可执行文件**: `build/dflash_server` 🔧 **已有核心组件**: DFlash 解码、DDTree、PFlash、TurboQuant KV Cache 均已实现（在 `test/test_dflash.cpp` 中）",
   "branchName": "feature/dflash-c-http-todo",
   "userStories": [
     {
       "id": "STORY-001",
-      "title": "核心功能 (必须实现)",
-      "description": "- [ ] Tokenizer 集成 - [x] 创建 src/server/tokenizer.h - [x] 创建 src/server/tokenizer.cpp - [ ] 创建 src/server/tokenizer_parser.h (辅助工具) - [ ] 使用 llama.cpp 的 gguf_get_tokenizer() 加载分词器 - [ ] 实现 encode() 方法：文本 → token IDs - [ ] 实现 decode() 方法：token IDs → 文本 - [ ] 实现 vocab_size() 属性",
+      "title": "修复占位符 (必须先完成)",
+      "description": "修复占位符 (必须先完成)",
       "acceptanceCriteria": [],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "labels": [],
-      "dependsOn": [],
-      "completionNotes": "Completed by agent"
+      "dependsOn": []
     },
     {
       "id": "STORY-002",
-      "title": "高级功能 (重要但非阻塞)",
-      "description": "- [ ] 工具调用解析 - [ ] 创建 src/server/parsers.h - [ ] 创建 src/server/parsers.cpp - [ ] 实现正则表达式解析 Qwen3 工具调用格式 - [ ] 转换为 OpenAI 格式响应 - [ ] 支持参数类型转换 (string/int/float/bool)",
+      "title": "核心生成循环",
+      "description": "核心生成循环",
       "acceptanceCriteria": [],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "labels": [],
-      "dependsOn": [],
-      "completionNotes": "Completed by agent"
+      "dependsOn": []
     },
     {
       "id": "STORY-003",
-      "title": "完善和优化",
-      "description": "- [ ] Anthropic Messages API - [ ] 实现 /v1/messages 端点 - [ ] 支持 Anthropic 流式格式",
+      "title": "PFlash 压缩集成",
+      "description": "PFlash 压缩集成",
       "acceptanceCriteria": [],
       "priority": 3,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-004",
+      "title": "TurboQuant KV Cache",
+      "description": "TurboQuant KV Cache",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-005",
+      "title": "DDTree 树形推测解码",
+      "description": "DDTree 树形推测解码",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-006",
+      "title": "流式响应",
+      "description": "流式响应",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-007",
+      "title": "Prefix Cache",
+      "description": "Prefix Cache",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-008",
+      "title": "高级功能",
+      "description": "高级功能",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-009",
+      "title": "基础功能 (1-2 天)",
+      "description": "1. 移除占位符，集成真实 Tokenizer 2. 实现模型加载 (target + draft + cache) 3. 实现基础 generate_internal() (不含 DDTree/PFlash)",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-010",
+      "title": "Chat Template (半天)",
+      "description": "4. 实现 Chat Template 引擎 5. 测试 OpenAI Chat Completions API",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-011",
+      "title": "DFlash 解码 (1 天)",
+      "description": "6. 完整实现 DFlash 解码循环 7. 支持 draft + verify + accept + replay 8. 测试生成质量",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-012",
+      "title": "PFlash 压缩 (1 天)",
+      "description": "9. 集成 PFlash Drafter 10. 实现压缩协调逻辑 11. 测试长上下文性能",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-013",
+      "title": "DDTree (1 天)",
+      "description": "12. 提取 DDTree 代码 13. 实现树形验证 14. 测试接受率提升",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-014",
+      "title": "TurboQuant (半天)",
+      "description": "15. 集成 KV 类型解析 16. 支持环境变量配置 17. 测试内存和速度",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-015",
+      "title": "流式响应 (半天)",
+      "description": "18. 实现 OpenAI SSE 流式 19. 实现 Anthropic SSE 流式 20. 测试流式延迟",
+      "acceptanceCriteria": [],
+      "priority": 4,
+      "passes": false,
+      "labels": [],
+      "dependsOn": []
+    },
+    {
+      "id": "STORY-016",
+      "title": "高级功能 (1-2 天)",
+      "description": "21. 实现 Prefix Cache 22. 实现工具调用集成 23. 完善错误处理和日志",
+      "acceptanceCriteria": [],
+      "priority": 4,
       "passes": false,
       "labels": [],
       "dependsOn": []
     }
   ],
   "metadata": {
-    "createdAt": "2026-05-10T11:26:50.097Z",
+    "createdAt": "2026-05-10T12:53:24.143Z",
     "version": "1.0.0",
     "sourcePrd": "TODO.md",
-    "updatedAt": "2026-05-10T12:04:10.205Z"
+    "updatedAt": "2026-05-10T12:53:48.414Z"
   }
 }

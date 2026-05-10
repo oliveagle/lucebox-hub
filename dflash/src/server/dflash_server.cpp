@@ -5,14 +5,17 @@
 
 #include "dflash_server.h"
 #include "internal.h"
+#include "parsers.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include <optional>
 
 #include "cpp-httplib/httplib.h"
 #include "nlohmann/json.hpp"
@@ -204,6 +207,13 @@ void DFlashServer::setup_routes() {
             res.set_content(health.dump(), "application/json");
         }
     );
+
+    // Anthropic Messages API
+    http_server_->Post("/v1/messages",
+        [this](const httplib::Request& req, httplib::Response& res) {
+            handle_anthropic_messages(req, res);
+        }
+    );
 }
 
 bool DFlashServer::is_streaming_request(const httplib::Request& req) {
@@ -368,6 +378,404 @@ ChatResponse DFlashServer::build_chat_response(
     resp.usage.total_tokens = 0;  // TODO
 
     return resp;
+}
+
+// ─── Reasoning Extraction (using parsers) ────────────────────────────────
+
+std::pair<std::string, std::string> DFlashServer::extract_reasoning(
+    const std::string& text
+) {
+    // Use the parse_reasoning function from parsers.cpp
+    ReasoningParseResult result = parse_reasoning(text, /*thinking_enabled=*/true);
+    return {result.content, result.reasoning};
+}
+
+// ─── Anthropic Messages API Implementation ──────────────────────────────
+
+AnthropicMessagesRequest DFlashServer::parse_anthropic_messages_request(
+    const httplib::Request& req
+) {
+    json body = json::parse(req.body);
+
+    AnthropicMessagesRequest areq;
+
+    // Parse model
+    areq.model = body.value("model", "dflash");
+
+    // Parse stream flag
+    areq.stream = body.value("stream", false);
+
+    // Parse max_tokens (required by Anthropic)
+    if (body.contains("max_tokens")) {
+        areq.max_tokens = body["max_tokens"];
+    }
+
+    // Parse optional parameters
+    if (body.contains("temperature")) {
+        areq.temperature = body["temperature"];
+    }
+    if (body.contains("top_p")) {
+        areq.top_p = body["top_p"];
+    }
+    if (body.contains("top_k")) {
+        areq.top_k = body["top_k"];
+    }
+
+    // Parse system prompt
+    if (body.contains("system")) {
+        if (body["system"].is_string()) {
+            areq.system = body["system"];
+        }
+        // TODO: Handle system as array of content blocks
+    }
+
+    // Parse stop_sequences
+    if (body.contains("stop_sequences")) {
+        std::vector<std::string> seqs;
+        for (const auto& s : body["stop_sequences"]) {
+            seqs.push_back(s);
+        }
+        areq.stop_sequences = std::move(seqs);
+    }
+
+    // Parse messages
+    if (body.contains("messages")) {
+        for (const auto& msg : body["messages"]) {
+            AnthropicMessage am;
+            am.role = msg["role"];
+
+            // Parse content (can be string or array)
+            if (msg.contains("content")) {
+                if (msg["content"].is_string()) {
+                    // Simple text content
+                    AnthropicContentBlock block;
+                    block.type = "text";
+                    block.text = msg["content"];
+                    am.content.push_back(block);
+                } else if (msg["content"].is_array()) {
+                    // Array of content blocks
+                    for (const auto& cb : msg["content"]) {
+                        AnthropicContentBlock block;
+                        block.type = cb.value("type", "text");
+
+                        if (block.type == "text") {
+                            block.text = cb.value("text", "");
+                        } else if (block.type == "image") {
+                            // TODO: Handle image content
+                            block.source_type = cb["source"].value("type", "");
+                            block.media_type = cb["source"].value("media_type", "");
+                            block.data = cb["source"].value("data", "");
+                        } else if (block.type == "tool_use") {
+                            block.id = cb.value("id", "");
+                            block.input_json = cb.value("input", json::object()).dump();
+                        } else if (block.type == "tool_result") {
+                            block.id = cb.value("tool_use_id", "");
+                            if (cb["content"].is_string()) {
+                                block.text = cb["content"];
+                            }
+                        }
+
+                        am.content.push_back(block);
+                    }
+                }
+            }
+
+            // Parse optional name
+            if (msg.contains("name")) {
+                am.name = msg["name"];
+            }
+
+            areq.messages.push_back(am);
+        }
+    }
+
+    // Parse tools
+    if (body.contains("tools")) {
+        areq.tools = std::vector<AnthropicTool>{};
+        for (const auto& tool : body["tools"]) {
+            AnthropicTool atool;
+            atool.name = tool["name"];
+            atool.description = tool.value("description", "");
+            atool.input_schema = tool["input_schema"];
+            areq.tools->push_back(atool);
+        }
+    }
+
+    // Parse tool_choice
+    if (body.contains("tool_choice")) {
+        auto& tc = body["tool_choice"];
+        if (tc.is_string()) {
+            std::string tc_str = tc;
+            if (tc_str == "auto") {
+                areq.tool_choice = AnthropicToolChoice{AnthropicToolChoiceType::auto_mode, ""};
+            } else if (tc_str == "any") {
+                areq.tool_choice = AnthropicToolChoice{AnthropicToolChoiceType::any, ""};
+            }
+        } else if (tc.is_object()) {
+            std::string type = tc.value("type", "auto");
+            if (type == "tool") {
+                areq.tool_choice = AnthropicToolChoice{
+                    AnthropicToolChoiceType::tool,
+                    tc.value("name", "")
+                };
+            }
+        }
+    }
+
+    return areq;
+}
+
+ChatRequest DFlashServer::convert_anthropic_to_chat(
+    const AnthropicMessagesRequest& areq
+) {
+    ChatRequest creq;
+
+    // Set basic fields
+    creq.model = areq.model;
+    creq.stream = areq.stream;
+    creq.max_tokens = areq.max_tokens;
+    creq.temperature = areq.temperature;
+    creq.top_p = areq.top_p;
+
+    // Convert messages
+    for (const auto& am : areq.messages) {
+        ChatMessage cm;
+        cm.role = am.role;
+
+        // Join all text content blocks
+        std::string text_content;
+        for (const auto& cb : am.content) {
+            if (cb.type == "text") {
+                text_content += cb.text;
+            }
+            // TODO: Handle tool_use and tool_result blocks
+        }
+
+        cm.content = text_content;
+
+        if (am.name) {
+            cm.name = *am.name;
+        }
+
+        creq.messages.push_back(cm);
+    }
+
+    // Handle system prompt (prepend as user message for now)
+    // TODO: Properly integrate system prompt with chat template
+    if (!areq.system.empty()) {
+        ChatMessage sys_msg;
+        sys_msg.role = "system";
+        sys_msg.content = areq.system;
+        creq.messages.insert(creq.messages.begin(), sys_msg);
+    }
+
+    // Convert stop_sequences to stop
+    if (areq.stop_sequences) {
+        creq.stop = *areq.stop_sequences;
+    }
+
+    // Convert tools (from Anthropic to OpenAI format)
+    if (areq.tools) {
+        creq.tools = std::vector<ToolDef>{};
+        for (const auto& atool : *areq.tools) {
+            ToolDef tdef;
+            tdef.type = "function";
+            tdef.function = {
+                {"name", atool.name},
+                {"description", atool.description},
+                {"parameters", atool.input_schema}
+            };
+            creq.tools->push_back(tdef);
+        }
+    }
+
+    return creq;
+}
+
+AnthropicMessagesResponse DFlashServer::build_anthropic_response(
+    const std::vector<int32_t>& tokens,
+    const AnthropicMessagesRequest& areq,
+    const std::string& reasoning
+) {
+    AnthropicMessagesResponse resp;
+
+    // Generate message ID
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = now.time_since_epoch().count();
+    resp.id = "msg_" + std::to_string(timestamp);
+
+    resp.model = areq.model;
+    resp.type = "message";
+    resp.role = "assistant";
+
+    // Decode tokens to text
+    std::string text = tokenizer_->decode(tokens);
+
+    // Parse reasoning if present
+    std::string content_text = text;
+    if (!reasoning.empty()) {
+        // If reasoning was provided separately, use it
+        // TODO: Handle reasoning content in Anthropic format
+    } else {
+        // Check if text contains reasoning tags
+        size_t think_pos = text.find("\xe5\x8f\x8d\xe5\xa4\x8d\xe6\x8e\xa8\xe7\x90\x86");  // 反复推理
+        if (think_pos != std::string::npos) {
+            // Has reasoning - extract it
+            auto [content, reasoning_content] = extract_reasoning(text);
+            content_text = content;
+            // TODO: Include reasoning in response
+        }
+    }
+
+    // Create text content block
+    AnthropicContentBlock block;
+    block.type = "text";
+    block.text = content_text;
+    resp.content.push_back(block);
+
+    // Set stop_reason
+    resp.stop_reason = "end_turn";  // Default
+    // TODO: Determine actual stop_reason from generation
+
+    // Set usage
+    resp.usage.input_tokens = 0;  // TODO: Get from prompt
+    resp.usage.output_tokens = tokens.size();
+
+    return resp;
+}
+
+json DFlashServer::anthropic_response_to_json(
+    const AnthropicMessagesResponse& resp
+) {
+    json content_blocks = json::array();
+    for (const auto& cb : resp.content) {
+        json block;
+        block["type"] = cb.type;
+
+        if (cb.type == "text") {
+            block["text"] = cb.text;
+        } else if (cb.type == "tool_use") {
+            block["id"] = cb.id;
+            block["name"] = cb.text;  // Reusing text field for tool name
+            block["input"] = json::parse(cb.input_json);
+        } else if (cb.type == "tool_result") {
+            block["tool_use_id"] = cb.id;
+            block["content"] = cb.text;
+        } else if (cb.type == "image") {
+            block["source"] = {
+                {"type", cb.source_type},
+                {"media_type", cb.media_type},
+                {"data", cb.data}
+            };
+        }
+
+        content_blocks.push_back(block);
+    }
+
+    json response = {
+        {"id", resp.id},
+        {"type", resp.type},
+        {"role", resp.role},
+        {"content", content_blocks},
+        {"model", resp.model},
+        {"stop_reason", resp.stop_reason},
+        {"usage", {
+            {"input_tokens", resp.usage.input_tokens},
+            {"output_tokens", resp.usage.output_tokens}
+        }}
+    };
+
+    return response;
+}
+
+std::string DFlashServer::anthropic_event_to_sse(
+    const std::string& event_name,
+    const json& event_data
+) {
+    std::ostringstream oss;
+    oss << "event: " << event_name << "\n";
+    oss << "data: " << event_data.dump() << "\n\n";
+    return oss.str();
+}
+
+void DFlashServer::handle_anthropic_messages(
+    const httplib::Request& req,
+    httplib::Response& res
+) {
+    try {
+        AnthropicMessagesRequest areq = parse_anthropic_messages_request(req);
+
+        if (areq.stream) {
+            handle_anthropic_messages_stream_impl(areq, res);
+        } else {
+            handle_anthropic_messages_impl(areq, res);
+        }
+
+    } catch (const std::exception& e) {
+        // Return Anthropic-style error
+        json error = {
+            {"type", "error"},
+            {"error", {
+                {"type", "internal_error"},
+                {"message", std::string("Internal error: ") + e.what()}
+            }}
+        };
+        res.status = 500;
+        res.set_content(error.dump(), "application/json");
+    }
+}
+
+void DFlashServer::handle_anthropic_messages_impl(
+    const AnthropicMessagesRequest& areq,
+    httplib::Response& res
+) {
+    // Convert to ChatRequest and use existing generation logic
+    ChatRequest creq = convert_anthropic_to_chat(areq);
+
+    // Tokenize prompt
+    std::vector<int32_t> prompt_tokens;
+    // TODO: Apply chat template and tokenize
+
+    // Check cache
+    auto cached_slot = prefix_cache_->find_slot(prompt_tokens);
+
+    std::vector<int32_t> tokens;
+
+    if (cached_slot) {
+        // Restore from cache
+        // TODO: Implement cache restore
+    } else {
+        // Generate
+        tokens = generate_internal(prompt_tokens, creq.max_tokens);
+
+        // Cache result
+        int slot = prefix_cache_->allocate_slot();
+        if (slot >= 0) {
+            // TODO: Snapshot cache
+        }
+    }
+
+    // Build Anthropic response
+    AnthropicMessagesResponse aresp = build_anthropic_response(tokens, areq);
+
+    // Convert to JSON
+    json response_json = anthropic_response_to_json(aresp);
+
+    res.set_content(response_json.dump(), "application/json");
+}
+
+void DFlashServer::handle_anthropic_messages_stream_impl(
+    const AnthropicMessagesRequest& areq,
+    httplib::Response& res
+) {
+    // Set SSE headers
+    res.set_header("Content-Type", "text/event-stream");
+    res.set_header("Cache-Control", "no-cache");
+    res.set_header("Connection", "keep-alive");
+
+    // For now, use non-streaming implementation as placeholder
+    // TODO: Implement proper SSE streaming with Anthropic event format
+    handle_anthropic_messages_impl(areq, res);
 }
 
 void DFlashServer::run() {

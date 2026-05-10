@@ -109,6 +109,77 @@ struct ChatResponse {
     } usage;
 };
 
+// ─── Anthropic Messages API Types ─────────────────────────────────────
+
+// Anthropic content block (text, image, tool_use, tool_result)
+struct AnthropicContentBlock {
+    std::string type;  // "text", "image", "tool_use", "tool_result"
+    std::string text;
+    // For tool_use
+    std::string id;
+    std::string input_json;
+    // For image (not implemented yet)
+    std::string source_type;
+    std::string media_type;
+    std::string data;
+};
+
+// Anthropic message (role + content blocks)
+struct AnthropicMessage {
+    std::string role;  // "user" or "assistant"
+    std::vector<AnthropicContentBlock> content;  // Can be text, images, etc.
+    std::optional<std::string> name;  // Optional name for the message
+};
+
+// Anthropic tool definition
+struct AnthropicTool {
+    std::string name;
+    std::string description;
+    nlohmann::json input_schema;  // JSON Schema
+};
+
+// Anthropic tool_choice
+enum class AnthropicToolChoiceType {
+    auto_mode,   // default
+    any,
+    tool         // specific tool
+};
+
+struct AnthropicToolChoice {
+    AnthropicToolChoiceType type = AnthropicToolChoiceType::auto_mode;
+    std::string tool_name;  // only for tool type
+};
+
+// Anthropic Messages API request
+struct AnthropicMessagesRequest {
+    std::string model = "dflash";
+    std::vector<AnthropicMessage> messages;
+    // System prompt can be string or array of content blocks
+    std::string system;
+    bool stream = false;
+    int max_tokens = 4096;
+    std::optional<float> temperature;
+    std::optional<float> top_p;
+    std::optional<float> top_k;
+    std::optional<std::vector<std::string>> stop_sequences;
+    std::optional<std::vector<AnthropicTool>> tools;
+    std::optional<AnthropicToolChoice> tool_choice;
+};
+
+// Anthropic Messages API response (non-streaming)
+struct AnthropicMessagesResponse {
+    std::string id;
+    std::string model;
+    std::string type = "message";
+    std::string role = "assistant";
+    std::vector<AnthropicContentBlock> content;
+    std::string stop_reason;  // "end_turn", "max_tokens", "stop_sequence", "tool_use"
+    struct Usage {
+        int input_tokens;
+        int output_tokens;
+    } usage;
+};
+
 // ─── Main Server Class ─────────────────────────────────────────────────
 
 class DFlashServer {
@@ -159,6 +230,42 @@ public:
 
     // Reasoning extraction
     std::pair<std::string, std::string> extract_reasoning(const std::string& text);
+
+    // ─── Anthropic Messages API Methods ─────────────────────────────
+
+    // Parse Anthropic Messages API request from JSON body
+    AnthropicMessagesRequest parse_anthropic_messages_request(const httplib::Request& req);
+
+    // Convert Anthropic request to internal ChatRequest format
+    ChatRequest convert_anthropic_to_chat(const AnthropicMessagesRequest& areq);
+
+    // Build Anthropic response from generated tokens
+    AnthropicMessagesResponse build_anthropic_response(
+        const std::vector<int32_t>& tokens,
+        const AnthropicMessagesRequest& areq,
+        const std::string& reasoning = ""
+    );
+
+    // Serialize Anthropic response to JSON
+    nlohmann::json anthropic_response_to_json(const AnthropicMessagesResponse& resp);
+
+    // Serialize Anthropic streaming event to SSE format
+    std::string anthropic_event_to_sse(
+        const std::string& event_name,
+        const nlohmann::json& event_data
+    );
+
+    // Handle Anthropic Messages API (non-streaming)
+    void handle_anthropic_messages_impl(
+        const AnthropicMessagesRequest& areq,
+        httplib::Response& res
+    );
+
+    // Handle Anthropic Messages API (streaming)
+    void handle_anthropic_messages_stream_impl(
+        const AnthropicMessagesRequest& areq,
+        httplib::Response& res
+    );
 
     // Configuration
     ServerConfig config_;
