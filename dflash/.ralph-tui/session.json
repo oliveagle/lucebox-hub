@@ -3,10 +3,10 @@
   "sessionId": "8c372803-907a-4081-96ce-520a55886f9f",
   "status": "running",
   "startedAt": "2026-05-10T12:53:40.639Z",
-  "updatedAt": "2026-05-10T15:43:08.035Z",
-  "currentIteration": 15,
+  "updatedAt": "2026-05-10T15:48:14.590Z",
+  "currentIteration": 16,
   "maxIterations": 50,
-  "tasksCompleted": 8,
+  "tasksCompleted": 9,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -164,6 +164,16 @@
       "durationMs": 312890,
       "startedAt": "2026-05-10T15:31:52.863Z",
       "endedAt": "2026-05-10T15:37:05.753Z"
+    },
+    {
+      "iteration": 16,
+      "status": "completed",
+      "taskId": "STORY-012",
+      "taskTitle": "PFlash 压缩 (1 天)",
+      "taskCompleted": true,
+      "durationMs": 361162,
+      "startedAt": "2026-05-10T15:37:06.871Z",
+      "endedAt": "2026-05-10T15:43:08.033Z"
     }
   ],
   "skippedTaskIds": [],
