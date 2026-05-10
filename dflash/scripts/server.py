@@ -43,6 +43,18 @@ from _prefill_hook import (
 from prefix_cache import DaemonStdoutBus, PrefixCache
 
 
+class OpenAICompatError(Exception):
+    def __init__(self, message: str, status_code: int = 400,
+                 error_type: str = "invalid_request_error",
+                 param: str | None = None, code: str | None = None):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.error_type = error_type
+        self.param = param
+        self.code = code
+
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TARGET = Path(os.environ.get(
     "DFLASH_TARGET",
@@ -150,6 +162,13 @@ TOOL_CALL_PARAMETER_RE = re.compile(
     r"<parameter=(.*?)(?:</parameter>|(?=<parameter=)|(?=</function>)|$)",
     re.DOTALL,
 )
+BARE_FUNCTION_XML_RE = re.compile(
+    r"<function=([A-Za-z_][\w.-]*)>(.*?)</function>(?:\s*</tool_call>)?",
+    re.DOTALL,
+)
+FUNCTION_SIGNATURE_RE = re.compile(
+    r"<function=([A-Za-z_][\w.-]*)\((.*?)\)</function>", re.DOTALL)
+TOOL_CODE_RE = re.compile(r"<tool_code>(.*?)</tool_code>", re.DOTALL)
 TOOL_OPEN_TAG = "<tool_call>"
 THINK_OPEN_TAG = "<think>"
 THINK_CLOSE_TAG = "</think>"
@@ -210,6 +229,18 @@ def _find_tool_properties(tools, function_name):
     return {}
 
 
+def _tool_allowed(tools, function_name: str) -> bool:
+    if not tools:
+        return True
+    for t in tools or []:
+        fn = t.function if hasattr(t, "function") else t.get("function", {})
+        if hasattr(fn, "model_dump"):
+            fn = fn.model_dump()
+        if isinstance(fn, dict) and fn.get("name") == function_name:
+            return True
+    return False
+
+
 def _convert_param_value(param_value: str, param_name: str, param_config: dict,
                          func_name: str):
     """Coerce stringified XML values to their JSON-schema type."""
@@ -246,27 +277,71 @@ def _convert_param_value(param_value: str, param_name: str, param_config: dict,
     except (ValueError, SyntaxError, TypeError): return param_value
 
 
+def _parse_function_signature_args(arg_text: str) -> dict | None:
+    """Parse `<function=name(k="v")</function>` arguments without guessing."""
+    import ast
+    try:
+        expr = ast.parse(f"_f({arg_text})", mode="eval").body
+    except SyntaxError:
+        return None
+    if not isinstance(expr, ast.Call) or expr.args:
+        return None
+    args: dict = {}
+    for kw in expr.keywords:
+        if kw.arg is None:
+            return None
+        try:
+            args[kw.arg] = ast.literal_eval(kw.value)
+        except (ValueError, SyntaxError, TypeError):
+            return None
+    return args
+
+
+def _parse_json_tool_call(obj) -> tuple[str, dict] | None:
+    """Parse OpenAI-ish JSON tool call objects."""
+    if not isinstance(obj, dict):
+        return None
+    name = obj.get("name")
+    args = obj.get("arguments")
+    if not isinstance(name, str) and isinstance(obj.get("function"), dict):
+        fn = obj["function"]
+        name = fn.get("name")
+        args = fn.get("arguments")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            return None
+    if isinstance(name, str) and isinstance(args, dict):
+        return name, args
+    return None
+
+
 def parse_tool_calls(text: str, tools=None) -> tuple[str, list[dict]]:
-    """Parse Qwen3.x <tool_call> XML blocks into OpenAI tool_calls format.
+    """Parse textual tool-call shapes into OpenAI tool_calls format.
+
+    Supports Qwen XML, malformed function-call tags observed in model output,
+    bare JSON objects, and `<tool_code>{...}</tool_code>` wrappers.
 
     Returns (cleaned_content, tool_calls_list).
     """
     tool_calls: list[dict] = []
-    cleaned_parts: list[str] = []
-    cursor = 0
-    for m in TOOL_CALL_COMPLETE_RE.finditer(text):
-        cleaned_parts.append(text[cursor:m.start()])
-        cursor = m.end()
-        body = m.group(1)
-        fn_match = TOOL_CALL_FUNCTION_RE.search(body)
-        if not fn_match:
-            continue
-        fn_text = fn_match.group(1) or fn_match.group(2) or ""
-        end_idx = fn_text.find(">")
-        if end_idx == -1:
-            continue
-        function_name = fn_text[:end_idx].strip()
-        params_region = fn_text[end_idx + 1:]
+    removals: list[tuple[int, int]] = []
+
+    def add_call(function_name: str, args: dict, start: int, end: int):
+        if not _tool_allowed(tools, function_name):
+            return
+        tool_calls.append({
+            "id": "call_" + uuid.uuid4().hex[:24],
+            "type": "function",
+            "function": {
+                "name": function_name,
+                "arguments": json.dumps(args, ensure_ascii=False),
+            },
+        })
+        removals.append((start, end))
+
+    def parse_xml_function(function_name: str, params_region: str) -> dict:
         param_config = _find_tool_properties(tools, function_name)
         args: dict = {}
         for match_text in TOOL_CALL_PARAMETER_RE.findall(params_region):
@@ -278,16 +353,74 @@ def parse_tool_calls(text: str, tools=None) -> tuple[str, list[dict]]:
             if v.startswith("\n"): v = v[1:]
             if v.endswith("\n"): v = v[:-1]
             args[k] = _convert_param_value(v, k, param_config, function_name)
-        tool_calls.append({
-            "id": "call_" + uuid.uuid4().hex[:24],
-            "type": "function",
-            "function": {
-                "name": function_name,
-                "arguments": json.dumps(args, ensure_ascii=False),
-            },
-        })
-    cleaned_parts.append(text[cursor:])
-    return "".join(cleaned_parts).strip(), tool_calls
+        return args
+
+    for m in TOOL_CALL_COMPLETE_RE.finditer(text):
+        body = m.group(1)
+        fn_match = TOOL_CALL_FUNCTION_RE.search(body)
+        if not fn_match:
+            continue
+        fn_text = fn_match.group(1) or fn_match.group(2) or ""
+        end_idx = fn_text.find(">")
+        if end_idx == -1:
+            continue
+        function_name = fn_text[:end_idx].strip()
+        params_region = fn_text[end_idx + 1:]
+        add_call(function_name, parse_xml_function(function_name, params_region),
+                 m.start(), m.end())
+
+    for m in BARE_FUNCTION_XML_RE.finditer(text):
+        if any(lo <= m.start() < hi for lo, hi in removals):
+            continue
+        add_call(m.group(1), parse_xml_function(m.group(1), m.group(2)),
+                 m.start(), m.end())
+
+    for m in FUNCTION_SIGNATURE_RE.finditer(text):
+        if any(lo <= m.start() < hi for lo, hi in removals):
+            continue
+        args = _parse_function_signature_args(m.group(2))
+        if args is not None:
+            add_call(m.group(1), args, m.start(), m.end())
+
+    for m in TOOL_CODE_RE.finditer(text):
+        try:
+            obj = json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            continue
+        parsed = _parse_json_tool_call(obj)
+        if parsed is not None:
+            add_call(parsed[0], parsed[1], m.start(), m.end())
+
+    decoder = json.JSONDecoder()
+    cursor = 0
+    while cursor < len(text):
+        start = text.find("{", cursor)
+        if start == -1:
+            break
+        if any(lo <= start < hi for lo, hi in removals):
+            cursor = start + 1
+            continue
+        try:
+            obj, consumed = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            cursor = start + 1
+            continue
+        parsed = _parse_json_tool_call(obj)
+        if parsed is not None:
+            add_call(parsed[0], parsed[1], start, start + consumed)
+        cursor = start + max(consumed, 1)
+
+    if removals:
+        parts: list[str] = []
+        cursor = 0
+        for start, end in sorted(set(removals)):
+            if start < cursor:
+                continue
+            parts.append(text[cursor:start])
+            cursor = end
+        parts.append(text[cursor:])
+        text = "".join(parts)
+    return text.strip(), tool_calls
 
 
 # FIX 2: _content_to_str helper used for BOTH OpenAI and Anthropic message
@@ -451,6 +584,15 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
               verbose_daemon: bool = False) -> FastAPI:
     import asyncio
     app = FastAPI(title="Luce DFlash OpenAI server")
+
+    @app.exception_handler(OpenAICompatError)
+    async def _openai_compat_error_handler(_request: Request, exc: OpenAICompatError):
+        error = {"message": exc.message, "type": exc.error_type}
+        if exc.param is not None:
+            error["param"] = exc.param
+        if exc.code is not None:
+            error["code"] = exc.code
+        return JSONResponse({"error": error}, status_code=exc.status_code)
 
     # FIX 1: CORS middleware so Open WebUI / browser frontends on other ports
     # can reach this server without being blocked by the browser.
@@ -618,6 +760,10 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         prompt = tokenizer.apply_chat_template(msgs_list, **tpl_kwargs)
         started_in_thinking = bool(re.search(r"<think>\s*$", prompt))
         ids = tokenizer.encode(prompt, add_special_tokens=False)
+        if not ids:
+            raise OpenAICompatError(
+                "Chat prompt tokenized to zero tokens",
+                param="messages")
         return _ids_to_bin(ids), ids, prompt
 
     def _tokenize_prompt(req: ChatRequest) -> tuple[Path, list[int], list[dict], bool]:
@@ -697,6 +843,8 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 break
             tok_id = struct.unpack("<i", b)[0]
             if tok_id == -1:
+                if timing is not None:
+                    timing["daemon_done"] = True
                 break
             if timing and timing.get("t_first_tok") is None:
                 timing["t_first_tok"] = time.monotonic()
@@ -732,6 +880,8 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 break
             tok_id = struct.unpack("<i", b)[0]
             if tok_id == -1:
+                if timing is not None:
+                    timing["daemon_done"] = True
                 break
             if timing and timing.get("t_first_tok") is None:
                 timing["t_first_tok"] = time.monotonic()
@@ -1054,7 +1204,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                                                           "total_tokens": prompt_len + completion_tokens}}
                                 yield f"data: {json.dumps(usage_chunk)}\n\n"
                             yield "data: [DONE]\n\n"
-                            if full_hit is None:
+                            if timing.get("daemon_done") and full_hit is None:
                                 try: cur_bin.unlink()
                                 except Exception: pass
                             _park_draft_if_lazy(timing)
@@ -1089,12 +1239,17 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                                 out = emit_delta(tool_buffer, "content")
                                 if out: yield out
                     finally:
-                        if full_hit is None:
-                            try: cur_bin.unlink()
-                            except Exception: pass
+                        if timing.get("daemon_done"):
+                            if full_hit is None:
+                                try: cur_bin.unlink()
+                                except Exception: pass
+                            else:
+                                try: prompt_bin.unlink()
+                                except Exception: pass
                         else:
-                            try: prompt_bin.unlink()
-                            except Exception: pass
+                            log.warning(
+                                "stream ended before daemon sentinel; "
+                                "retaining prompt .bin for in-flight daemon read")
 
                     _confirm_or_abort_snap(
                         completion_tokens, full_snap_prep_ref[0], snap_prep,
@@ -1354,12 +1509,17 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                             delta_key = "thinking" if target_kind == "thinking" else "text"
                             yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': block_index, 'delta': {'type': delta_type, delta_key: text}})}\n\n"
                     finally:
-                        if full_hit is None:
-                            try: cur_bin.unlink()
-                            except Exception: pass
+                        if timing.get("daemon_done"):
+                            if full_hit is None:
+                                try: cur_bin.unlink()
+                                except Exception: pass
+                            else:
+                                try: prompt_bin.unlink()
+                                except Exception: pass
                         else:
-                            try: prompt_bin.unlink()
-                            except Exception: pass
+                            log.warning(
+                                "stream ended before daemon sentinel; "
+                                "retaining prompt .bin for in-flight daemon read")
 
                     _confirm_or_abort_snap(
                         out_tokens, full_snap_prep_ref[0], snap_prep,
@@ -1892,12 +2052,17 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     window = ""
 
                 finally:
-                    if full_hit is None:
-                        try: cur_bin.unlink()
-                        except Exception: pass
+                    if timing.get("daemon_done"):
+                        if full_hit is None:
+                            try: cur_bin.unlink()
+                            except Exception: pass
+                        else:
+                            try: prompt_bin.unlink()
+                            except Exception: pass
                     else:
-                        try: prompt_bin.unlink()
-                        except Exception: pass
+                        log.warning(
+                            "stream ended before daemon sentinel; "
+                            "retaining prompt .bin for in-flight daemon read")
 
                 _confirm_or_abort_snap(
                     completion_tokens, full_snap_prep_ref[0], snap_prep,

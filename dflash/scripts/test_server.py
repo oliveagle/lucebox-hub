@@ -150,6 +150,29 @@ class TestParseToolCalls:
         assert args["path"] == "out.txt"
         assert args["content"] == "hello world"
 
+    def test_bare_qwen_xml_function_call(self):
+        text = (
+            '<function=read>\n'
+            '<parameter=path>\n'
+            '~/.npm-global/lib/node_modules/openclaw/skills/weather/SKILL.md\n'
+            '</parameter>\n'
+            '</function>\n'
+            '</tool_call>'
+        )
+        cleaned, calls = parse_tool_calls(text, tools=[{
+            "type": "function",
+            "function": {"name": "read", "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+            }},
+        }])
+        assert cleaned == ""
+        assert len(calls) == 1
+        assert calls[0]["function"]["name"] == "read"
+        assert json.loads(calls[0]["function"]["arguments"]) == {
+            "path": "~/.npm-global/lib/node_modules/openclaw/skills/weather/SKILL.md"
+        }
+
     def test_tool_call_id_format(self):
         text = "<tool_call><function=f><parameter=x>1</parameter></function></tool_call>"
         _, calls = parse_tool_calls(text, tools=None)
@@ -162,6 +185,71 @@ class TestParseToolCalls:
         assert len(calls) == 1
         assert "Before" in cleaned
         assert "After" in cleaned
+
+    def test_function_signature_tool_call(self):
+        text = '<function=web_search(query="Open Claw docs documentation")</function>'
+        cleaned, calls = parse_tool_calls(text, tools=[{
+            "type": "function",
+            "function": {"name": "web_search", "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            }},
+        }])
+        assert cleaned == ""
+        assert len(calls) == 1
+        assert calls[0]["function"]["name"] == "web_search"
+        assert json.loads(calls[0]["function"]["arguments"]) == {
+            "query": "Open Claw docs documentation"
+        }
+
+    @pytest.mark.parametrize("text", [
+        '{"name":"web_search","arguments":{"query":"OpenAI docs"}}',
+        '<tool_code>{"name":"web_search","arguments":{"query":"OpenAI docs"}}</tool_code>',
+    ])
+    def test_json_tool_call_shapes(self, text):
+        cleaned, calls = parse_tool_calls(text, tools=[{
+            "type": "function",
+            "function": {"name": "web_search", "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            }},
+        }])
+        assert cleaned == ""
+        assert len(calls) == 1
+        assert calls[0]["function"]["name"] == "web_search"
+        assert json.loads(calls[0]["function"]["arguments"]) == {"query": "OpenAI docs"}
+
+    def test_multiple_mixed_tool_call_shapes(self):
+        text = (
+            '<function=web_search(query="OpenAI docs")</function>'
+            '{"name":"read_file","arguments":{"path":"README.md"}}'
+        )
+        cleaned, calls = parse_tool_calls(text, tools=[
+            {"type": "function", "function": {"name": "web_search"}},
+            {"type": "function", "function": {"name": "read_file"}},
+        ])
+        assert cleaned == ""
+        assert [c["function"]["name"] for c in calls] == ["web_search", "read_file"]
+        assert json.loads(calls[0]["function"]["arguments"]) == {"query": "OpenAI docs"}
+        assert json.loads(calls[1]["function"]["arguments"]) == {"path": "README.md"}
+
+    def test_unknown_tool_name_preserved_when_tools_are_known(self):
+        text = '{"name":"unknown_tool","arguments":{"query":"OpenAI docs"}}'
+        cleaned, calls = parse_tool_calls(text, tools=[{
+            "type": "function",
+            "function": {"name": "web_search"},
+        }])
+        assert calls == []
+        assert cleaned == text
+
+    def test_malformed_function_signature_is_preserved(self):
+        text = '<function=web_search(query="unterminated"</function>'
+        cleaned, calls = parse_tool_calls(text, tools=[{
+            "type": "function",
+            "function": {"name": "web_search"},
+        }])
+        assert calls == []
+        assert cleaned == text
 
 
 # ─── normalize_stop / first_stop_match ──────────────────────────────
@@ -290,6 +378,28 @@ def test_chat_completions_non_streaming_with_tool_call(mock_os_read, mock_pipe,
     tc = data["choices"][0]["message"]["tool_calls"]
     assert len(tc) == 1
     assert tc[0]["function"]["name"] == "read_file"
+
+
+@patch("server.os.pipe")
+@patch("server.os.read")
+def test_zero_token_prompt_is_rejected_before_daemon(
+        mock_os_read, mock_pipe, mock_tokenizer, app):
+    mock_pipe.return_value = (1, 2)
+    mock_tokenizer.encode.return_value = []
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json={
+        "model": MODEL_NAME,
+        "messages": [],
+        "stream": False,
+    })
+
+    assert response.status_code == 400
+    data = response.json()
+    assert data["error"]["type"] == "invalid_request_error"
+    assert data["error"]["param"] == "messages"
+    assert "zero tokens" in data["error"]["message"]
+    mock_os_read.assert_not_called()
 
 
 @patch("server.os.pipe")
