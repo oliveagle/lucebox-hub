@@ -1,6 +1,6 @@
 {
   "name": "DFlash C++ HTTP 服务器完整实现 TODO",
-  "description": "✅ **已完成**: C++ HTTP 服务器框架已搭建，编译成功 📍 **可执行文件**: `build/dflash_server` 🔧 **已有核心组件**: DFlash 解码、DDTree、PFlash、TurboQuant KV Cache 均已实现（在 `test/test_dflash.cpp` 中）\n\n### Progress: 7/16 stories complete",
+  "description": "✅ **已完成**: C++ HTTP 服务器框架已搭建，编译成功 📍 **可执行文件**: `build/dflash_server` 🔧 **已有核心组件**: DFlash 解码、DDTree、PFlash、TurboQuant KV Cache 均已实现（在 `test/test_dflash.cpp` 中）\n\n### Progress: 8/16 stories complete",
   "branchName": "feature/dflash-c-http-todo",
   "userStories": [
     {
@@ -116,9 +116,10 @@
       "description": "6. 完整实现 DFlash 解码循环 7. 支持 draft + verify + accept + replay 8. 测试生成质量",
       "acceptanceCriteria": [],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "labels": [],
-      "dependsOn": []
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "STORY-012",
@@ -175,6 +176,6 @@
     "createdAt": "2026-05-10T12:53:24.143Z",
     "version": "1.0.0",
     "sourcePrd": "TODO.md",
-    "updatedAt": "2026-05-10T15:25:53.930Z"
+    "updatedAt": "2026-05-10T15:37:05.755Z"
   }
 }

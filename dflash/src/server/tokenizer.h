@@ -3,12 +3,20 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <optional>
+
+#include "nlohmann/json.hpp"
 
 struct llama_model;
 struct llama_context;
 struct llama_vocab;
 
 namespace dflash27b {
+
+// Forward declarations (defined in dflash_server.h)
+struct ChatMessage;
+struct ToolCall;
+struct ToolDef;
 
 // Tokenizer wrapper using llama.cpp's tokenizer infrastructure.
 // Loads tokenizer metadata from a GGUF file and provides encode/decode.
@@ -50,13 +58,24 @@ public:
     // Get the last error message.
     const std::string& last_error() const { return last_error_; }
 
+    // Apply chat template to a list of messages.
+    // Returns the formatted prompt string (not tokenized).
+    // If chat_template is nullptr, uses the model's default template.
+    std::string apply_chat_template(
+        const std::vector<ChatMessage>& messages,
+        const char* chat_template = nullptr,
+        bool add_generation_prompt = true,
+        const std::vector<ToolDef>* tools = nullptr,
+        const nlohmann::json* chat_template_kwargs = nullptr
+    ) const;
+
 private:
     // llama.cpp handles
     const llama_model* model_ = nullptr;
     llama_context* ctx_ = nullptr;
 
     // Error message for failed operations.
-    std::string last_error_;
+    mutable std::string last_error_;
 };
 
 } // namespace dflash27b

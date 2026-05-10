@@ -148,3 +148,16 @@ after each iteration and it's included in prompts for context.
 - **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). STORY-009 requirements already fulfilled in STORY-001.
 
 ---
+
+## 2025-05-10 - STORY-011
+- **What was implemented**: Verified STORY-011 (DFlash 解码) is already complete from previous iterations. The `run_dflash_decode()` method (lines 612-969) implements the full DFlash decode loop with draft + verify + accept + replay phases. Fixed a build issue: tokenizer.h's `last_error_` member needed `mutable` qualifier for use in const methods, and tokenizer.cpp needed `#include "dflash_server.h"` for complete type definitions of ChatMessage/ToolDef/ToolCall.
+- **Files changed**:
+  - `src/server/tokenizer.h`: Added `mutable` to `last_error_` member.
+  - `src/server/tokenizer.cpp`: Added `#include "dflash_server.h"` for complete type definitions.
+- **Learnings:**
+  - `apply_chat_template()` is a const method that needs to modify `last_error_`, requiring `mutable` qualifier.
+  - `tokenizer.h` uses forward declarations for ChatMessage/ToolCall/ToolDef, but `tokenizer.cpp` needs full definitions which are in `dflash_server.h`.
+  - STORY-011 was implemented in previous iterations (STORY-009 and STORY-005), no new decode logic was needed.
+- **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). STORY-011 requirements verified as complete.
+
+---

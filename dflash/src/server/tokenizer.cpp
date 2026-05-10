@@ -1,11 +1,17 @@
 #include "tokenizer.h"
+#include "dflash_server.h"
 
 #include "llama.h"
+#include "nlohmann/json.hpp"
 
 #include <cstring>
 #include <vector>
+#include <regex>
+#include <sstream>
 
 namespace dflash27b {
+
+using json = nlohmann::json;
 
 Tokenizer::~Tokenizer() {
     if (ctx_) {
@@ -155,6 +161,105 @@ int32_t Tokenizer::eos_token() const {
 int32_t Tokenizer::eot_token() const {
     if (!model_) return -1;
     return llama_vocab_eot(llama_model_get_vocab(model_));
+}
+
+std::string Tokenizer::apply_chat_template(
+    const std::vector<ChatMessage>& messages,
+    const char* chat_template,
+    bool add_generation_prompt,
+    const std::vector<ToolDef>* tools,
+    const json* chat_template_kwargs
+) const {
+    if (!model_) {
+        return "";
+    }
+
+    // Convert ChatMessage to llama_chat_message format
+    std::vector<llama_chat_message> llama_msgs;
+    std::vector<std::string> role_refs;
+    std::vector<std::string> content_refs;
+
+    for (const auto& msg : messages) {
+        // Build content from message
+        std::string content = msg.content;
+
+        // Handle tool_calls (convert to JSON for template)
+        if (msg.tool_calls.has_value() && !msg.tool_calls->empty()) {
+            json tool_calls_json = json::array();
+            for (const auto& tc : *msg.tool_calls) {
+                json tc_obj = {
+                    {"id", tc.id},
+                    {"type", tc.type},
+                    {"function", {
+                        {"name", tc.function.name}
+                    }}
+                };
+                // Parse arguments as JSON if it's a string
+                try {
+                    tc_obj["function"]["arguments"] = json::parse(tc.function.arguments);
+                } catch (...) {
+                    // If parsing fails, keep as string
+                    tc_obj["function"]["arguments"] = tc.function.arguments;
+                }
+                tool_calls_json.push_back(tc_obj);
+            }
+            // Append tool_calls to content for template processing
+            if (!content.empty()) {
+                content += "\n";
+            }
+            content += tool_calls_json.dump();
+        }
+
+        role_refs.push_back(msg.role);
+        content_refs.push_back(content);
+
+        llama_chat_message llama_msg;
+        llama_msg.role = role_refs.back().c_str();
+        llama_msg.content = content_refs.back().c_str();
+        llama_msgs.push_back(llama_msg);
+    }
+
+    // Determine template to use
+    // For Qwen3.5, llama.cpp has built-in template support
+    const char* tmpl = chat_template;
+    if (tmpl == nullptr) {
+        // Use model's default template (llama.cpp will handle this)
+        tmpl = nullptr;  // Let llama.cpp use the model's built-in template
+    }
+
+    // Handle Qwen3.5-specific chat_template_kwargs
+    // For now, we pass the template as-is since llama.cpp handles built-in templates
+    // If custom template is needed, it would be passed via chat_template parameter
+
+    // Calculate buffer size (2x total message length is a safe upper bound)
+    size_t total_len = 0;
+    for (const auto& msg : messages) {
+        total_len += msg.role.size() + msg.content.size() + 32;  // +32 for template overhead
+    }
+    if (tools) {
+        total_len += tools->size() * 512;  // Extra space for tool definitions
+    }
+    size_t buf_size = total_len * 2 + 4096;  // Conservative estimate
+
+    std::vector<char> buf(buf_size);
+
+    // Apply the chat template
+    int32_t result = llama_chat_apply_template(
+        tmpl,
+        llama_msgs.data(),
+        llama_msgs.size(),
+        add_generation_prompt,
+        buf.data(),
+        static_cast<int32_t>(buf.size())
+    );
+
+    if (result < 0) {
+        // Buffer too small or error
+        last_error_ = "llama_chat_apply_template failed or buffer too small";
+        return "";
+    }
+
+    return std::string(buf.data(), static_cast<size_t>(result));
 }
 
 } // namespace dflash27b
