@@ -54,9 +54,11 @@ Option 3 — full-compress-result cache:
 """
 import asyncio
 import hashlib
+import json
 import os
 import shutil
 import struct
+import time
 from collections import OrderedDict
 from pathlib import Path
 
@@ -425,6 +427,8 @@ class PrefixCache:
     # configured cap > this is silently clamped down — exceeding it would
     # cause silent SNAPSHOT failures on slots ≥ 8.
     DAEMON_MAX_SLOTS = 8
+    FULL_META_VERSION = 1
+    FULL_META_SUFFIX = ".meta.json"
 
     def __init__(self, *, daemon_stdin, await_reply, daemon_lock,
                  tokenizer, kv_k_type: str, fa_window: int,
@@ -674,6 +678,140 @@ class PrefixCache:
               f"slots=[{self._full_slot_base},{self._full_slot_base + full_cap}) "
               f"dir={cache_dir_path}", flush=True)
 
+    def _full_bin_path(self, key: bytes) -> Path:
+        return self._full_cache_dir / f"{key.hex()}.bin"
+
+    def _full_meta_path(self, key: bytes) -> Path:
+        return self._full_cache_dir / f"{key.hex()}{self.FULL_META_SUFFIX}"
+
+    def _write_json_atomic(self, path: Path, payload: dict) -> None:
+        tmp_path = Path(f"{path}.tmp")
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, sort_keys=True)
+        os.replace(tmp_path, path)
+
+    def _persist_full_metadata(self, key: bytes, cur_ids_len: int,
+                               *, last_used_ns: int | None = None) -> None:
+        if getattr(self, "_full_disabled", True):
+            return
+        meta = {
+            "version": self.FULL_META_VERSION,
+            "key_hex": key.hex(),
+            "kv_k_type": self.kv_k_type,
+            "fa_window": int(self.fa_window or 0),
+            "cur_ids_len": int(cur_ids_len),
+            "last_used_ns": int(time.time_ns() if last_used_ns is None else last_used_ns),
+        }
+        try:
+            self._write_json_atomic(self._full_meta_path(key), meta)
+        except OSError as exc:
+            print(f"{self.log_prefix} full-cache: failed to write metadata for "
+                  f"{key.hex()[:8]}: {exc}", flush=True)
+
+    def _drop_full_metadata(self, key: bytes) -> None:
+        if getattr(self, "_full_disabled", True):
+            return
+        try:
+            self._full_meta_path(key).unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"{self.log_prefix} full-cache: failed to remove metadata for "
+                  f"{key.hex()[:8]}: {exc}", flush=True)
+
+    def _load_persisted_full_entries(self) -> list[tuple[bytes, str, int, int]]:
+        """Return persisted full-cache entries sorted from LRU → MRU."""
+        if getattr(self, "_full_disabled", True):
+            return []
+
+        entries_by_key: dict[bytes, tuple[bytes, str, int, int]] = {}
+        fa_window = int(self.fa_window or 0)
+        for meta_path in self._full_cache_dir.glob(f"*{self.FULL_META_SUFFIX}"):
+            try:
+                with meta_path.open("r", encoding="utf-8") as f:
+                    meta = json.load(f)
+            except (OSError, ValueError, TypeError):
+                continue
+
+            if not isinstance(meta, dict):
+                continue
+            if meta.get("version") != self.FULL_META_VERSION:
+                continue
+            if meta.get("kv_k_type") != self.kv_k_type:
+                continue
+            if int(meta.get("fa_window", -1)) != fa_window:
+                continue
+
+            key_hex = meta.get("key_hex")
+            cur_ids_len = meta.get("cur_ids_len")
+            last_used_ns = meta.get("last_used_ns", 0)
+            if not isinstance(key_hex, str):
+                continue
+            try:
+                key = bytes.fromhex(key_hex)
+            except ValueError:
+                continue
+            if len(key) != 16:
+                continue
+            if not isinstance(cur_ids_len, int) or cur_ids_len < 0:
+                continue
+            if not isinstance(last_used_ns, int):
+                continue
+
+            bin_path = self._full_bin_path(key)
+            if not bin_path.exists():
+                continue
+
+            prev = entries_by_key.get(key)
+            record = (key, str(bin_path), cur_ids_len, last_used_ns)
+            if prev is None or record[3] >= prev[3]:
+                entries_by_key[key] = record
+
+        return sorted(entries_by_key.values(), key=lambda item: (item[3], item[0].hex()))
+
+    async def rehydrate_full_cache(self, replay_entry) -> int:
+        """Restore persisted full-cache entries into fresh daemon slots.
+
+        ``replay_entry`` must be an async callable accepting
+        ``(slot, cur_bin_path, cur_ids_len)`` and return ``True`` on success.
+        """
+        if getattr(self, "_full_disabled", True):
+            return 0
+
+        persisted = self._load_persisted_full_entries()
+        if not persisted:
+            self.full_entries.clear()
+            self._full_next_slot = 0
+            return 0
+
+        if len(persisted) > self._full_cap:
+            persisted = persisted[-self._full_cap:]
+
+        self.full_entries.clear()
+        self._full_pending_evict_key = None
+        self._full_pending_evict_path = None
+
+        restored = 0
+        async with self.lock:
+            for key, cur_bin_path, cur_ids_len, _last_used_ns in persisted:
+                slot = self._full_slot_base + restored
+                try:
+                    ok = await replay_entry(slot, cur_bin_path, cur_ids_len)
+                except Exception as exc:
+                    print(f"{self.log_prefix} full-cache: restore failed for "
+                          f"{Path(cur_bin_path).name}: {exc}", flush=True)
+                    ok = False
+                if not ok:
+                    continue
+                self.full_entries[key] = (slot, cur_bin_path, cur_ids_len)
+                restored += 1
+                if restored >= self._full_cap:
+                    break
+
+        self._full_next_slot = restored % self._full_cap if self._full_cap > 0 else 0
+        if restored:
+            print(f"{self.log_prefix} full-cache restored {restored} entries "
+                  f"from disk", flush=True)
+        return restored
+
     def lookup_full(self, prompt_ids: list[int]) -> tuple[int, str, int] | None:
         """Exact-match on full prompt_ids hash (keyed on raw, pre-compression ids).
 
@@ -693,8 +831,10 @@ class PrefixCache:
         # Verify the cached file still exists (could have been deleted externally).
         if not Path(cur_bin_path).exists():
             self.full_entries.pop(key, None)
+            self._drop_full_metadata(key)
             return None
         self.full_entries.move_to_end(key)  # mark fresh in LRU
+        self._persist_full_metadata(key, cur_ids_len)
         print(f"{self.log_prefix} full-cache hit slot={slot} "
               f"cur_ids_len={cur_ids_len} key={key.hex()[:8]}", flush=True)
         return slot, cur_bin_path, cur_ids_len
@@ -744,7 +884,7 @@ class PrefixCache:
             return
 
         key = hash_prefix(prompt_ids, self.kv_k_type, self.fa_window)
-        dest = self._full_cache_dir / (key.hex() + ".bin")
+        dest = self._full_bin_path(key)
 
         try:
             shutil.copy2(str(cur_bin_src), str(dest))
@@ -759,13 +899,16 @@ class PrefixCache:
         # Atomically evict the reserved entry (if any) and insert new one.
         if self._full_pending_evict_key is not None:
             evicted_path = self._full_pending_evict_path
-            self.full_entries.pop(self._full_pending_evict_key, None)
+            evicted_key = self._full_pending_evict_key
+            self.full_entries.pop(evicted_key, None)
             if evicted_path:
                 Path(evicted_path).unlink(missing_ok=True)
+            self._drop_full_metadata(evicted_key)
             self._full_pending_evict_key = None
             self._full_pending_evict_path = None
 
         self.full_entries[key] = (slot, str(dest), cur_ids_len)
+        self._persist_full_metadata(key, cur_ids_len)
         print(f"{self.log_prefix} full-cache committed slot={slot} "
               f"cur_ids_len={cur_ids_len} key={key.hex()[:8]}", flush=True)
 

@@ -677,6 +677,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
     async def _startup():
         bus.start(asyncio.get_running_loop())
         await prefix_cache.startup_sync()
+        if not getattr(prefix_cache, "_full_disabled", True):
+            restored = await prefix_cache.rehydrate_full_cache(
+                _rehydrate_full_cache_entry)
+            if restored:
+                log.info("full-cache restored %d entries from disk", restored)
         if lazy_draft:
             log.info("lazy-draft: parking decode draft at startup to free ~3.3 GB")
             daemon_proc.stdin.write(b"park draft\n")
@@ -926,6 +931,33 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         daemon_proc.stdin.flush()
         if timing is not None:
             timing["t_cmd_sent"] = time.monotonic()
+
+    async def _rehydrate_full_cache_entry(slot: int, cur_bin_path: str,
+                                          cur_ids_len: int) -> bool:
+        cmd_line = f"{cur_bin_path} 0 snap={cur_ids_len}:{slot}\n"
+        loop = asyncio.get_running_loop()
+        sent = False
+        try:
+            _write_cmd(cmd_line)
+            sent = True
+            await bus.await_reply(f"[snap] inline slot={slot} ", timeout=120.0)
+            await loop.run_in_executor(None, _drain_until_sentinel, r_pipe)
+            return True
+        except Exception as exc:
+            log.warning("full-cache restore failed for slot=%d path=%s: %s",
+                        slot, cur_bin_path, exc)
+            if sent:
+                try:
+                    await loop.run_in_executor(None, _drain_until_sentinel, r_pipe)
+                except Exception:
+                    pass
+                try:
+                    daemon_proc.stdin.write(f"FREE_SNAPSHOT {slot}\n".encode("utf-8"))
+                    daemon_proc.stdin.flush()
+                    await bus.await_reply(f"[snap] freed slot={slot}", timeout=5.0)
+                except Exception:
+                    pass
+            return False
 
     def _park_draft_if_lazy(timing=None):
         """Park decode draft to free ~3.3 GB VRAM. Call after tokens consumed."""
