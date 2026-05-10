@@ -374,6 +374,7 @@ if(DFLASH27B_HTTP_SERVER)
         src/server/dflash_server.cpp
         src/server/tokenizer.cpp
         src/server/tokenizer_parser.cpp
+        src/server/parsers.cpp
         ${HTTPLIB_INC_DIR}/httplib.cpp
     )
 

@@ -104,3 +104,52 @@ When integrating llama.cpp's tokenizer into a C++ project:
 6. **Const Correctness**: `llama_free()` expects non-const `llama_context*`, so store as non-const pointer in the wrapper class.
 
 ---
+
+## [Date] - STORY-002
+
+**Date**: 2026-05-10
+
+**Task**: Tool Call Parsing (STORY-002 - 高级功能)
+
+**What was implemented**:
+- Created `src/server/parsers.h` with tool call and reasoning parsing interfaces
+- Created `src/server/parsers.cpp` with complete implementation of:
+  - `parse_tool_calls()` - Parses Qwen3 tool call format (访问函数...结束访问)
+  - `parse_reasoning()` - Parses Qwen3 thinking/reasoning tags (反复推理...结束推理)
+  - `convert_param_value()` - Type coercion for tool parameters (string/int/float/bool/object/array/null)
+  - `find_tool_properties()` - Helper to find tool schema by function name
+  - `generate_call_id()` - Generates random call IDs for tool calls
+- Updated `CMakeLists.txt` to add `src/server/parsers.cpp` to dflash_server build
+
+**Files changed**:
+- `src/server/parsers.h` - Created with tool call and reasoning parsing interfaces
+- `src/server/parsers.cpp` - Created with parser implementations ported from vLLM
+- `CMakeLists.txt` - Added parsers.cpp to dflash_server sources
+
+**Learnings**:
+
+1. **C++ std::regex doesn't have dotall mode**: Unlike Python's `re.DOTALL` or PCRE's `s` flag, C++ `std::regex` has no equivalent. To match across newlines, use `[\s\S]*?` instead of `.*?`. The `[\s\S]` character class matches any character including newlines.
+
+2. **Avoid name collisions with `std::end`**: When using `std::sregex_iterator`, don't name the end iterator `end` as it can conflict with `std::end` in some contexts. Use `iter_end` or similar instead.
+
+3. **Qwen3 tool call format**: The XML format uses Chinese tags:
+   - Tool calls: `访问函数<function=NAME>...</function>结束访问`
+   - Reasoning: `反复推理...结束推理`
+   - The regex patterns need to handle UTF-8 encoded Chinese characters correctly.
+
+4. **Type coercion for tool parameters**: Parameters extracted from XML are strings. The `convert_param_value()` function converts them to proper JSON types based on the tool's JSON schema:
+   - `int`, `uint`, `long`, `short`, `unsigned` → integer
+   - `num`, `float` → float (or int if whole number)
+   - `boolean`, `bool` → boolean (true/false)
+   - `string`, `str`, `text`, etc. → string
+   - `object`, `array`, `dict`, `list` → JSON-parsed object/array
+   - `null` → JSON null
+
+5. **Tool call ID generation**: Call IDs follow OpenAI format: `call_` + 24 hex characters. Used `std::random_device` and `std::mt19937` for generation.
+
+6. **Porting from Python to C++**: The parsers were ported from vLLM's Python implementation (Apache-2.0). Key differences:
+   - Python's `re.DOTALL` → C++ `[\s\S]` pattern
+   - Python's `json.loads()` → C++ `nlohmann::json::parse()`
+   - Python's `uuid.uuid4().hex[:24]` → custom hex generation with `<random>`
+
+---

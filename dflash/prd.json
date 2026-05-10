@@ -20,9 +20,10 @@
       "description": "- [ ] 工具调用解析 - [ ] 创建 src/server/parsers.h - [ ] 创建 src/server/parsers.cpp - [ ] 实现正则表达式解析 Qwen3 工具调用格式 - [ ] 转换为 OpenAI 格式响应 - [ ] 支持参数类型转换 (string/int/float/bool)",
       "acceptanceCriteria": [],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "labels": [],
-      "dependsOn": []
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "STORY-003",
@@ -39,6 +40,6 @@
     "createdAt": "2026-05-10T11:26:50.097Z",
     "version": "1.0.0",
     "sourcePrd": "TODO.md",
-    "updatedAt": "2026-05-10T11:47:13.801Z"
+    "updatedAt": "2026-05-10T12:04:10.205Z"
   }
 }

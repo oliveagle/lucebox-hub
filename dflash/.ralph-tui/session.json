@@ -3,10 +3,10 @@
   "sessionId": "24e0b667-6882-4fe4-8b22-1a39963968bc",
   "status": "running",
   "startedAt": "2026-05-10T11:27:08.022Z",
-  "updatedAt": "2026-05-10T11:47:13.802Z",
-  "currentIteration": 0,
+  "updatedAt": "2026-05-10T12:04:10.205Z",
+  "currentIteration": 1,
   "maxIterations": 50,
-  "tasksCompleted": 0,
+  "tasksCompleted": 1,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -14,7 +14,18 @@
     "totalTasks": 0,
     "tasks": []
   },
-  "iterations": [],
+  "iterations": [
+    {
+      "iteration": 1,
+      "status": "completed",
+      "taskId": "STORY-001",
+      "taskTitle": "核心功能 (必须实现)",
+      "taskCompleted": true,
+      "durationMs": 1196997,
+      "startedAt": "2026-05-10T11:27:16.801Z",
+      "endedAt": "2026-05-10T11:47:13.798Z"
+    }
+  ],
   "skippedTaskIds": [],
   "cwd": "/home/oliveagle/repos/github.com/others/lucebox-hub/dflash",
   "activeTaskIds": [],
