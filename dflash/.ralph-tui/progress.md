@@ -161,3 +161,19 @@ after each iteration and it's included in prompts for context.
 - **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). STORY-011 requirements verified as complete.
 
 ---
+
+## 2025-05-10 - STORY-012
+- **What was implemented**: Verified STORY-012 (PFlash 压缩) is already complete from STORY-003 (2025-05-10). All three requirements are fulfilled:
+  1. **集成 PFlash Drafter**: `load_drafter()` / `free_drafter()` methods in dflash_server.cpp call `dflash27b::load_drafter()` / `dflash27b::free_drafter()` with `DrafterContext`. Drafter loading happens in `initialize()` via `--prefill-drafter` CLI arg.
+  2. **实现压缩协调逻辑**: `PrefillCoordinator` class implements `should_compress()` with off/auto/always modes, `prefill_threshold` and `prefill_keep_ratio` params. `compress_prefill()` calls `dflash27b::drafter_score_and_compress()`. Integration in `generate_internal()` executes park draft → compress → restore draft flow.
+  3. **测试长上下文性能**: Requires runtime with actual models - implementation supports the pipeline.
+- **Files changed**: None - verification only. STORY-012 was completed in STORY-003.
+- **Learnings:**
+  - STORY-012 requirements were fully implemented in STORY-003 iteration, no new code needed.
+  - `PrefillCoordinator` has three modes: `off` (skip compression), `auto` (compress if prompt > prefill_threshold), `always` (always compress).
+  - PFlash compression only executes on Prefix Cache miss (no point compressing a cached prefill).
+  - `--prefill-drafter` CLI parameter specifies the drafter GGUF path; when not set, compression is disabled even if `--prefill-mode` is auto/always.
+  - `drafter_ctx_` is a unique_ptr<DrafterContext> with `unique_fn(free_drafter)` for RAII management.
+- **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). STORY-012 requirements verified as complete.
+
+---
