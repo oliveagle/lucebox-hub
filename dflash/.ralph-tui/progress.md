@@ -131,3 +131,42 @@ if ((int)token_history_.size() > sampler.rep_window) {
 ```
 
 ---
+
+## [2026-05-11] - STORY-010 - Chat Template
+
+### What was implemented
+
+1. **Chat template integration**: The existing `Tokenizer::apply_chat_template` (already implemented in tokenizer.cpp) was wired into all request handlers:
+   - `handle_chat_completions`: OpenAI non-streaming
+   - `handle_chat_completions_stream`: OpenAI streaming
+   - `handle_anthropic_messages_impl`: Anthropic non-streaming
+   - `handle_anthropic_messages_stream_impl`: Anthropic streaming
+
+2. **Template logic**: All handlers now:
+   - Call `apply_chat_template` on the message list
+   - Encode the resulting string with `tokenizer_->encode()`
+   - Pass `add_generation_prompt = true` to include assistant prompt
+   - Support custom template string via `chat_template_kwargs`
+
+3. **Anthropic type handling**: Since Anthropic requests use `AnthropicTool` type, but `apply_chat_template` expects `ToolDef`, we currently pass `nullptr` for tools in Anthropic handlers. This can be fixed with a conversion later if needed.
+
+### Files changed
+
+- `src/server/dflash_server.cpp`:
+  - Updated `handle_chat_completions` to apply chat template
+  - Updated `handle_chat_completions_stream` to apply chat template
+  - Updated `handle_anthropic_messages_impl` to apply chat template
+  - Updated `handle_anthropic_messages_stream_impl` to apply chat template
+
+### Learnings
+
+**Patterns discovered**:
+- **Chat template flow**: The pattern is `messages -> formatted string -> tokens`, not directly `messages -> tokens`. This allows templates to inject special tokens and structure.
+- **Tool type separation**: Anthropic and OpenAI have different tool definitions, so they need separate handling/conversion layers.
+
+**Gotchas encountered**:
+- **Type mismatches**: `AnthropicTool` ≠ `ToolDef`. Tried passing `areq.tools` directly to `apply_chat_template` but got compile errors.
+- **Capture safety**: In lambda handlers (streaming), need to capture by value to avoid dangling references.
+- **Llama template support**: `llama_chat_apply_template` already knows about Qwen-specific templates from the model file, so no need to provide custom templates.
+
+---

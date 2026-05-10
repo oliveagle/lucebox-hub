@@ -107,9 +107,10 @@
       "description": "4. 实现 Chat Template 引擎 5. 测试 OpenAI Chat Completions API",
       "acceptanceCriteria": [],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "labels": [],
-      "dependsOn": []
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "STORY-011",
@@ -182,6 +183,6 @@
     "createdAt": "2026-05-10T12:53:24.143Z",
     "version": "1.0.0",
     "sourcePrd": "TODO.md",
-    "updatedAt": "2026-05-10T18:23:55.241Z"
+    "updatedAt": "2026-05-10T18:35:47.102Z"
   }
 }

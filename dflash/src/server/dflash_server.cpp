@@ -1524,9 +1524,27 @@ void DFlashServer::handle_chat_completions(const httplib::Request& req, httplib:
     try {
         ChatRequest chat_req = parse_chat_request(req);
 
-        // Tokenize prompt
-        std::vector<int32_t> prompt_tokens;
-        // TODO: Apply chat template and tokenize
+        // Apply chat template and tokenize
+        std::string formatted_prompt;
+        const char* custom_template = nullptr;
+        // If chat_template_kwargs contains a custom template string, use it
+        if (chat_req.chat_template_kwargs.has_value()) {
+            auto& kwargs = chat_req.chat_template_kwargs.value();
+            if (kwargs.contains("chat_template") && kwargs["chat_template"].is_string()) {
+                custom_template = kwargs["chat_template"].get<std::string>().c_str();
+            }
+        }
+
+        formatted_prompt = tokenizer_->apply_chat_template(
+            chat_req.messages,
+            custom_template,
+            true,  // add_generation_prompt
+            chat_req.tools.has_value() ? &chat_req.tools.value() : nullptr,
+            chat_req.chat_template_kwargs.has_value() ? &chat_req.chat_template_kwargs.value() : nullptr
+        );
+
+        // Encode the formatted prompt to token IDs
+        std::vector<int32_t> prompt_tokens = tokenizer_->encode(formatted_prompt);
 
         // Check if tools are present (affects prefill compression)
         bool has_tools = chat_req.tools.has_value() && !chat_req.tools->empty();
@@ -1654,9 +1672,24 @@ void DFlashServer::handle_chat_completions_stream(const httplib::Request& req, h
             /*content_type=*/"text/event-stream",
             /*provider=*/[this, chat_req](size_t offset, size_t length, httplib::DataSink& sink) mutable -> bool {
                 (void)offset; (void)length;  // Unused in streaming mode
-                // Tokenize prompt
-                std::vector<int32_t> prompt_tokens;
-                // TODO: Apply chat template and tokenize
+
+                // Apply chat template and tokenize
+                std::string formatted_prompt;
+                const char* custom_template = nullptr;
+                if (chat_req.chat_template_kwargs.has_value()) {
+                    auto& kwargs = chat_req.chat_template_kwargs.value();
+                    if (kwargs.contains("chat_template") && kwargs["chat_template"].is_string()) {
+                        custom_template = kwargs["chat_template"].get<std::string>().c_str();
+                    }
+                }
+                formatted_prompt = tokenizer_->apply_chat_template(
+                    chat_req.messages,
+                    custom_template,
+                    true,
+                    chat_req.tools.has_value() ? &chat_req.tools.value() : nullptr,
+                    chat_req.chat_template_kwargs.has_value() ? &chat_req.chat_template_kwargs.value() : nullptr
+                );
+                std::vector<int32_t> prompt_tokens = tokenizer_->encode(formatted_prompt);
 
                 // Generate unique ID for this response
                 std::string response_id = "chatcmpl-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
@@ -2379,9 +2412,17 @@ void DFlashServer::handle_anthropic_messages_impl(
     // Convert to ChatRequest and use existing generation logic
     ChatRequest creq = convert_anthropic_to_chat(areq);
 
-    // Tokenize prompt
-    std::vector<int32_t> prompt_tokens;
-    // TODO: Apply chat template and tokenize
+    // Apply chat template and tokenize
+    // Note: Anthropic tools (AnthropicTool) differ from OpenAI tools (ToolDef),
+    // so we pass nullptr for tools. The drafter handles tools separately.
+    std::string formatted_prompt = tokenizer_->apply_chat_template(
+        creq.messages,
+        nullptr,  // Use default template
+        true,     // add_generation_prompt
+        nullptr,  // Anthropic tools not yet convertible to ToolDef format
+        nullptr
+    );
+    std::vector<int32_t> prompt_tokens = tokenizer_->encode(formatted_prompt);
 
     // Resolve sampling config from request parameters
     SamplerCfg req_sampler;
@@ -2427,8 +2468,15 @@ void DFlashServer::handle_anthropic_messages_stream_impl(
             ChatRequest creq = convert_anthropic_to_chat(areq);
 
             // Tokenize prompt
-            std::vector<int32_t> prompt_tokens;
-            // TODO: Apply chat template and tokenize
+            // Note: Anthropic tools not yet convertible to ToolDef format
+            std::string formatted_prompt = tokenizer_->apply_chat_template(
+                creq.messages,
+                nullptr,
+                true,
+                nullptr,
+                nullptr
+            );
+            std::vector<int32_t> prompt_tokens = tokenizer_->encode(formatted_prompt);
 
             // Generate message ID
             auto now = std::chrono::system_clock::now();
