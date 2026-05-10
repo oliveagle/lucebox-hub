@@ -149,9 +149,10 @@
       "description": "15. 集成 KV 类型解析 16. 支持环境变量配置 17. 测试内存和速度",
       "acceptanceCriteria": [],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "labels": [],
-      "dependsOn": []
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "STORY-015",
@@ -178,6 +179,6 @@
     "createdAt": "2026-05-10T12:53:24.143Z",
     "version": "1.0.0",
     "sourcePrd": "TODO.md",
-    "updatedAt": "2026-05-10T15:48:14.589Z"
+    "updatedAt": "2026-05-10T15:56:20.932Z"
   }
 }

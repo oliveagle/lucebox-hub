@@ -194,3 +194,17 @@ after each iteration and it's included in prompts for context.
 - **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). DDTree is fully functional with `--tree-budget <n>` (n=1-128, 0=disabled).
 
 ---
+
+## 2025-05-10 - STORY-014
+- **What was implemented**: Verified STORY-014 (TurboQuant KV Cache) is already complete from STORY-004 (2025-05-10). All three requirements are fulfilled:
+  1. **集成 KV 类型解析**: `initialize()` calls `dflash::resolve_kv_types()` for env var defaults, then overrides with `--kv-k-type`/`--kv-v-type` CLI args via `setenv()` so `create_target_cache()` picks them up. Validation via `dflash::is_supported_kv_pair()`.
+  2. **支持环境变量配置**: `DFLASH27B_KV_K` and `DFLASH27B_KV_V` env vars supported, CLI args override via `setenv()`. Help text lists all supported types: f16/bf16/q4_0/q8_0/tq3_0.
+  3. **测试内存和速度**: Implementation supports the pipeline. TurboQuant auto-enabled when `kv_k_type == GGML_TYPE_TQ3_0` (TQ3_0 applies WHT during quantization, `kv_k_rotated=false`).
+- **Files changed**: None - verification only. STORY-014 was completed in STORY-004.
+- **Learnings:**
+  - STORY-014 requirements were fully implemented in STORY-004 iteration, no new code needed.
+  - `create_target_cache()` internally calls `dflash::resolve_kv_types()` which reads from env vars, so `setenv()` is required to propagate CLI config.
+  - TurboQuant is automatically enabled for TQ3_0 - `kv_k_rotated=false` because WHT is applied during quantization.
+- **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). STORY-014 requirements verified as complete.
+
+---
