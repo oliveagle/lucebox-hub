@@ -447,7 +447,8 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
               prefix_cache_slots: int = 4,
               prefill_cache_slots: int = 4,
               arch: str = "qwen35",
-              lazy_draft: bool = False) -> FastAPI:
+              lazy_draft: bool = False,
+              verbose_daemon: bool = False) -> FastAPI:
     import asyncio
     app = FastAPI(title="Luce DFlash OpenAI server")
 
@@ -503,7 +504,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                                        stdout=subprocess.PIPE, bufsize=0)
     os.close(w_pipe)
 
-    bus = DaemonStdoutBus(daemon_proc.stdout)
+    bus = DaemonStdoutBus(daemon_proc.stdout, verbose=verbose_daemon)
 
     def _resolve_kv_k_type():
         kv = "q8_0"
@@ -2029,6 +2030,9 @@ def main():
     ap.add_argument("--lazy-draft", action="store_true",
                     help="Park decode draft (~3.3 GB) when idle; unpark/park "
                          "around each generate to free VRAM for longer context.")
+    ap.add_argument("--verbose-daemon", action="store_true",
+                    help="Print all daemon stdout lines, including suppressed "
+                         "timing and per-step diagnostics.")
     ap.add_argument("--prefix-cache-slots", type=int, default=4)
     ap.add_argument("--prefill-cache-slots", type=int, default=4)
     ap.add_argument("--daemon", action="store_true")
@@ -2098,7 +2102,8 @@ def main():
                     prefix_cache_slots=args.prefix_cache_slots,
                     prefill_cache_slots=args.prefill_cache_slots,
                     arch=arch,
-                    lazy_draft=args.lazy_draft)
+                    lazy_draft=args.lazy_draft,
+                    verbose_daemon=args.verbose_daemon)
 
     import uvicorn
     logging.basicConfig(
@@ -2116,6 +2121,8 @@ def main():
     print(f"  tokenizer = {tokenizer_id}")
     if args.lazy_draft:
         print("  lazy_draft= ON (decode draft parked when idle)")
+    if args.verbose_daemon:
+        print("  verbose_daemon = ON")
     if prefill_cfg.enabled:
         print(f"  pflash    = {prefill_cfg.mode} · threshold={prefill_cfg.threshold} "
               f"keep={prefill_cfg.keep_ratio} drafter={prefill_cfg.drafter_gguf}")
