@@ -416,13 +416,21 @@ static ggml_tensor * rms_norm_mul(ggml_context * ctx, ggml_tensor * x,
     return ggml_mul(ctx, n, weight);
 }
 
+// NVFP4 scale2: if weight has a per-tensor scale, multiply the matmul result
+// by that scale. No-op when scale==1.0f (non-NVFP4 models).
+static ggml_tensor * apply_scale2(ggml_context * ctx, ggml_tensor * mm_result,
+                                   float scale) {
+    if (scale == 1.0f) return mm_result;
+    return ggml_scale(ctx, mm_result, scale);
+}
+
 static ggml_tensor * build_swiglu_ffn(ggml_context * ctx, ggml_tensor * cur,
                                       const TargetLayer & L) {
-    ggml_tensor * gate = ggml_mul_mat(ctx, L.w_gate, cur);   // [inter, n_tokens]
+    ggml_tensor * gate = apply_scale2(ctx, ggml_mul_mat(ctx, L.w_gate, cur), L.w_gate_s);   // [inter, n_tokens]
     gate = ggml_silu(ctx, gate);
-    ggml_tensor * up = ggml_mul_mat(ctx, L.w_up, cur);
+    ggml_tensor * up = apply_scale2(ctx, ggml_mul_mat(ctx, L.w_up, cur), L.w_up_s);
     ggml_tensor * gu = ggml_mul(ctx, gate, up);
-    return ggml_mul_mat(ctx, L.w_down, gu);                  // [hidden, n_tokens]
+    return apply_scale2(ctx, ggml_mul_mat(ctx, L.w_down, gu), L.w_down_s);                  // [hidden, n_tokens]
 }
 
 // Full-attention block (matches llama.cpp's build_layer_attn for qwen35)
@@ -456,7 +464,7 @@ static ggml_tensor * build_full_attn_block(
     const int n_head_kv = w.n_head_kv;
     const int q_dim = head_dim * n_head;
     // ── Q projection (packed Q || gate), shape [2*q_dim, n_tokens]
-    ggml_tensor * QG = ggml_mul_mat(ctx, L.wq, cur);
+    ggml_tensor * QG = apply_scale2(ctx, ggml_mul_mat(ctx, L.wq, cur), L.wq_s);
     // Reshape to [head_dim*2, n_head, n_tokens] so we can view the Q and gate halves
     QG = ggml_reshape_3d(ctx, QG, head_dim * 2, n_head, n_tokens);
 
@@ -478,8 +486,8 @@ static ggml_tensor * build_full_attn_block(
     gate = ggml_cont_2d(ctx, gate, q_dim, n_tokens);  // [q_dim, n_tokens]
 
     // ── K and V projections
-    ggml_tensor * Kcur = ggml_mul_mat(ctx, L.wk, cur);   // [kv_dim, n_tokens]
-    ggml_tensor * Vcur = ggml_mul_mat(ctx, L.wv, cur);   // [kv_dim, n_tokens]
+    ggml_tensor * Kcur = apply_scale2(ctx, ggml_mul_mat(ctx, L.wk, cur), L.wk_s);
+    ggml_tensor * Vcur = apply_scale2(ctx, ggml_mul_mat(ctx, L.wv, cur), L.wv_s);
 
     Kcur = ggml_reshape_3d(ctx, Kcur, head_dim, n_head_kv, n_tokens);
     Kcur = rms_norm_mul(ctx, Kcur, L.k_norm, w.rms_eps);
@@ -610,7 +618,7 @@ static ggml_tensor * build_full_attn_block(
     attn = ggml_mul(ctx, attn, gate_sig);
 
     // ── Output projection
-    attn = ggml_mul_mat(ctx, L.wo, attn);  // [hidden, n_tokens]
+    attn = apply_scale2(ctx, ggml_mul_mat(ctx, L.wo, attn), L.wo_s);
     return attn;
 }
 
@@ -645,14 +653,14 @@ static ggml_tensor * build_delta_net_block(
     const int n_seq_tokens = n_tokens;
 
     // ── qkv_mixed = wqkv @ cur         [10240, n_tokens]
-    ggml_tensor * qkv_mixed = ggml_mul_mat(ctx, L.wqkv, cur);
+    ggml_tensor * qkv_mixed = apply_scale2(ctx, ggml_mul_mat(ctx, L.wqkv, cur), L.wqkv_s);
     qkv_mixed = ggml_reshape_3d(ctx, qkv_mixed, conv_channels, n_seq_tokens, n_seqs);
 
     // ── z = wqkv_gate @ cur            [inner, n_tokens]
-    ggml_tensor * z = ggml_mul_mat(ctx, L.wqkv_gate, cur);
+    ggml_tensor * z = apply_scale2(ctx, ggml_mul_mat(ctx, L.wqkv_gate, cur), L.wqkv_gate_s);
 
     // ── beta = ssm_beta @ cur          [dt_rank, n_tokens]
-    ggml_tensor * beta = ggml_mul_mat(ctx, L.ssm_beta, cur);
+    ggml_tensor * beta = apply_scale2(ctx, ggml_mul_mat(ctx, L.ssm_beta, cur), L.ssm_beta_s);
     beta = ggml_reshape_4d(ctx, beta, 1, num_v_heads, n_seq_tokens, n_seqs);
     beta = ggml_sigmoid(ctx, beta);
 
@@ -660,7 +668,7 @@ static ggml_tensor * build_delta_net_block(
     //    alpha = alpha + ssm_dt_bias          (per-head bias)
     //    alpha = softplus(alpha)
     //    g     = alpha * ssm_a                (-A_log.exp() * softplus)
-    ggml_tensor * alpha = ggml_mul_mat(ctx, L.ssm_alpha, cur);
+    ggml_tensor * alpha = apply_scale2(ctx, ggml_mul_mat(ctx, L.ssm_alpha, cur), L.ssm_alpha_s);
     alpha = ggml_reshape_3d(ctx, alpha, num_v_heads, n_seq_tokens, n_seqs);
     alpha = ggml_add(ctx, alpha, L.ssm_dt_bias);
     alpha = ggml_softplus(ctx, alpha);
@@ -885,7 +893,7 @@ after_delta_net:
         head_v_dim * num_v_heads, n_seq_tokens, n_seqs);
 
     // Output projection
-    ggml_tensor * out = ggml_mul_mat(ctx, L.ssm_out, flat);
+    ggml_tensor * out = apply_scale2(ctx, ggml_mul_mat(ctx, L.ssm_out, flat), L.ssm_out_s);
     out = ggml_reshape_2d(ctx, out, w.n_embd, n_seq_tokens * n_seqs);
     return out;
 }
@@ -1461,5 +1469,6 @@ bool restore_target_cache_chain(const PrefixSnapshot * thick,
     // last_tok was captured, or fall back to bare-prompt prefill afterward.
     return true;
 }
+
 
 } // namespace dflash27b
