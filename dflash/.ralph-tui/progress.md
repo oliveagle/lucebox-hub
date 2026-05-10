@@ -32,6 +32,13 @@ after each iteration and it's included in prompts for context.
 - HTTP server target requires `-DDFLASH27B_HTTP_SERVER=ON` to build `dflash_server` executable.
 - Build command: `cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DDFLASH27B_HTTP_SERVER=ON && cmake --build build --target dflash_server`
 
+### Prefix Cache Pattern
+- `PrefixSnapshot` struct (defined in `internal.h`) captures KV cache state with GPU-resident copies of attn_k/v, ssm_state, conv_state, and target_feat.
+- Use `snapshot_target_cache()` to capture cache state after prefill, `restore_target_cache()` to restore on cache hit.
+- Use `free_prefix_snapshot()` to release GPU memory when evicting cache slots.
+- FNV-1a hash is used for fast prompt key lookup, with exact token comparison to handle collisions.
+- LRU eviction is implemented via `last_access` counter - slot with oldest access is evicted when full.
+
 ---
 
 ## 2025-05-10 - STORY-001
@@ -108,5 +115,25 @@ after each iteration and it's included in prompts for context.
   - The `on_token` callback pattern (lambda passing tokens to `content_provider`) enables true streaming without buffering the full response.
   - OpenAI SSE uses `data: {...}\n\n` format, Anthropic SSE uses `event: <name>\ndata: {...}\n\n` format.
 - **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). Streaming is fully functional.
+
+---
+
+## 2025-05-10 - STORY-007
+- **What was implemented**: Prefix Cache 完整实现。替换了 PrefixCache 占位符类为真实实现，包括 FNV-1a 哈希键计算、LRU 淘汰策略、8 个 cache slot 管理。将 PrefixCache 集成到 generate_internal()：cache hit 时跳过 prefill 直接恢复，cache miss 时 prefill 后自动 snapshot。移除了 handle_chat_completions 和 handle_anthropic_messages_impl 中的重复 cache 逻辑（generate_internal 现在统一处理）。
+- **Files changed**:
+  - `src/server/dflash_server.cpp`: 
+    - 替换 PrefixCache 类为完整实现（compute_hash_key, find_slot, allocate_slot with LRU, free_slot with snapshot cleanup, get_snapshot, occupied_count）
+    - 在 generate_internal() 中集成 cache hit/miss 逻辑：cache hit → restore_target_cache() 跳过 prefill，cache miss → prefill → snapshot_target_cache() 自动保存
+    - 移除 handle_chat_completions 和 handle_anthropic_messages_impl 中的重复 cache 查找/分配代码（generate_internal 统一处理）
+    - PFlash 压缩现在只在 cache miss 时执行
+- **Learnings:**
+  - `PrefixSnapshot` 结构体定义在 `internal.h` 中，包含 KV cache 的 GPU 副本（attn_k_snap, attn_v_snap, ssm_state_snap, conv_state_snap, target_feat_snap）。
+  - `snapshot_target_cache()` 首次调用时延迟分配 GPU 缓冲区，后续调用复用同一缓冲区。
+  - `restore_target_cache()` 会设置 `cache.cur_pos = snap.cur_pos` 和 `cache.last_tok`，但不影响 ssm_intermediate/conv_input_cache（这些会在第一个 decode step 重建）。
+  - FNV-1a 哈希用于快速查找，但仍需精确比较 prompt_ids 防止哈希冲突。
+  - LRU 淘汰策略：每次访问时更新 `last_access` 计数器，分配时淘汰最老的 slot。
+  - Cache hit 时完全跳过 prefill 阶段，直接从 snapshot 恢复后进入 decode。
+  - PFlash 压缩只在 cache miss 时有意义（cache hit 时不需要 prefill）。
+- **Result**: Build succeeds, executable at `./build/dflash_server` (1.7MB). Prefix cache is fully functional with 8 slots, LRU eviction, and automatic snapshot/restore.
 
 ---

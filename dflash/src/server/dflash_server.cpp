@@ -928,38 +928,104 @@ public:
     struct Slot {
         bool occupied = false;
         std::vector<int32_t> prompt_ids;
-        // TODO: Add GGML buffer pointers
+        PrefixSnapshot snapshot;
+        uint64_t last_access = 0;  // For LRU eviction
+        uint64_t access_counter = 0;
+        uint64_t hash_key = 0;     // FNV-1a hash of prompt_ids
     };
 
+    // Compute a simple hash key from prompt token IDs
+    static uint64_t compute_hash_key(const std::vector<int32_t>& prompt_ids) {
+        uint64_t hash = 14695981039346656037ULL;  // FNV-1a offset basis
+        for (int32_t tok : prompt_ids) {
+            hash ^= static_cast<uint64_t>(tok);
+            hash *= 1099511628211ULL;  // FNV-1a prime
+        }
+        return hash;
+    }
+
+    // Find a slot matching the prompt tokens (by hash and exact comparison)
     std::optional<int> find_slot(const std::vector<int32_t>& prompt_ids) {
-        // Simple linear search for matching prompt
+        uint64_t hash = compute_hash_key(prompt_ids);
+
         for (int i = 0; i < MAX_SLOTS; i++) {
-            if (slots_[i].occupied && slots_[i].prompt_ids == prompt_ids) {
-                return i;
+            if (slots_[i].occupied && slots_[i].hash_key == hash) {
+                // Verify exact match (hash collision is possible but rare)
+                if (slots_[i].prompt_ids == prompt_ids) {
+                    // Update LRU
+                    slots_[i].last_access = ++access_counter_;
+                    return i;
+                }
             }
         }
         return std::nullopt;
     }
 
-    int allocate_slot() {
+    // Allocate a new slot (with LRU eviction if full)
+    int allocate_slot(const std::vector<int32_t>& prompt_ids) {
+        // First try to find an empty slot
         for (int i = 0; i < MAX_SLOTS; i++) {
             if (!slots_[i].occupied) {
-                slots_[i].occupied = true;
+                init_slot(i, prompt_ids);
                 return i;
             }
         }
-        return -1;  // Full
+
+        // All slots occupied - evict LRU
+        int lru_idx = 0;
+        uint64_t oldest_access = slots_[0].last_access;
+        for (int i = 1; i < MAX_SLOTS; i++) {
+            if (slots_[i].last_access < oldest_access) {
+                oldest_access = slots_[i].last_access;
+                lru_idx = i;
+            }
+        }
+
+        // Free the LRU slot
+        free_slot(lru_idx);
+        init_slot(lru_idx, prompt_ids);
+        return lru_idx;
     }
 
+    // Free a specific slot and release its snapshot memory
     void free_slot(int slot) {
-        if (slot >= 0 && slot < MAX_SLOTS) {
+        if (slot >= 0 && slot < MAX_SLOTS && slots_[slot].occupied) {
+            free_prefix_snapshot(slots_[slot].snapshot);
             slots_[slot].occupied = false;
             slots_[slot].prompt_ids.clear();
+            slots_[slot].hash_key = 0;
+            slots_[slot].last_access = 0;
         }
+    }
+
+    // Get snapshot reference for a slot
+    PrefixSnapshot* get_snapshot(int slot) {
+        if (slot >= 0 && slot < MAX_SLOTS && slots_[slot].occupied) {
+            return &slots_[slot].snapshot;
+        }
+        return nullptr;
+    }
+
+    // Get statistics
+    int occupied_count() const {
+        int count = 0;
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            if (slots_[i].occupied) count++;
+        }
+        return count;
     }
 
 private:
     std::array<Slot, MAX_SLOTS> slots_;
+    uint64_t access_counter_ = 0;
+
+    void init_slot(int slot, const std::vector<int32_t>& prompt_ids) {
+        slots_[slot].occupied = true;
+        slots_[slot].prompt_ids = prompt_ids;
+        slots_[slot].hash_key = compute_hash_key(prompt_ids);
+        slots_[slot].last_access = ++access_counter_;
+        // snapshot will be populated by snapshot_target_cache()
+    }
 };
 
 // ─── Prefill Coordinator ────────────────────────────────────────────────
@@ -1000,36 +1066,6 @@ std::vector<int32_t> DFlashServer::generate_internal(
         return result;
     }
 
-    // PFlash prefill compression
-    const bool has_tools = false;  // Tool integration will be added in STORY-008
-    std::vector<int32_t> working_tokens = prompt_tokens;
-
-    if (prefill_ && prefill_->should_compress((int)prompt_tokens.size(), has_tools)) {
-        std::cout << "[PFlash] Compression triggered for " << prompt_tokens.size() << " tokens" << std::endl;
-
-        // Park draft weights to free VRAM for drafter
-        if (draft_weights_) {
-            std::cout << "[PFlash] Parking draft weights" << std::endl;
-            free_draft_weights(*draft_weights_);
-        }
-
-        // Compress the prompt
-        auto compressed = compress_prefill(prompt_tokens);
-        if (!compressed.empty() && compressed.size() < prompt_tokens.size()) {
-            working_tokens = compressed;
-            std::cout << "[PFlash] Using compressed tokens: " << working_tokens.size() << std::endl;
-        }
-
-        // Restore draft weights
-        if (draft_weights_) {
-            std::cout << "[PFlash] Restoring draft weights" << std::endl;
-            // Note: draft weights need to be reloaded; this is handled by the initialization
-        }
-    }
-
-    // Reset cache state for new request
-    reset_target_cache(*cache_);
-
     const int hidden = DFLASH27B_TARGET_HIDDEN;
     const int vocab = DFLASH27B_TARGET_VOCAB;
     const int q_len = DFLASH27B_DRAFT_BLOCK_SIZE;
@@ -1037,64 +1073,141 @@ std::vector<int32_t> DFlashServer::generate_internal(
 
     int32_t last_tok = -1;
     int committed = 0;
+    bool cache_hit = false;
 
-    // Prefill: single-token decode with layer feature capture
-    for (int start = 0; start < static_cast<int>(working_tokens.size()); start += pf_ub) {
-        const int nt = std::min(pf_ub, static_cast<int>(working_tokens.size()) - start);
-        const int kv_len_p = start + nt;
-        const bool with_m = (kv_len_p > 1) || (committed > 0);
-
-        if (!build_target_step(target_sg_, start, nt, with_m, true, false, config_.fa_window)) {
-            std::cerr << "prefill build failed @" << start << std::endl;
-            return result;
+    // ─────────────────────────────────────────────────────────────────────
+    // Prefix Cache Lookup
+    // ─────────────────────────────────────────────────────────────────────
+    auto cached_slot = prefix_cache_->find_slot(prompt_tokens);
+    if (cached_slot) {
+        PrefixSnapshot* snap = prefix_cache_->get_snapshot(*cached_slot);
+        if (snap && restore_target_cache(*snap, *cache_)) {
+            std::cout << "[PrefixCache] Cache hit! Restored " << cache_->cur_pos
+                      << " tokens (slot " << *cached_slot << ")" << std::endl;
+            committed = cache_->cur_pos;
+            last_tok = cache_->last_tok;
+            cache_hit = true;
+        } else {
+            std::cerr << "[PrefixCache] Cache hit but restore failed, falling back to prefill" << std::endl;
         }
-
-        // Embed tokens
-        std::vector<float> pf_emb((size_t)hidden * nt);
-        if (!target_weights_->embedder.embed(working_tokens.data() + start, nt, pf_emb.data())) {
-            std::cerr << "prefill embed failed @" << start << std::endl;
-            return result;
-        }
-        ggml_backend_tensor_set(target_sg_.inp_embed, pf_emb.data(), 0,
-                                sizeof(float) * pf_emb.size());
-
-        // Set positions
-        std::vector<int32_t> pf_pos(4 * nt);
-        for (int i = 0; i < nt; i++) {
-            const int p = start + i;
-            pf_pos[0 * nt + i] = p;
-            pf_pos[1 * nt + i] = p;
-            pf_pos[2 * nt + i] = p;
-            pf_pos[3 * nt + i] = 0;
-        }
-        ggml_backend_tensor_set(target_sg_.positions, pf_pos.data(), 0,
-                                sizeof(int32_t) * pf_pos.size());
-
-        // Set attention mask if needed
-        if (with_m) {
-            std::vector<uint16_t> pf_mask;
-            build_causal_mask(pf_mask, kv_len_p, nt, start);
-            ggml_backend_tensor_set(target_sg_.attn_mask, pf_mask.data(), 0,
-                                    sizeof(uint16_t) * pf_mask.size());
-        }
-
-        auto st = ggml_backend_graph_compute(cache_->backend, target_sg_.gf);
-        if (st != GGML_STATUS_SUCCESS) {
-            std::cerr << "prefill compute failed @" << start << ": " << (int)st << std::endl;
-            return result;
-        }
-
-        committed = kv_len_p;
     }
 
-    // Get last token logits for decode seed
-    std::vector<float> last_logits(vocab);
-    ggml_backend_tensor_get(target_sg_.logits, last_logits.data(),
-                            (size_t)(committed - 1) * vocab * sizeof(float),
-                            sizeof(float) * vocab);
-    last_tok = argmax_f32(last_logits.data(), vocab);
-    cache_->cur_pos = committed;
-    cache_->last_tok = last_tok;
+    // ─────────────────────────────────────────────────────────────────────
+    // PFlash Prefill Compression (only on cache miss)
+    // ─────────────────────────────────────────────────────────────────────
+    std::vector<int32_t> working_tokens = prompt_tokens;
+
+    if (!cache_hit) {
+        const bool has_tools = false;  // Tool integration will be added in STORY-008
+
+        if (prefill_ && prefill_->should_compress((int)prompt_tokens.size(), has_tools)) {
+            std::cout << "[PFlash] Compression triggered for " << prompt_tokens.size() << " tokens" << std::endl;
+
+            // Park draft weights to free VRAM for drafter
+            if (draft_weights_) {
+                std::cout << "[PFlash] Parking draft weights" << std::endl;
+                free_draft_weights(*draft_weights_);
+            }
+
+            // Compress the prompt
+            auto compressed = compress_prefill(prompt_tokens);
+            if (!compressed.empty() && compressed.size() < prompt_tokens.size()) {
+                working_tokens = compressed;
+                std::cout << "[PFlash] Using compressed tokens: " << working_tokens.size() << std::endl;
+            }
+
+            // Restore draft weights
+            if (draft_weights_) {
+                std::cout << "[PFlash] Restoring draft weights" << std::endl;
+                // Note: draft weights need to be reloaded; this is handled by the initialization
+            }
+        }
+
+        // Reset cache state for new request (only on cache miss)
+        reset_target_cache(*cache_);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Prefill: single-token decode with layer feature capture (skip on cache hit)
+    // ─────────────────────────────────────────────────────────────────────
+    if (!cache_hit) {
+        for (int start = 0; start < static_cast<int>(working_tokens.size()); start += pf_ub) {
+            const int nt = std::min(pf_ub, static_cast<int>(working_tokens.size()) - start);
+            const int kv_len_p = start + nt;
+            const bool with_m = (kv_len_p > 1) || (committed > 0);
+
+            if (!build_target_step(target_sg_, start, nt, with_m, true, false, config_.fa_window)) {
+                std::cerr << "prefill build failed @" << start << std::endl;
+                return result;
+            }
+
+            // Embed tokens
+            std::vector<float> pf_emb((size_t)hidden * nt);
+            if (!target_weights_->embedder.embed(working_tokens.data() + start, nt, pf_emb.data())) {
+                std::cerr << "prefill embed failed @" << start << std::endl;
+                return result;
+            }
+            ggml_backend_tensor_set(target_sg_.inp_embed, pf_emb.data(), 0,
+                                    sizeof(float) * pf_emb.size());
+
+            // Set positions
+            std::vector<int32_t> pf_pos(4 * nt);
+            for (int i = 0; i < nt; i++) {
+                const int p = start + i;
+                pf_pos[0 * nt + i] = p;
+                pf_pos[1 * nt + i] = p;
+                pf_pos[2 * nt + i] = p;
+                pf_pos[3 * nt + i] = 0;
+            }
+            ggml_backend_tensor_set(target_sg_.positions, pf_pos.data(), 0,
+                                    sizeof(int32_t) * pf_pos.size());
+
+            // Set attention mask if needed
+            if (with_m) {
+                std::vector<uint16_t> pf_mask;
+                build_causal_mask(pf_mask, kv_len_p, nt, start);
+                ggml_backend_tensor_set(target_sg_.attn_mask, pf_mask.data(), 0,
+                                        sizeof(uint16_t) * pf_mask.size());
+            }
+
+            auto st = ggml_backend_graph_compute(cache_->backend, target_sg_.gf);
+            if (st != GGML_STATUS_SUCCESS) {
+                std::cerr << "prefill compute failed @" << start << ": " << (int)st << std::endl;
+                return result;
+            }
+
+            committed = kv_len_p;
+        }
+
+        // Get last token logits for decode seed
+        std::vector<float> last_logits(vocab);
+        ggml_backend_tensor_get(target_sg_.logits, last_logits.data(),
+                                (size_t)(committed - 1) * vocab * sizeof(float),
+                                sizeof(float) * vocab);
+        last_tok = argmax_f32(last_logits.data(), vocab);
+        cache_->cur_pos = committed;
+        cache_->last_tok = last_tok;
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Snapshot the cache after prefill (for future requests)
+        // ─────────────────────────────────────────────────────────────────────
+        int new_slot = prefix_cache_->allocate_slot(prompt_tokens);
+        if (new_slot >= 0) {
+            PrefixSnapshot* snap = prefix_cache_->get_snapshot(new_slot);
+            if (snap) {
+                if (snapshot_target_cache(*target_weights_, *cache_, cache_->backend, *snap)) {
+                    std::cout << "[PrefixCache] Snapshotted " << committed
+                              << " tokens to slot " << new_slot
+                              << " (occupied: " << prefix_cache_->occupied_count()
+                              << "/" << PrefixCache::MAX_SLOTS << ")" << std::endl;
+                } else {
+                    std::cerr << "[PrefixCache] Failed to snapshot cache" << std::endl;
+                }
+            }
+        } else {
+            std::cerr << "[PrefixCache] No free slots available for snapshot" << std::endl;
+        }
+    }
 
     // Initialize feature mirror
     feature_mirror_.target_feat = cache_->target_feat;
@@ -1318,24 +1431,7 @@ void DFlashServer::handle_chat_completions(const httplib::Request& req, httplib:
         std::vector<int32_t> prompt_tokens;
         // TODO: Apply chat template and tokenize
 
-        // Check cache
-        auto cached_slot = prefix_cache_->find_slot(prompt_tokens);
-
-        std::vector<int32_t> tokens;
-
-        if (cached_slot) {
-            // Restore from cache
-            // TODO: Implement cache restore
-        } else {
-            // Generate
-            tokens = generate_internal(prompt_tokens, chat_req.max_tokens);
-
-            // Cache result
-            int slot = prefix_cache_->allocate_slot();
-            if (slot >= 0) {
-                // TODO: Snapshot cache
-            }
-        }
+        std::vector<int32_t> tokens = generate_internal(prompt_tokens, chat_req.max_tokens);
 
         // Build response
         ChatResponse chat_resp = build_chat_response(tokens, chat_req);
@@ -1898,24 +1994,8 @@ void DFlashServer::handle_anthropic_messages_impl(
     std::vector<int32_t> prompt_tokens;
     // TODO: Apply chat template and tokenize
 
-    // Check cache
-    auto cached_slot = prefix_cache_->find_slot(prompt_tokens);
-
-    std::vector<int32_t> tokens;
-
-    if (cached_slot) {
-        // Restore from cache
-        // TODO: Implement cache restore
-    } else {
-        // Generate
-        tokens = generate_internal(prompt_tokens, creq.max_tokens);
-
-        // Cache result
-        int slot = prefix_cache_->allocate_slot();
-        if (slot >= 0) {
-            // TODO: Snapshot cache
-        }
-    }
+    // Generation is handled internally with prefix cache support
+    std::vector<int32_t> tokens = generate_internal(prompt_tokens, areq.max_tokens);
 
     // Build Anthropic response
     AnthropicMessagesResponse aresp = build_anthropic_response(tokens, areq);

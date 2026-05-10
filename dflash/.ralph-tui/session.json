@@ -3,10 +3,10 @@
   "sessionId": "8c372803-907a-4081-96ce-520a55886f9f",
   "status": "running",
   "startedAt": "2026-05-10T12:53:40.639Z",
-  "updatedAt": "2026-05-10T14:50:00.406Z",
-  "currentIteration": 6,
+  "updatedAt": "2026-05-10T14:59:03.656Z",
+  "currentIteration": 7,
   "maxIterations": 50,
-  "tasksCompleted": 4,
+  "tasksCompleted": 5,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -74,6 +74,16 @@
       "durationMs": 544757,
       "startedAt": "2026-05-10T14:34:44.006Z",
       "endedAt": "2026-05-10T14:43:48.763Z"
+    },
+    {
+      "iteration": 7,
+      "status": "completed",
+      "taskId": "STORY-006",
+      "taskTitle": "流式响应",
+      "taskCompleted": true,
+      "durationMs": 370597,
+      "startedAt": "2026-05-10T14:43:49.807Z",
+      "endedAt": "2026-05-10T14:50:00.404Z"
     }
   ],
   "skippedTaskIds": [],
