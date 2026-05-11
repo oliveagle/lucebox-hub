@@ -168,6 +168,112 @@ Compare to Qwen3.5-27B on the same harness: 2.87× / 2.21× / 2.56× — cross-g
 
 Numbers will move once a Qwen3.6-matched DFlash draft lands; swap it in via `DFLASH_DRAFT=...` without rebuilding.
 
+## Laguna-XS.2 target (experimental, Poolside MoE)
+
+[Poolside Laguna-XS.2](https://huggingface.co/poolside/Laguna-XS.2) is a 40-layer MoE LLM with 256 experts (top-8) plus an always-on shared expert, per-layer head counts `[48,64,64,64]×10`, and a per-layer SWA pattern (window 512). It is **architecturally distinct from `qwen35`**, so dflash adds a hand-rolled CUDA forward path (`Path A`, ggml-only — no libllama dependency) that mirrors the qwen35 stack. The Q4_K_M GGUF lands at 18.77 GiB on a single RTX 3090; tok_embd stays CPU-only (110 MiB) to keep the GPU budget under 24 GB.
+
+### Single binary, single server
+
+`test_dflash` peeks `general.architecture` from the target GGUF at startup
+and dispatches by arch:
+
+  - `qwen35` / `qwen36` → existing DFlash + DDTree pipeline (no change).
+  - `laguna` → `dflash27b::run_laguna_daemon()` (no spec-decode, no DDTree).
+
+The daemon stdin/stream-fd protocol is identical, so `scripts/server.py`
+drives both arches end-to-end. The only thing the user changes is `--target`.
+
+### Build + run
+
+```bash
+cmake --build build --target test_dflash test_laguna_daemon pflash_daemon -j
+
+# 19 GB Q4_K_M target + 1.2 GB Qwen3-0.6B BF16 drafter + tokenizers
+huggingface-cli download Lucebox/Laguna-XS.2-GGUF laguna-xs2-Q4_K_M.gguf --local-dir models/
+huggingface-cli download unsloth/Qwen3-0.6B-GGUF Qwen3-0.6B-BF16.gguf --local-dir models/
+huggingface-cli download poolside/Laguna-XS.2 --local-dir models/Laguna-XS-2 \
+    --include 'tokenizer*' '*.json'
+
+# OpenAI-compatible HTTP server (same scripts/server.py used for qwen35).
+# server.py drops --draft and the DFlash/DDTree flags when arch=laguna;
+# test_dflash itself routes to run_laguna_daemon().
+python3 scripts/server.py \
+    --target models/laguna-xs2-Q4_K_M.gguf \
+    --max-ctx 16384 --port 8000
+
+curl -sN http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"luce-dflash","messages":[{"role":"user","content":"Hi"}],"max_tokens":32}'
+
+# Smoke (loader only, no forward)
+./build/smoke_load_target_laguna models/laguna-xs2-Q4_K_M.gguf
+
+# Variable-N TTFT bench (DFLASH_KV_TYPE=q4_0 for ctx > 32K, DFLASH_CHUNK=2048 default)
+DFLASH_KV_TYPE=q4_0 ./build/bench_laguna_ttft models/laguna-xs2-Q4_K_M.gguf '4096,16384,65536'
+
+# NIAH single-needle, with PFlash compression. The driver still spawns the
+# standalone test_laguna_daemon binary so it can run without server.py.
+python3 scripts/laguna_pflash_niah.py \
+    --target models/laguna-xs2-Q4_K_M.gguf \
+    --drafter models/Qwen3-0.6B-BF16.gguf \
+    --laguna-tok models/Laguna-XS-2 \
+    --drafter-tok Qwen/Qwen3-0.6B \
+    --pflash-bin ./build/pflash_daemon \
+    --laguna-bin ./build/test_laguna_daemon \
+    --ctx 131072 --depth 0.5 --keep 0.10 --target-kv q4_0
+```
+
+### NIAH retrieval (RTX 3090, depth=0.5, q4_0 KV target, Q8_0 KV at 4K)
+
+| Context | KV   | keep | drafter (s) | target prefill (s) | end-to-end TTFT | NIAH |
+|--------:|:----:|:----:|------------:|-------------------:|----------------:|:----:|
+|   4 096 | Q8_0 | 0.10 |        1.54 |               0.39 |          1.92 s |  ✅  |
+|  65 536 | Q4_0 | 0.10 |        ~5   |                ~6  |           ~11 s |  ✅  |
+|  65 536 | Q4_0 | 0.20 |        ~5   |                ~8  |           ~13 s |  ✅  |
+|  65 536 | Q4_0 | 0.30 |        ~5   |                ~10 |           ~15 s |  ✅  |
+|  65 536 | Q4_0 | 0.50 |        ~5   |                ~17 |           ~22 s |  ✅  |
+| 131 072 | Q4_0 | 0.10 |       11.11 |               4.79 |         15.91 s |  ✅  |
+| 131 072 | Q4_0 | 0.20 |       11.20 |              13.55 |         24.75 s |  ✅  |
+| 131 072 | Q4_0 | 0.30 |       11.41 |              26.43 |         37.84 s |  ✅  |
+
+The **131K @ keep=0.10 PASS** is the surprising result. Earlier scaffolding had this point failing because pflash drops chunk-boundary tokens, truncating multi-token needles like `BLUEHORIZON-7421` to their first kept fragment (`BLUEH`). The fix lives in `scripts/laguna_pflash_niah.py::cross_tok_compressed`: recover kept-token positions by greedy subsequence-match against the original drafter IDs, group consecutive positions into runs, expand each run outward until both endpoints sit on whitespace, then decode the union once. The expanded set is a **superset** of the kept tokens, so semantic compression is preserved while broken words are pulled back together. This rescued every failing (ctx, keep) point at 64K and 131K.
+
+### Real-prompt NIAH (code corpus filler)
+
+The table above uses synthetic uniform filler. Pass `--filler-file <path>` to
+use a real corpus instead (file or directory; directories are recursively
+concatenated). On `dflash/src` (1.3 MiB of C++/CUDA, ctx=16K, depth=0.5):
+
+| keep | drafter compressed | NIAH |
+|:----:|-------------------:|:----:|
+| no-compress | (full haystack)        | ✅ PASS |
+| 0.10 |    1486 / 15278     | ❌ FAIL |
+| 0.15 |    2254 / 15278     | ❌ FAIL |
+| 0.20 |    3022 / 15278     | ❌ FAIL |
+| 0.30 |    4558 / 15278     | ✅ PASS |
+| 0.50 |    7630 / 15278     | ✅ PASS |
+
+No-compress passes, so the model itself reads the needle out of code; the
+failure mode at low `keep` is the drafter dropping the needle line. Code has
+a denser distribution of "important" tokens than synthetic filler (every
+identifier, syntax token, and semantic span looks informative to the
+attention-based scorer), so the needle line doesn't stand out as an outlier
+until retention is around 3× the synthetic-filler threshold (~0.10 → ~0.30).
+
+Production implication: route by prompt source. Synthetic / prose prompts
+tolerate `keep=0.10`; code-heavy prompts want `keep ≥ 0.30` to keep recall
+intact. A NIAH-aware drafter (or a hybrid scorer that boosts low-frequency
+tokens) is the path to bring code recall to the same ratio as prose.
+
+### Sampler
+
+`test_laguna_daemon` is greedy by default. When `scripts/laguna_serve.py` (or any caller) appends ` samp=temp,top_p,top_k,rep_pen,seed` to a `generate` line, the daemon strips it and runs a CPU sampler chain (rep_penalty → top_k → softmax(temp) → top_p → draw) over the prompt + emitted history. Verified that greedy / temp=2.0 seed=42 / temp=2.0 seed=43 / top_p=0.5 produce four distinct outputs on the same prompt.
+
+### Outstanding
+
+- **No Laguna spec-decode draft published yet.** Current decode is autoregressive only (~111 tok/s on RTX 3090). When a matched draft lands, the DFlash + DDTree machinery already in `test_dflash` ports across.
+- **Prefix cache + in-process PFlash compression** are disabled on the laguna server.py path. Both require `SNAPSHOT` / `RESTORE` / `FREE_SNAPSHOT` and `compress` / `park` / `unpark` commands inside `run_laguna_daemon`. Tracked as follow-ups; the qwen35 path uses them today.
+- **Path B (in-process Python drafter)** is not used here. Path A keeps the dflash daemon ggml-only.
+
 ## Quick start
 
 ```bash
@@ -304,4 +410,53 @@ Open an issue or PR against `Luce-Org/lucebox-hub`. Good first picks:
 Apache 2.0 · [Lucebox](https://lucebox.com) · [Discord](https://discord.gg/yHfswqZmJQ)
 
 Inspired by [z-lab/DFlash](https://arxiv.org/abs/2602.06036), [liranringel/ddtree](https://github.com/liranringel/ddtree), [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
-l-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
+
+---
+
+## Using with OpenAI Codex CLI
+
+The DFlash server natively supports the **Responses API** (`/v1/responses`), which is the
+only wire protocol used by [OpenAI Codex](https://github.com/openai/codex).
+
+### 1. Start the DFlash server
+
+```bash
+python dflash/scripts/server.py \
+  --target models/Qwen3.5-27B-Q4_K_M.gguf \
+  --draft models/Qwen3.5-3B-f16.safetensors \
+  --budget 22 --port 8080
+```
+
+### 2. Configure Codex
+
+Create or edit `~/.codex/config.toml`:
+
+```toml
+model = "luce-dflash"
+model_provider = "dflash"
+
+[model_providers.dflash]
+name = "DFlash"
+base_url = "http://localhost:8080/v1"
+wire_api = "responses"
+supports_websockets = false
+```
+
+No `env_key` is needed — the local server accepts any token.
+
+### 3. Run Codex
+
+```bash
+codex --provider dflash "Explain this codebase"
+```
+
+### Supported features
+
+| Feature | Status |
+|---------|--------|
+| Responses API (`POST /v1/responses`) | ✅ |
+| Function/tool calling | ✅ |
+| Streaming (SSE) | ✅ |
+| Codex models endpoint | ✅ |
+| Reasoning / thinking | ✅ (effort: low / medium) |
+| WebSockets | ❌ (not needed) |
