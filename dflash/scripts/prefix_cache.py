@@ -744,6 +744,13 @@ class PrefixCache:
                 continue
         return total
 
+    @staticmethod
+    def _read_full_meta_int(meta: dict, key: str, *, default: int | None = None) -> int | None:
+        value = meta.get(key, default)
+        if value is None or isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return value
+
     def _recompute_full_next_slot(self) -> None:
         if getattr(self, "_full_disabled", True) or self._full_cap <= 0:
             self._full_next_slot = 0
@@ -856,18 +863,18 @@ class PrefixCache:
 
             if not isinstance(meta, dict):
                 continue
-            version = int(meta.get("version", 0) or 0)
+            version = self._read_full_meta_int(meta, "version", default=0)
+            if version is None:
+                continue
             if version not in (1, self.FULL_META_VERSION):
                 continue
             if meta.get("kv_k_type") != self.kv_k_type:
                 continue
-            if int(meta.get("fa_window", -1)) != fa_window:
+            meta_fa_window = self._read_full_meta_int(meta, "fa_window", default=-1)
+            if meta_fa_window != fa_window:
                 continue
 
             key_hex = meta.get("key_hex")
-            cur_ids_len = meta.get("cur_ids_len")
-            raw_prompt_len = meta.get("raw_prompt_len", cur_ids_len)
-            last_used_ns = meta.get("last_used_ns", 0)
             if not isinstance(key_hex, str):
                 continue
             try:
@@ -876,11 +883,14 @@ class PrefixCache:
                 continue
             if len(key) != 16:
                 continue
-            if not isinstance(cur_ids_len, int) or cur_ids_len < 0:
+            cur_ids_len = self._read_full_meta_int(meta, "cur_ids_len")
+            if cur_ids_len is None or cur_ids_len < 0:
                 continue
-            if not isinstance(raw_prompt_len, int) or raw_prompt_len < 0:
+            raw_prompt_len = self._read_full_meta_int(meta, "raw_prompt_len", default=cur_ids_len)
+            if raw_prompt_len is None or raw_prompt_len < 0:
                 continue
-            if not isinstance(last_used_ns, int):
+            last_used_ns = self._read_full_meta_int(meta, "last_used_ns", default=0)
+            if last_used_ns is None:
                 continue
 
             bin_path = self._full_bin_path(key)

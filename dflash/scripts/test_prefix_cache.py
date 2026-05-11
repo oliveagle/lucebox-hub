@@ -97,6 +97,32 @@ def test_rehydrate_full_cache_skips_stale_metadata(tmp_path):
     assert cache.full_entries == {}
 
 
+def test_rehydrate_full_cache_skips_malformed_integer_metadata(tmp_path):
+    cache = make_cache(tmp_path)
+    bad_key = b"\x02" * 16
+    good_prompt = [7, 7, 7]
+    good_key = hash_prefix(good_prompt, cache.kv_k_type, cache.fa_window)
+    cache._full_bin_path(bad_key).write_bytes(b"bad")
+    cache._full_meta_path(bad_key).write_text(json.dumps({
+        "version": [],
+        "key_hex": bad_key.hex(),
+        "kv_k_type": cache.kv_k_type,
+        "fa_window": "oops",
+        "cur_ids_len": 5,
+        "raw_prompt_len": 5,
+        "last_used_ns": 1,
+    }), encoding="utf-8")
+    cache._full_bin_path(good_key).write_bytes(b"good")
+    write_meta(cache, good_key, cur_ids_len=6, raw_prompt_len=len(good_prompt), last_used_ns=2)
+
+    replay = AsyncMock(return_value=True)
+    restored = asyncio.run(cache.rehydrate_full_cache(replay))
+
+    assert restored == 1
+    replay.assert_awaited_once_with(cache._full_slot_base, str(cache._full_bin_path(good_key)), 6)
+    assert list(cache.full_entries.keys()) == [good_key]
+
+
 def test_rehydrate_full_cache_keeps_most_recent_entries_within_cap(tmp_path):
     cache = make_cache(tmp_path, full_cap=2)
     keys = [bytes([i]) * 16 for i in range(1, 4)]
