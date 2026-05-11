@@ -1195,6 +1195,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     window = ""
                     tool_buffer = ""
                     accumulated_content = ""
+                    accumulated_raw_text = ""
                     stops = normalize_stop(req.stop)
                     tag_holdback = max(len(THINK_OPEN_TAG), len(THINK_CLOSE_TAG), len(TOOL_OPEN_TAG))
                     stop_holdback = max((len(s) for s in stops), default=0)
@@ -1211,6 +1212,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         async for tok_id in _astream_tokens(r_pipe, gen_len, timing):
                             completion_tokens += 1
                             piece = tokenizer.decode([tok_id])
+                            accumulated_raw_text += piece
                             window += piece
 
                             if stops and mode != "tool_buffer":
@@ -1314,7 +1316,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                         if mode == "tool_buffer":
                             cleaned_after, tool_calls = parse_tool_calls(tool_buffer, tools=req.tools)
                             if tool_calls:
-                                _remember_tool_call_text(accumulated_content + tool_buffer, tool_calls)
+                                _remember_tool_call_text(accumulated_raw_text, tool_calls)
                                 if cleaned_after:
                                     out = emit_delta(cleaned_after, "content")
                                     if out: yield out
@@ -2075,6 +2077,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 window = ""
                 tool_buffer = ""
                 accumulated_text = ""
+                accumulated_raw_text = ""
                 tag_holdback = max(len(THINK_OPEN_TAG), len(THINK_CLOSE_TAG), len(TOOL_OPEN_TAG))
                 HOLDBACK = tag_holdback
                 completion_tokens = 0
@@ -2084,6 +2087,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                     async for tok_id in _astream_tokens(r_pipe, gen_len, timing):
                         completion_tokens += 1
                         piece = tokenizer.decode([tok_id])
+                        accumulated_raw_text += piece
                         window += piece
 
                         while True:
@@ -2171,7 +2175,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                 if mode == "tool_buffer" and tool_buffer:
                     cleaned_after, tool_calls = parse_tool_calls(tool_buffer, tools=chat_req.tools)
                     if tool_calls:
-                        _remember_tool_call_text(accumulated_text + tool_buffer, tool_calls)
+                        _remember_tool_call_text(accumulated_raw_text, tool_calls)
                         if cleaned_after:
                             accumulated_text += cleaned_after
                         for tc in tool_calls:

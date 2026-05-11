@@ -503,6 +503,68 @@ def test_chat_completions_streaming_ignores_stray_think_closers(
     assert "</think>" not in text
     assert '"content":"8"' in text or '"content": "8"' in text
 
+def test_chat_completions_streaming_replays_exact_raw_text_with_reasoning(
+        mock_os_read, mock_pipe, mock_tokenizer, app):
+    mock_pipe.return_value = (1, 2)
+    raw_tool_turn = (
+        "<think>private chain</think>"
+        "visible"
+        "<tool_call>"
+        "<function=read_file><parameter=path>x.py</parameter></function>"
+        "</tool_call>"
+    )
+    mock_tokenizer.decode.side_effect = [
+        "<think>private chain",
+        "</think>",
+        "visible",
+        "<tool_call><function=read_file><parameter=path>x.py</parameter></function></tool_call>",
+        "followup",
+    ]
+    mock_os_read.side_effect = [
+        struct.pack("<i", 10), struct.pack("<i", 11),
+        struct.pack("<i", 12), struct.pack("<i", 13), struct.pack("<i", -1),
+        struct.pack("<i", 14), struct.pack("<i", -1),
+    ]
+
+    client = TestClient(app)
+    first = client.post("/v1/chat/completions", json={
+        "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": "read x.py"}],
+        "stream": True,
+    })
+    assert first.status_code == 200
+    chunks = [
+        json.loads(line[6:])
+        for line in first.text.strip().split("\n\n")
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+    tool_delta = next(
+        c["choices"][0]["delta"]["tool_calls"][0]
+        for c in chunks
+        if c["choices"][0]["delta"].get("tool_calls")
+    )
+
+    second = client.post("/v1/chat/completions", json={
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "user", "content": "read x.py"},
+            {"role": "assistant", "tool_calls": [{
+                "id": tool_delta["id"],
+                "type": "function",
+                "function": tool_delta["function"],
+            }]},
+            {"role": "tool", "tool_call_id": tool_delta["id"], "content": "file body"},
+            {"role": "user", "content": "what next?"},
+        ],
+        "stream": False,
+    })
+    assert second.status_code == 200
+
+    msgs = mock_tokenizer.apply_chat_template.call_args_list[-1][0][0]
+    assistant = next(m for m in msgs if m["role"] == "assistant")
+    assert assistant["content"] == raw_tool_turn
+    assert "tool_calls" not in assistant
+
 
 # ─── POST /v1/responses ───────────────────────────────────────────
 
