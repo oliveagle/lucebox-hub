@@ -483,7 +483,7 @@ ggml_tensor * build_qwen35_layer(
 
 } // namespace dflash27b
 
-#if defined(GGML_USE_CUDA)
+#if defined(GGML_USE_CUDA) && !defined(GGML_USE_HIP)
 #include <cuda_runtime.h>
 // Host-staged copy between CUDA devices (no peer access required).
 // Streams are device-specific: src_stream orders the D2H leg on src_dev and
