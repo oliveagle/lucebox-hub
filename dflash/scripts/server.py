@@ -697,7 +697,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         cap=prefix_cache_slots,
     )
     if prefill_cfg is not None and prefill_cache_slots > 0:
-        prefix_cache.init_full_cache(prefill_cache_slots, budget_bytes=prefill_cache_bytes)
+        prefix_cache.init_full_cache(prefill_cache_slots)
     tool_memory = ToolMemory(
         max_entries=int(os.environ.get("DFLASH_TOOL_MEMORY_MAX_ENTRIES", "50000")),
         max_bytes=int(os.environ.get("DFLASH_TOOL_MEMORY_MAX_BYTES", str(64 * 1024 * 1024))),
