@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "sessionId": "e78c49e0-f823-455b-9818-e735042baef5",
+  "sessionId": "507b576e-a517-438f-9dd9-ad2a7e8ae52a",
   "status": "running",
-  "startedAt": "2026-05-10T17:51:18.183Z",
-  "updatedAt": "2026-05-10T18:35:47.102Z",
-  "currentIteration": 2,
+  "startedAt": "2026-05-11T03:05:17.944Z",
+  "updatedAt": "2026-05-11T03:12:40.527Z",
+  "currentIteration": 0,
   "maxIterations": 50,
-  "tasksCompleted": 1,
+  "tasksCompleted": 0,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -14,32 +14,9 @@
     "totalTasks": 0,
     "tasks": []
   },
-  "iterations": [
-    {
-      "iteration": 1,
-      "status": "failed",
-      "taskId": "STORY-002",
-      "taskTitle": "核心生成循环",
-      "taskCompleted": false,
-      "durationMs": 286026,
-      "startedAt": "2026-05-10T17:51:23.409Z",
-      "endedAt": "2026-05-10T17:56:09.435Z"
-    },
-    {
-      "iteration": 2,
-      "status": "completed",
-      "taskId": "STORY-008",
-      "taskTitle": "高级功能",
-      "taskCompleted": true,
-      "durationMs": 1664745,
-      "startedAt": "2026-05-10T17:56:10.489Z",
-      "endedAt": "2026-05-10T18:23:55.234Z"
-    }
-  ],
+  "iterations": [],
   "skippedTaskIds": [],
   "cwd": "/home/oliveagle/repos/github.com/others/lucebox-hub/dflash",
-  "activeTaskIds": [
-    "STORY-002"
-  ],
+  "activeTaskIds": [],
   "subagentPanelVisible": false
 }
