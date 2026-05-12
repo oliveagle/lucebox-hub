@@ -336,3 +336,371 @@ sequence; rationale in the Tier 2 section above.
   on the HIP support PR.
 - Prompt-md5 disciplined bench: warmup + ≥2 measurement runs, fresh
   binary, prompt md5 logged. See lucebox's existing `bench_he.py` setup.
+
+---
+
+# 2026-05-11 evening update — cycles 9–16 empirical follow-on
+
+After the Tier 1 validation + Tier 2 falsification above, this is the
+log of eight additional cycles testing every remaining lever within the
+HIP path's ceiling. The headline is mixed: **one new kernel-side
+config win + one drafter-swap win, four falsified levers, one
+sanity-check that quantifies the structural ceiling.** Combined gains
+land at **+6.4% to +10.95% over the post-Tier-1 baseline**, but the
+sanity-check vs hipfire's native implementation on the same silicon
+shows lucebox-hub HIP runs at ~58% of the hardware's practical ceiling.
+
+The strategic recommendation at the end (cycle 16) is to pivot the AMD
+direction toward **Vulkan**, not because the HIP work is wasted (it
+shouldn't be — ship it), but because the kernel-tuning ceiling on HIP
+is structurally lower than what Vulkan offers across all RDNA archs.
+
+## Correction to Tier 1 attribution
+
+The original Tier 1 write-up framed the +53% gfx1100 win as
+"MMQ→MMVQ dispatch via `MMVQ_MAX_BATCH_SIZE = 8`". The mechanism is
+correct (budget=8 → `src1->ne[1]=8 ≤ 8` → MMVQ path for the target
+spec-verify q4_K matmul). What's **wrong** is the implied severity:
+cycle 11's `rocprof --stats` decode-time attribution on the same
+configuration shows MMVQ accounts for **only 1.10% of decode GPU
+time** (8 calls × 1128 µs avg on the 27B HE-0 workload). The +53% comes
+from the routing decision for one specific tensor — the target q4_K
+spec-verify matmul — which dominates _budget=22_'s wasted-tile cost
+but is only one of several q4_K/q5_K/q6_K mat-muls in the forward
+pass. The wider MMQ surface (52.66% of decode time across
+`mul_mat_q<q4_K, 16>` + `<q5_K>` + `<q6_K>`) is unchanged by the
+budget switch and remains the bottleneck after Tier 1 lands.
+
+This doesn't change the recommendation to ship Tier 1 — it just
+clarifies what's actually moving.
+
+## Cycle 9 — Issue ggml-org/llama.cpp#21284 MMQ tile override on RDNA3_0
+
+The closed PR #21344 (pedapudi, for gfx1151) hypothesized that the
+upstream `mmq_x_max=128, mmq_y=128, nwarps=8` defaults spill VGPRs on
+RDNA3-class WMMA architectures and proposed `48, 64, 4` for RDNA3_5.
+IMbackK (ROCm maintainer) explicitly suggested testing the same values
+on discrete RDNA3 (gfx1100/gfx1101) but never followed up. We tested it.
+
+**Implementation**: 6 edits to `ggml-cuda/mmq.cuh`'s
+`get_mmq_x_max_host/device`, `get_mmq_y_host/device`,
+`mmq_get_nwarps_host/device` — all gated behind an opt-in macro
+`LUCEBOX_GFX1100_TILE_OVERRIDE` (default OFF). Branch
+`Kaden-Schutt/lucebox-hub@feat/mmq-q4_K-rdna3-custom` (local, unpushed).
+
+**Bench** (HE 10-prompt, n_gen=256, budget=8, n=2 runs each):
+
+| Tile override | Mean tok/s | AL  | Δ vs stock |
+|---|---|---|---|
+| OFF (= upstream defaults 128/128/8) | 62.56 | 5.25 | baseline |
+| ON  (= 48/64/4 on RDNA3_0)           | **63.86** | 5.25 | **+1.93%** |
+
+Per-prompt deltas: +1.5% to +3.0% across all 10 prompts, every prompt
+positive → structural, not DPM drift. AL identical (tokens
+bit-identical). The WMMA static-assert `nwarps × tile_C::I == mmq_y`
+collapses the sweep space to 3 valid points; cycle 12 confirmed (48,
+64, 4) is the empirical peak.
+
+**Status**: small but real and reproducible. The first non-negative
+result in 9 cycles of kernel-level work. Default OFF keeps upstream
+behaviour intact; flip the macro to opt-in.
+
+## Cycle 10 — ggml's built-in HIP graph capture: FALSIFIED at -0.73%
+
+ggml ships `GGML_HIP_GRAPHS=ON` (default OFF, ggml's own description:
+"experimental, slow"). We tested the full 2×2 matrix (tile-override ×
+ggml-graphs):
+
+| Tile | ggml graphs | Mean tok/s | Δ |
+|---|---|---|---|
+| OFF | OFF | 62.65 | baseline |
+| ON  | OFF | 63.86 | +1.93% |
+| OFF | ON  | 62.19 | **-0.73%** |
+| ON  | ON  | 63.51 | +1.37% (graphs erase ~30% of tile gain) |
+
+ggml's "experimental, slow" disclaimer holds. Per cycle 12's hipGraph
+port subagent analysis, the actionable fix would be to bypass ggml's
+cgraph-wide capture and do hipfire-style surgical per-forward capture
+— but this is blocked by `build_target_step_tree` baking `kv_start`
+into `ggml_view_3d` offsets (a single captured graph would write to
+the wrong KV slot on every cycle past the first). Estimated 3-5 days
+of integration + a ggml refactor for +1-2% best case. Not worth doing
+without ggml-side work.
+
+## Cycle 11 — rocprofv2 decode-time attribution on gfx1100
+
+Ran `rocprof --stats` on test_dflash for HE-0, n_gen=32, budget=8.
+27,766 kernel events, 48 unique kernel signatures.
+
+**The decode-time breakdown that should have been in the original
+plan**:
+
+| Category | % of GPU time | Notes |
+|---|---|---|
+| **q4_K MMQ** | **34.98%** | target weights; cycle 9 tile override acts here |
+| **rocBLAS FP32 GEMM** `Cijk_..._SB_MT64x64x8_..._ISA1100` | **29.75%** | **drafter forward** (FP32-class Tensile fallback for ncols=16 — see cycle 14) |
+| **q6_K MMQ** | **13.96%** | token_embd + output projection in Q4_K_M's mixed-quant |
+| **q5_K MMQ** | 3.72% | minor mix-in |
+| rocBLAS FP16 WMMA GEMM (HB tiles) | ~4% | FA / attention paths |
+| Qwen3 SSM (`gated_delta_net` + `ssm_conv`) | ~2.8% | DeltaNet path |
+| Activation quant (`quantize_mmq_q8_1`) | ~1.2% | |
+| **MMVQ** (`mul_mat_vec_q`) | **1.10%** | **The MMVQ rabbit-hole was attacking 1% of decode** |
+| Norms + RoPE + k_bin_bcast + copies | ~5% | thousands of tiny launches |
+| Launch overhead (estimated) | ~10-15% | ~10k tiny kernels at 3-5 µs each |
+
+**Implication for Tier 3**: the original "multi-row decode GEMV à la
+hipfire" hypothesis was attacking q4_K MMQ time (34.98% of decode).
+That's the right surface area — but cycles 1-7 testing the multi-row
+GEMV prototype against the lucebox stack landed at −20.4% to −23.5%
+per-cycle (documented in the
+`Kaden-Schutt/llama.cpp-dflash-ggml@feat/mmvq-rdna3-batch16` research
+branch). The multi-row hipfire pattern beats Tensile on hipfire's
+runtime; on lucebox-hub's ggml backend it regresses because
+hipfire's wins depend on a Rust-native dispatch layer + per-arch
+custom kernels + per-forward hipGraph capture that ggml's
+infrastructure doesn't have. Tier 3 should be considered superseded
+by cycle 9 (tile tuning) + cycle 14 (drafter swap) at the
+HIP-friendly cost/benefit ratio.
+
+## Cycle 12 — tile sweep + 3 parallel subagent investigations
+
+**Tile sweep**: WMMA static-assert `nwarps × tile_C::I == mmq_y`
+forces only three valid `(mmq_y, nwarps)` triples — (32, 2), (64, 4),
+(128, 8). Cycle 9's (64, 4) is the empirical peak (63.86); (32, 2) is
+within noise (63.70); (128, 8) is stock-equivalent (62.41).
+
+**q6_K subagent**: cycle 9's override is type-agnostic, so q6_K and
+q5_K already inherit the (48, 64, 4) values. The +1.93% global is the
+combined effect across all MMQ types. Per-type tile tuning yields ±0.5%
+expected — not worth pursuing.
+
+**hipGraph port subagent**: hipfire's surgical capture is 30 LOC of
+bridge code, but porting to lucebox requires bypassing ggml's
+backend-graph layer AND refactoring `build_target_step_tree`'s
+`kv_start` offsets. 3-5 days first-pass + 1-2 weeks if the ggml
+refactor is harder than estimated. Best-case yield: +1-2% per
+realistic gfx1100/ROCm-7.2 perf data.
+
+**Drafter FP16 subagent (the cycle 14 setup)**: cycle 11's "drafter
+runs FP32 = 29.75%" attribution was *literally* correct but the
+*reason* was wrong. Drafter weights are already F16 on HIP
+(`build_prefers_bf16_projection() == false`); the slowness comes from
+F32 **activations** + small-N=16 GEMM shapes falling outside Tensile's
+WMMA solution coverage on ISA1100. Dispatch trace:
+`ggml_cuda_mul_mat` → MMF rejected by `mmf.cu:169` (RDNA3_0 +
+ncols>8) → batched-cublas-f16 rejected (single-batch) →
+`ggml_cuda_op_mul_mat_cublas` → Tensile picks
+`_SB_MT64x64x8_SN_..._ISA1100` SGEMM-class tile.
+
+## Cycle 13 — MMF cutoff lift on RDNA3_0: FALSIFIED at -2.78%
+
+Tried the subagent's "free 1-line experiment": patch `mmf.cu:169`
+from `ncols > 8` to `ncols > 16` on RDNA3_0 to route the drafter
+q_len=16 case into MMF's FP16-WMMA path instead of Tensile.
+
+| Tile | MMF lift | tok/s | AL  | Δ |
+|---|---|---|---|---|
+| OFF | OFF | 62.65 | 5.25 | baseline |
+| ON  | OFF | 63.86 | 5.25 | +1.93% |
+| OFF | ON  | **60.91** | 5.29 | **-2.78%** |
+| ON  | ON  | 62.49 | 5.29 | -0.26% (MMF erases tile gain) |
+
+The conservative `>8` cutoff at `mmf.cu:169` is empirically tuned and
+correct. MMF FP16-WMMA at ncols=16 is slower per-call than Tensile's
+SGEMM-class tile on RDNA3_0. AL went *up* slightly (5.25→5.29 —
+drafter numerics under MMF FP16 align slightly better with target's
+argmax) but per-cycle time worsened more than AL helped. **Patch
+reverted to default OFF.**
+
+## Cycle 14 — Drafter swap to spiritbuun Q8_0 GGUF: **+4.40% to +8.85%** on top of cycle 9
+
+The biggest single lever found across all 14 cycles, and it required
+**zero code changes**. test_dflash already auto-detects `.gguf`
+extension and routes through `load_draft_gguf` (`test_dflash.cpp:2438-2440`).
+
+Drafter swap from `z-lab/Qwen3.6-27B-DFlash/model.safetensors`
+(F16 dense via Tensile FP32 fallback) →
+`spiritbuun/Qwen3.6-27B-DFlash-GGUF/dflash-draft-3.6-q8_0.gguf`
+(Q8_0 GGUF via ggml's MMQ path):
+
+| Run | Tile | Drafter | tok/s | AL | Δ vs stock |
+|---|---|---|---|---|---|
+| Stock        | OFF | F16 safetensors | 62.65 | 5.25 | — |
+| Cycle 9      | ON  | F16 safetensors | 63.86 | 5.25 | +1.93% |
+| GGUF run 1   | ON  | Q8_0 GGUF       | **66.67** | 5.54 | **+6.42%** |
+| GGUF run 2   | ON  | Q8_0 GGUF       | **69.51** | 5.54 | **+10.95%** |
+| **GGUF mean** | ON | Q8_0 GGUF | **68.09** | 5.54 | **+8.69%** |
+
+**Why it works**: replaces 29.75% Tensile FP32-class fallback kernel
+with ggml's `mul_mat_q<Q8_0, 16, false>` MMQ kernel — which ALSO
+benefits from cycle 9's tile override (compounding effect). AL rose
+5.25 → 5.54 (Q8_0 drafter is slightly better aligned with target than
+F16 safetensors). Per-prompt heterogeneous (separate_paren_groups
++50%, below_zero +56%, sum_product +22%; intersperse -26%,
+truncate_number -20%); all outputs remain coherent.
+
+**Suggested ship**: README recommendation + a tested-known-good URL
+for the GGUF. No `test_dflash.cpp` change needed.
+
+⚠️ **Watch out for Q4_K_M GGUF drafter**: spiritbuun's model card
+warns that 3.6 drafters have causal sliding-window attention which is
+Q4-fragile. Q4_K_M drops acceptance from ~43% to ~28%. Use Q8_0 only.
+
+## Cycle 15 — Sanity check vs hipfire's native DFlash on the same silicon
+
+Ran hipfire's `dflash_spec_demo` (vanilla DFlash, **no DDTree**) on
+the same 7900 XTX with `~/.hipfire/models/qwen3.6-27b.mq4` target +
+`~/.hipfire/models/qwen36-27b-dflash-mq4.hf4` drafter.
+
+| Prompt | hipfire mean (3 runs) | lucebox-hub mean (cycle 9+14) | Hipfire advantage |
+|---|---|---|---|
+| HE 0 has_close_elements | 152.85 (AL 8.00) | 78.53 (AL 6.24) | **+95%** |
+| HE 3 below_zero         | 111.79 (AL 4.90) | 73.93 (AL 5.95) | **+51%** |
+| **Mean over 2 HE prompts** | **132.32** | **76.23** | **+73.6%** |
+
+Important caveats:
+- **DDTree HURTS hipfire's DFlash impl**. At `--ddtree-budget=8` on
+  hipfire, perf drops to 27.46 tok/s on HE 0. Hipfire's win is
+  vanilla linear block-diffusion drafts at AL τ=8. Lucebox-hub
+  *requires* DDTree because that's how the fork's DFlash is wired up
+  in test_dflash.
+- Different quant formats (hipfire `.mq4` vs lucebox `.gguf Q4_K_M`),
+  different tokenizers (built-in vs HF Qwen3.5-27B), different prompt
+  normalization (hipfire default-on vs lucebox raw HF tokens).
+- Per cycle 12 subagent B, the structural ceiling for lucebox-hub on
+  HIP without ggml refactors is ~70-80 tok/s. We're at 68. The
+  ~+74% gap to hipfire is real and architectural.
+
+The four structural reasons hipfire wins (per the subagent analysis):
+(a) surgical per-forward hipGraph capture works on hipfire's code but
+is blocked by ggml's `kv_start` design on lucebox; (b) hand-tuned
+`.mq4` kernels per arch (lucebox's ggml MMQ is shape-generic);
+(c) Rust-native pipeline avoids the ggml backend abstraction tax +
+Tensile FP32 fallback (29.75% recovered by cycle 14, the rest is
+launch + abstraction overhead); (d) vanilla linear DFlash drafts
+> DDTree on this codebase.
+
+## Cycle 16 — Strategic recommendation: pivot AMD direction toward Vulkan
+
+After 14 cycles measuring every available HIP-side lever, the
+ceiling-to-hipfire gap is **structural to the ggml backend** on
+RDNA3 + ROCm 7.2.x, not a lack of kernel-level effort. Three options
+for what comes next:
+
+### Option A: Ship the HIP path as-is
+
+Ship the HIP support PR + the two cycle-validated improvements
+(cycle 9 tile override default-off macro, cycle 14 README drafter
+recommendation). Stop further HIP optimization. Realistic ceiling
+on RDNA3 ROCm 7.2.x without ggml refactors: **~70-80 tok/s** on
+canonical 27B Q4_K_M HE10 budget=8.
+
+Pros: low risk, gets gfx101x/gfx102x/gfx110x/gfx115x/gfx120x users
+working today. The cycle 9 / cycle 14 wins compose to +6.4-10.95%
+over post-Tier-1 baseline.
+
+Cons: leaves ~64% of the silicon's practical ceiling on the table
+(132 vs 76 tok/s on 7900 XTX). All future maintenance is ROCm
+version-sensitive; the Tensile FP32 fallback path will be hit again
+whenever AMD ships a new quant variant.
+
+### Option B: Pursue hipfire-pattern hipGraph port (3-5 days + ggml refactor)
+
+Bypass ggml's graph layer, capture surgically at the test_dflash
+decode-step level, refactor `kv_start` to scatter-style writes.
+Expected yield: +1-3% best case per the cycle 12 subagent analysis.
+Realistic: -1% to +0.5% if the kv_start refactor isn't surfaced
+upstream first (would race the wrong KV slot on cycles > 1).
+
+### Option C: Pivot AMD direction toward Vulkan (RECOMMENDED)
+
+Vulkan covers RDNA1 → RDNA4 + Intel discrete + Apple integrated in
+**one backend**. Eliminates the entire ROCm version-compatibility
+matrix that PR #156's predecessor work documented. Community data
+on gfx1100 cites **Vulkan +25-30% over ROCm** for Q4_0 decode
+(ggml-org discussion #20934, #21526). For 7900 XTX 27B Q4_K_M AR
+projected: HIP 31 → Vulkan ~39 (+25%) before any DFlash work.
+
+**Trade-off the user named**: Vulkan loses hipfire-style per-arch
+kernel tuning. Cycle 9's tile override (mmq.cuh edits) is
+HIP/CUDA-specific; doesn't transfer. Vulkan uses GLSL/SPIRV compute
+shaders compiled by the driver, not custom HIP intrinsics. Future
+kernel-level hand-tuning on lucebox becomes lower-priority on the
+Vulkan path. But cycle 9 was a +1.93% win out of a +6.42-10.95%
+total — kernel tuning is **NOT load-bearing** for lucebox in the
+way it is for hipfire (which gets its 132 tok/s by stacking many
+small kernel optimizations on top of the surgical hipGraph capture).
+
+**Practical sequencing**:
+1. Ship the HIP support PR + cycle 9 + cycle 14 as the **fallback
+   AMD path** (Option A). Users on pre-ROCm-7 stacks, gfx1010, or
+   CUDA-portable contexts need this anyway.
+2. Open a parallel Vulkan port of the DFlash kernels as the
+   **strategic AMD direction**. Most of the spec-decode
+   infrastructure (KV state mgmt, draft tree, accept logic) is
+   vendor-agnostic; only the matmul + flash-attn kernels need
+   Vulkan compute shader implementations. ggml-vulkan already has
+   q4_K MMQ; the integration effort is bridging ggml-vulkan to the
+   DFlash forward graph.
+
+The recommendation is C. Updates the doc's "Sequence of PRs" section
+above (see PR-D / PR-E renumbering below).
+
+## Revised PR sequence (post-cycles)
+
+Replaces the earlier "PR-A → PR-C → PR-D → PR-E" sequence:
+
+1. **PR-A**: arch-aware `--ddtree-budget` default (Tier 1, daemon-side
+   only, no submodule change). **Unchanged from original plan**.
+2. **PR-B (NEW)**: cycle 9 `mmq.cuh` tile override for RDNA3_0
+   (gfx1100/gfx1101). 6-line patch behind opt-in macro
+   `LUCEBOX_GFX1100_TILE_OVERRIDE`, default OFF to preserve
+   upstream behavior. +1.93% on canonical bench, AL-preserving.
+   Effectively a port of the spirit of closed PR
+   `ggml-org/llama.cpp#21344` to discrete RDNA3 (IMbackK's
+   never-acted-on suggestion).
+3. **PR-C (renumbered, was original PR-C)**: dropped pending
+   evidence — multi-row decode GEMV cascades 1-7 falsified on
+   lucebox-hub's ggml backend; hipfire's pattern doesn't transfer
+   without surgical hipGraph capture which is itself blocked.
+4. **PR-D (NEW)**: README + bench script recommendation for
+   `spiritbuun/Qwen3.6-27B-DFlash-GGUF/dflash-draft-3.6-q8_0.gguf`
+   as the canonical drafter (replaces `z-lab/Qwen3.6-27B-DFlash`
+   safetensors). +4.40-8.85% over PR-A baseline at cost of zero
+   code changes. ⚠️ explicitly warn against Q4_K_M variant of same
+   model (Q4-fragile per upstream model card).
+5. **PR-E (renamed, was original PR-D)**: gfx1010/1030
+   scalar-fallback score kernel (Tier 4). Unchanged.
+6. **PR-F (renamed, was original PR-E)**: rocWMMA port of
+   `flashprefill_kernels.cu`. Unchanged.
+7. **PR-G (NEW, strategic)**: Vulkan port of DFlash kernels as the
+   long-term AMD direction. Separate workstream from PR-A through
+   PR-F (which keep the HIP path as fallback). Not blocked on any
+   HIP-side work landing.
+
+Validation rubric per PR unchanged from the original plan.
+
+## Combined gain after PR-A + PR-B + PR-D
+
+Stacking the three actionable wins (Tier 1 arch-aware budget + cycle 9
+tile override + cycle 14 drafter swap):
+
+| Lever | Δ |
+|---|---|
+| Stock (pre-PR-A, default budget=22) | baseline 49.81 tok/s |
+| PR-A (budget=8 on gfx110x) | +53% → 76.02 tok/s |
+| + PR-B (tile override on RDNA3_0) | +1.93% on top → 77.49 tok/s |
+| + PR-D (Q8_0 GGUF drafter) | +6.6% on top → **82.61 tok/s mean** |
+
+Run-to-run variance: ±2-5% (gfx1100 thermal/DPM drift) → realistic
+range **~80-86 tok/s mean** after all three PRs land. Up from 49.81
+at the original baseline. **+65% combined gain** vs the pre-Tier-1
+state, still ~38% below hipfire's 132 tok/s on the same silicon.
+
+## Findings local artifact
+
+All 21 research markdown docs (cycle 9 through cycle 16) are kept at
+`Kaden-Schutt/lucebox-hub@feat/mmq-q4_K-rdna3-custom:tier3-research/`
+(LOCAL only, not pushed to any remote). The doc set is the complete
+audit trail for anyone wanting to reproduce a falsified cycle without
+re-running the experiment.
