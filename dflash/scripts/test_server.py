@@ -503,6 +503,8 @@ def test_chat_completions_streaming_ignores_stray_think_closers(
     assert "</think>" not in text
     assert '"content":"8"' in text or '"content": "8"' in text
 
+@patch("server.os.pipe")
+@patch("server.os.read")
 def test_chat_completions_streaming_replays_exact_raw_text_with_reasoning(
         mock_os_read, mock_pipe, mock_tokenizer, app):
     mock_pipe.return_value = (1, 2)
