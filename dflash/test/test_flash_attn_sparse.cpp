@@ -111,7 +111,7 @@ static bool test_sparse_matches_dense(ggml_backend_t backend, int S, int H, int 
 
     ggml_gallocr_free(alloc);
     ggml_free(ctx);
-    return max_diff < 1.0f && !any_nonfinite;
+    return max_diff < 1e-3f && !any_nonfinite;
 }
 
 // Sanity-check sparse attention at alpha < 1.0:
