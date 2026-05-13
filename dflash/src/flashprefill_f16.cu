@@ -123,7 +123,7 @@ __global__ void compute_block_score_kernel_f16(
         const half * mKp = mean_K + (size_t)b * s_mK_b
                                           + (size_t)n * s_mK_m
                                           + (size_t)kh * s_mK_h;
-        float dot = 0.0f;
+        float dot = active ? 0.0f : -INFINITY;
         if (active) {
             #pragma unroll
             for (int d = 0; d < D_HEAD; ++d) {
@@ -132,7 +132,7 @@ __global__ void compute_block_score_kernel_f16(
             dot *= sm_scale;
         }
 
-        smem[tid] = active ? dot : -INFINITY;
+        smem[tid] = dot;
         __syncthreads();
         for (int off = BLOCK / 2; off > 0; off >>= 1) {
             if (tid < off) smem[tid] = fmaxf(smem[tid], smem[tid + off]);
