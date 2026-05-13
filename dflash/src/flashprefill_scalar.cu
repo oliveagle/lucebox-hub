@@ -258,7 +258,7 @@ __global__ void sparse_flash_forward_kernel_f16(
     // Pre-scale Q in shared
     {
         const float sm_scale = scale * 1.4426950408889634f;
-        for (int d = tid % D_HEAD; d < D_HEAD; d += Q_TILE) {
+        for (int d = 0; d < D_HEAD; ++d) {
             float v = __half2float(Q_sh[tid * D_HEAD + d]);
             Q_sh[tid * D_HEAD + d] = __float2half(v * sm_scale);
         }

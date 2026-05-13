@@ -105,16 +105,16 @@ __global__ void compute_block_score_kernel_f16(
     const int kh = qh * n_k_heads / n_q_heads;
     const int tid = threadIdx.x;
     const int q_row_global = q_block_idx * BLOCK + tid;
-    if (tid >= BLOCK || q_row_global >= seq_len) return;
+    const bool active = (tid < BLOCK && q_row_global < seq_len);
 
-    // Load Q row into F32 registers
-    const half * Qp = Q + (size_t)b * s_Q_b
-                              + (size_t)q_row_global * s_Q_n
-                              + (size_t)qh * s_Q_h;
+    // Load Q row into F32 registers (predicate to avoid OOB for tail threads)
     float q_reg[D_HEAD];
+    const half * Qp = Q + (size_t)b * s_Q_b
+                              + (size_t)(q_block_idx * BLOCK + min(tid, seq_len - 1)) * s_Q_n
+                              + (size_t)qh * s_Q_h;
     #pragma unroll
     for (int d = 0; d < D_HEAD; ++d) {
-        q_reg[d] = __half2float(Qp[(size_t)d * s_Q_d]);
+        q_reg[d] = active ? __half2float(Qp[(size_t)d * s_Q_d]) : 0.0f;
     }
 
     extern __shared__ float smem[];
@@ -124,13 +124,15 @@ __global__ void compute_block_score_kernel_f16(
                                           + (size_t)n * s_mK_m
                                           + (size_t)kh * s_mK_h;
         float dot = 0.0f;
-        #pragma unroll
-        for (int d = 0; d < D_HEAD; ++d) {
-            dot += q_reg[d] * __half2float(mKp[(size_t)d * s_mK_d]);
+        if (active) {
+            #pragma unroll
+            for (int d = 0; d < D_HEAD; ++d) {
+                dot += q_reg[d] * __half2float(mKp[(size_t)d * s_mK_d]);
+            }
+            dot *= sm_scale;
         }
-        dot *= sm_scale;
 
-        smem[tid] = dot;
+        smem[tid] = active ? dot : -INFINITY;
         __syncthreads();
         for (int off = BLOCK / 2; off > 0; off >>= 1) {
             if (tid < off) smem[tid] = fmaxf(smem[tid], smem[tid + off]);
@@ -246,9 +248,9 @@ __global__ void sparse_flash_forward_kernel_f16(
     float * row_m = reinterpret_cast<float*>(P_sh + (size_t)Q_TILE * K_TILE);
     float * row_l = row_m + Q_TILE;
 
-    if (lane < Q_TILE) {
-        row_m[lane] = -INFINITY;
-        row_l[lane] = 0.0f;
+    if (threadIdx.x < Q_TILE) {
+        row_m[threadIdx.x] = -INFINITY;
+        row_l[threadIdx.x] = 0.0f;
     }
 
     // ── Cooperative load Q [Q_TILE, D_HEAD] ──
@@ -423,7 +425,7 @@ __global__ void sparse_flash_forward_kernel_f16(
                     rs[row_in_tile] += p;
 
                     int p_row = wid * MMA_M + row_in_tile;
-                    P_sh[(size_t)p_row * K_TILE + col_in_tile] = __float2half(p);
+                    P_sh[(size_t)p_row * K_TILE + nt * MMA_K + col_in_tile] = __float2half(p);
                 }
             }
 

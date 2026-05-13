@@ -280,8 +280,9 @@ tokens) is the path to bring code recall to the same ratio as prose.
 git clone --recurse-submodules https://github.com/Luce-Org/lucebox-hub
 cd lucebox-hub/dflash
 
-# Build (CUDA 12+, CMake 3.18+, sm_70+ GPU; CUDA 13+ required for Jetson AGX Thor sm_110)
+# Build (CUDA 12+, CMake 3.18+, sm_60+ GPU including Pascal; CUDA 13+ required for Jetson AGX Thor sm_110)
 # Pass -DCMAKE_CUDA_ARCHITECTURES matching your GPU. Common values:
+#   60;61 = Pascal P100/P40 (scalar flashprefill fallback, no WMMA)
 #   70 = V100 (F16 WMMA kernels, BF16 draft → FP16 at load)
 #   75 = 2080 Ti (F16 WMMA kernels, auto-converts BF16 draft → FP16 at load)
 #   86 = RTX 3090 / A40 (native BF16 WMMA)
@@ -289,8 +290,9 @@ cd lucebox-hub/dflash
 #   90 = H100
 #   120 = Blackwell / DGX Spark
 #   110 = Jetson AGX Thor (CUDA 13+)
-# Omitting the flag falls back to the CMake-set default ("70;75;86"), which
-# compiles both F16 (Volta/Turing) and BF16 (Ampere+) WMMA paths.
+# Omitting the flag falls back to the CMake-set default ("60;61;62;70;75;86"),
+# which compiles Pascal (scalar), Volta/Turing (F16 WMMA), and Ampere+ (BF16 WMMA)
+# flashprefill paths.
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=86
 cmake --build build --target test_dflash -j
 
@@ -326,7 +328,7 @@ DFLASH27B_KV_TQ3=1 DFLASH27B_PREFILL_UBATCH=16 \
   --fast-rollback --ddtree --ddtree-budget=16 --max-ctx=4096   # align_up(prompt + n_gen + 64, 256); raise up to 262144 for long prompts
 ```
 
-**Requirements:** NVIDIA sm_70+ GPU (V100 32GB, 2080 Ti, 3090, A10, A40, 4090) or Jetson AGX Thor sm_110, CUDA 12+ (CUDA 13+ required for Thor), 22+ GB VRAM, ~80 GB disk. On Volta (SM 7.0) and Turing (SM 7.5), BF16 draft weights are auto-converted to FP16 at load time for tensor core acceleration.
+**Requirements:** NVIDIA sm_60+ GPU (Pascal P100/P40, V100 32GB, 2080 Ti, 3090, A10, A40, 4090) or Jetson AGX Thor sm_110, CUDA 12+ (CUDA 13+ required for Thor), 22+ GB VRAM, ~80 GB disk. Pascal GPUs use the scalar flashprefill fallback (no WMMA). On Volta (SM 7.0) and Turing (SM 7.5), BF16 draft weights are auto-converted to FP16 at load time for tensor core acceleration.
 
 ## How it works
 
