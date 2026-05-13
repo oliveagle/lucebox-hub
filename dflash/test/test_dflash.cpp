@@ -27,6 +27,7 @@
                             // dflash27b::run_laguna_daemon() instead of the
                             // qwen35 + DFlash + DDTree pipeline below.
 #include "qwen35_daemon.h"  // arch dispatch - single-GPU qwen35 daemon mode
+#include "qwen35_layer_split.h" // multi-GPU layer-split daemon args
 #include "qwen3_daemon.h"   // arch dispatch - qwen3 (0.6B standalone)
 #include "gemma4_daemon.h"  // arch dispatch - gemma4 (iSWA + MoE)
 #include "sampler.h"        // shared CPU sampler chain (SamplerCfg /
@@ -2232,18 +2233,33 @@ int main(int argc, char ** argv) {
             return 2;
         }
         if (daemon_mode) {
+            dflash27b::Qwen35LayerSplitDaemonArgs lsargs;
+            lsargs.target_path = target_path;
+            lsargs.draft_path  = draft_path;
+            lsargs.device.layer_split_gpus    = target_gpus;
+            lsargs.device.layer_split_weights = target_split_weights;
+            lsargs.device.peer_access         = g_peer_access_opt_in;
+            lsargs.device.max_ctx = g_max_ctx_override > 0 ? g_max_ctx_override : 4096;
+            lsargs.draft_gpu   = draft_gpu;
+            lsargs.load_draft  = target_split_load_draft;
+            lsargs.run_dflash  = target_split_dflash;
+            lsargs.max_verify_tokens = ddtree_mode
+                ? std::max<int>(DFLASH27B_DRAFT_BLOCK_SIZE, ddtree_budget + 1)
+                : DFLASH27B_DRAFT_BLOCK_SIZE;
+            lsargs.stream_fd   = stream_fd;
+            // TODO: migrate to run_qwen35_layer_split_daemon() once helpers
+            // are extracted to src/qwen35/. For now, call the local function.
             return run_target_layer_split_daemon(
-                target_path, draft_path,
-                target_gpus, target_split_weights,
-                draft_gpu,
-                target_split_load_draft,
-                target_split_dflash,
-                g_max_ctx_override > 0 ? g_max_ctx_override : 4096,
-                ddtree_mode
-                    ? std::max<int>(DFLASH27B_DRAFT_BLOCK_SIZE, ddtree_budget + 1)
-                    : DFLASH27B_DRAFT_BLOCK_SIZE,
-                g_peer_access_opt_in,
-                stream_fd);
+                lsargs.target_path, lsargs.draft_path,
+                lsargs.device.layer_split_gpus,
+                lsargs.device.layer_split_weights,
+                lsargs.draft_gpu,
+                lsargs.load_draft,
+                lsargs.run_dflash,
+                lsargs.device.max_ctx,
+                lsargs.max_verify_tokens,
+                lsargs.device.peer_access,
+                lsargs.stream_fd);
         }
         if (target_split_dflash && fast_rollback) {
             std::fprintf(stderr,
