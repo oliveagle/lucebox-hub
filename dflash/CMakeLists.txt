@@ -217,6 +217,7 @@ add_library(dflash27b STATIC
     src/qwen35/ddtree.cpp
     src/qwen35/peer_access.cpp
     src/qwen35/draft_feature_mirror.cpp
+    src/qwen35/graph_builders.cpp
     src/common/sampler.cpp
     src/common/daemon_loop.cpp
 )
