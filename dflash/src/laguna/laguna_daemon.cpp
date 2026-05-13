@@ -21,7 +21,7 @@ namespace dflash27b {
 int run_laguna_daemon(const LagunaDaemonArgs & args) {
     LagunaBackendArgs bargs;
     bargs.target_path = args.target_path;
-    bargs.max_ctx     = args.max_ctx;
+    bargs.max_ctx     = args.device.max_ctx;
     bargs.chunk       = args.chunk;
     bargs.kv_type     = args.kv_type;
 
@@ -31,7 +31,7 @@ int run_laguna_daemon(const LagunaDaemonArgs & args) {
     DaemonLoopArgs dargs;
     dargs.stream_fd = args.stream_fd;
     dargs.chunk     = args.chunk;
-    dargs.max_ctx   = args.max_ctx;
+    dargs.max_ctx   = args.device.max_ctx;
 
     return run_daemon(backend, dargs);
 }

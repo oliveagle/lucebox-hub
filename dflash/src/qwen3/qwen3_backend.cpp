@@ -102,9 +102,9 @@ Qwen3Backend::~Qwen3Backend() { shutdown(); }
 // ── init ───────────────────────────────────────────────────────────────
 
 bool Qwen3Backend::init() {
-    backend_ = ggml_backend_cuda_init(cfg_.gpu);
+    backend_ = ggml_backend_cuda_init(cfg_.device.gpu);
     if (!backend_) {
-        std::fprintf(stderr, "[qwen3] CUDA init failed for GPU %d\n", cfg_.gpu);
+        std::fprintf(stderr, "[qwen3] CUDA init failed for GPU %d\n", cfg_.device.gpu);
         return false;
     }
 
@@ -115,11 +115,11 @@ bool Qwen3Backend::init() {
     std::printf("[qwen3] loaded %s (%d layers, hidden=%d, vocab=%d)\n",
                 cfg_.model_path, w_.n_layer, w_.n_embd, w_.n_vocab);
 
-    if (!create_qwen3_cache(backend_, w_, cfg_.max_ctx, cache_)) {
+    if (!create_qwen3_cache(backend_, w_, cfg_.device.max_ctx, cache_)) {
         std::fprintf(stderr, "[qwen3] cache creation failed\n");
         return false;
     }
-    std::printf("[qwen3] cache allocated (max_ctx=%d)\n", cfg_.max_ctx);
+    std::printf("[qwen3] cache allocated (max_ctx=%d)\n", cfg_.device.max_ctx);
 
     // Init CPU embedder
     if (!w_.tok_embd) {
@@ -135,7 +135,7 @@ bool Qwen3Backend::init() {
 
 void Qwen3Backend::print_ready_banner() const {
     std::printf("[qwen3-daemon] ready (layers=%d hidden=%d vocab=%d max_ctx=%d)\n",
-                w_.n_layer, w_.n_embd, w_.n_vocab, cfg_.max_ctx);
+                w_.n_layer, w_.n_embd, w_.n_vocab, cfg_.device.max_ctx);
     std::fflush(stdout);
 }
 

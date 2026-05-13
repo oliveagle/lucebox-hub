@@ -2132,11 +2132,11 @@ int main(int argc, char ** argv) {
             "(max_ctx=%d kv=%s chunk=%d stream_fd=%d). DFlash + DDTree disabled.\n",
             max_ctx_eff, ggml_type_name(kv), chunk, stream_fd);
         dflash27b::LagunaDaemonArgs largs;
-        largs.target_path = target_path;
-        largs.max_ctx     = max_ctx_eff;
-        largs.chunk       = chunk;
-        largs.kv_type     = kv;
-        largs.stream_fd   = stream_fd;
+        largs.target_path     = target_path;
+        largs.device.max_ctx  = max_ctx_eff;
+        largs.chunk           = chunk;
+        largs.kv_type         = kv;
+        largs.stream_fd       = stream_fd;
         return dflash27b::run_laguna_daemon(largs);
     }
 
@@ -2147,11 +2147,11 @@ int main(int argc, char ** argv) {
             "[test_dflash] arch=qwen3 -> dispatching to run_qwen3_daemon "
             "(max_ctx=%d stream_fd=%d)\n", max_ctx_eff, stream_fd);
         dflash27b::Qwen3DaemonArgs q3args;
-        q3args.model_path = target_path;
-        q3args.max_ctx    = max_ctx_eff;
-        q3args.stream_fd  = stream_fd;
-        q3args.chunk      = 512;
-        q3args.gpu        = target_gpu;
+        q3args.model_path     = target_path;
+        q3args.device.gpu     = target_gpu;
+        q3args.device.max_ctx = max_ctx_eff;
+        q3args.stream_fd      = stream_fd;
+        q3args.chunk          = 512;
         return dflash27b::run_qwen3_daemon(q3args);
     }
 
@@ -2162,11 +2162,11 @@ int main(int argc, char ** argv) {
             "[test_dflash] arch=gemma4 -> dispatching to run_gemma4_daemon "
             "(max_ctx=%d stream_fd=%d)\n", max_ctx_eff, stream_fd);
         dflash27b::Gemma4DaemonArgs g4args;
-        g4args.model_path = target_path;
-        g4args.max_ctx    = max_ctx_eff;
-        g4args.stream_fd  = stream_fd;
-        g4args.chunk      = 512;
-        g4args.gpu        = target_gpu;
+        g4args.model_path     = target_path;
+        g4args.device.gpu     = target_gpu;
+        g4args.device.max_ctx = max_ctx_eff;
+        g4args.stream_fd      = stream_fd;
+        g4args.chunk          = 512;
         return dflash27b::run_gemma4_daemon(g4args);
     }
 
@@ -2274,9 +2274,9 @@ int main(int argc, char ** argv) {
         dflash27b::Qwen35DaemonArgs qargs;
         qargs.target_path       = target_path;
         qargs.draft_path        = draft_path;
-        qargs.target_gpu        = target_gpu;
+        qargs.device.gpu        = target_gpu;
+        qargs.device.max_ctx    = max_ctx_eff;
         qargs.draft_gpu         = draft_gpu;
-        qargs.max_ctx           = max_ctx_eff;
         qargs.stream_fd         = stream_fd;
         qargs.chunk             = 512;
         qargs.fa_window         = g_fa_window;

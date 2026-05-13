@@ -12,6 +12,7 @@
 #pragma once
 
 #include "common/model_backend.h"
+#include "common/device_placement.h"
 #include "step_graph.h"
 #include "ddtree.h"
 #include "draft_feature_mirror.h"
@@ -31,9 +32,8 @@ namespace dflash27b {
 struct Qwen35Config {
     const char * target_path = nullptr;
     const char * draft_path  = nullptr;
-    int          target_gpu  = 0;
+    DevicePlacement device;                // target GPU placement
     int          draft_gpu   = 0;
-    int          max_ctx     = 4096;
     int          stream_fd   = -1;
 
     // FA/KV

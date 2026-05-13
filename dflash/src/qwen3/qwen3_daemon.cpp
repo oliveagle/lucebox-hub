@@ -11,10 +11,9 @@ namespace dflash27b {
 int run_qwen3_daemon(const Qwen3DaemonArgs & args) {
     Qwen3BackendConfig cfg;
     cfg.model_path = args.model_path;
-    cfg.max_ctx    = args.max_ctx;
+    cfg.device     = args.device;
     cfg.stream_fd  = args.stream_fd;
     cfg.chunk      = args.chunk;
-    cfg.gpu        = args.gpu;
 
     Qwen3Backend backend(cfg);
     if (!backend.init()) return 1;
@@ -22,7 +21,7 @@ int run_qwen3_daemon(const Qwen3DaemonArgs & args) {
     DaemonLoopArgs dargs;
     dargs.stream_fd = args.stream_fd;
     dargs.chunk     = args.chunk;
-    dargs.max_ctx   = args.max_ctx;
+    dargs.max_ctx   = args.device.max_ctx;
 
     return run_daemon(backend, dargs);
 }

@@ -43,9 +43,9 @@ Qwen35Backend::~Qwen35Backend() { shutdown(); }
 // ── init() ──────────────────────────────────────────────────────────────
 
 bool Qwen35Backend::init() {
-    split_gpus_ = (cfg_.target_gpu != cfg_.draft_gpu);
+    split_gpus_ = (cfg_.device.gpu != cfg_.draft_gpu);
 
-    target_backend_ = ggml_backend_cuda_init(cfg_.target_gpu);
+    target_backend_ = ggml_backend_cuda_init(cfg_.device.gpu);
     if (!target_backend_) {
         std::fprintf(stderr, "target cuda init failed\n");
         return false;
@@ -59,7 +59,7 @@ bool Qwen35Backend::init() {
         }
     }
     if (split_gpus_ && g_peer_access_opt_in) {
-        enable_peer_access_pair(cfg_.target_gpu, cfg_.draft_gpu);
+        enable_peer_access_pair(cfg_.device.gpu, cfg_.draft_gpu);
     }
 
     // Load target
@@ -94,7 +94,7 @@ bool Qwen35Backend::init() {
     const int max_verify_tokens = cfg_.ddtree_mode
         ? std::max<int>(DFLASH27B_DRAFT_BLOCK_SIZE, cfg_.ddtree_budget + 1)
         : DFLASH27B_DRAFT_BLOCK_SIZE;
-    if (!create_target_cache(w_, cfg_.max_ctx, max_verify_tokens, target_backend_, cache_,
+    if (!create_target_cache(w_, cfg_.device.max_ctx, max_verify_tokens, target_backend_, cache_,
                              /*prefill_only=*/true)) {
         std::fprintf(stderr, "cache: %s\n", dflash27b_last_error());
         return false;
@@ -102,9 +102,9 @@ bool Qwen35Backend::init() {
 
     // Optionally init feature mirror
     if (cfg_.use_feature_mirror && split_gpus_) {
-        const int mirror_cap = std::min(cfg_.draft_ctx_max, cfg_.max_ctx);
+        const int mirror_cap = std::min(cfg_.draft_ctx_max, cfg_.device.max_ctx);
         if (!draft_feature_mirror_init(feature_mirror_, draft_backend_,
-                                       cfg_.draft_gpu, cfg_.target_gpu, mirror_cap)) {
+                                       cfg_.draft_gpu, cfg_.device.gpu, mirror_cap)) {
             std::fprintf(stderr, "warning: feature mirror init failed, using direct copies\n");
         }
     }
@@ -399,7 +399,7 @@ int Qwen35Backend::do_prefill(const std::vector<int32_t> & tokens,
     const int prompt_len = (int)tokens.size();
 
     // Migrate to full-mode KV cache if needed
-    migrate_prefill_cache(w_, cfg_.max_ctx,
+    migrate_prefill_cache(w_, cfg_.device.max_ctx,
                           cfg_.ddtree_mode
                               ? std::max<int>(DFLASH27B_DRAFT_BLOCK_SIZE, cfg_.ddtree_budget + 1)
                               : DFLASH27B_DRAFT_BLOCK_SIZE,

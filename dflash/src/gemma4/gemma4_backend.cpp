@@ -40,9 +40,9 @@ Gemma4Backend::Gemma4Backend(const Gemma4BackendConfig & cfg)
 Gemma4Backend::~Gemma4Backend() { shutdown(); }
 
 bool Gemma4Backend::init() {
-    backend_ = ggml_backend_cuda_init(cfg_.gpu);
+    backend_ = ggml_backend_cuda_init(cfg_.device.gpu);
     if (!backend_) {
-        std::fprintf(stderr, "[gemma4] CUDA backend init failed (gpu=%d)\n", cfg_.gpu);
+        std::fprintf(stderr, "[gemma4] CUDA backend init failed (gpu=%d)\n", cfg_.device.gpu);
         return false;
     }
 
@@ -52,13 +52,13 @@ bool Gemma4Backend::init() {
         return false;
     }
 
-    if (!create_gemma4_cache(backend_, w_, cfg_.max_ctx, cache_)) {
+    if (!create_gemma4_cache(backend_, w_, cfg_.device.max_ctx, cache_)) {
         std::fprintf(stderr, "[gemma4] cache alloc failed\n");
         return false;
     }
 
     std::printf("[gemma4] init ok: %d layers, embd=%d, vocab=%d, max_ctx=%d\n",
-                w_.n_layer, w_.n_embd, w_.n_vocab, cfg_.max_ctx);
+                w_.n_layer, w_.n_embd, w_.n_vocab, cfg_.device.max_ctx);
     std::fflush(stdout);
     return true;
 }
@@ -67,7 +67,7 @@ void Gemma4Backend::print_ready_banner() const {
     std::printf("[gemma4-daemon] READY (layers=%d, embd=%d, experts=%d/%d, "
                 "swa=%d, ctx=%d)\n",
                 w_.n_layer, w_.n_embd, w_.n_expert_used, w_.n_expert,
-                w_.sliding_window, cfg_.max_ctx);
+                w_.sliding_window, cfg_.device.max_ctx);
     std::fflush(stdout);
 }
 

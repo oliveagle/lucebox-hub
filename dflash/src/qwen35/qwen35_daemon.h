@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "device_placement.h"
 #include <string>
 
 namespace dflash27b {
@@ -12,9 +13,8 @@ namespace dflash27b {
 struct Qwen35DaemonArgs {
     const char * target_path    = nullptr;
     const char * draft_path     = nullptr;
-    int          target_gpu     = 0;
-    int          draft_gpu      = 0;
-    int          max_ctx        = 4096;
+    DevicePlacement device;                   // target GPU placement
+    int          draft_gpu      = 0;          // draft model GPU (arch-specific)
     int          stream_fd      = -1;
     int          chunk          = 512;
 

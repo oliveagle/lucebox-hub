@@ -6,6 +6,7 @@
 #pragma once
 
 #include "common/model_backend.h"
+#include "common/device_placement.h"
 #include "gemma4_internal.h"
 #include "common/sampler.h"
 
@@ -19,11 +20,10 @@
 namespace dflash27b {
 
 struct Gemma4BackendConfig {
-    const char * model_path = nullptr;
-    int          max_ctx    = 8192;
-    int          stream_fd  = -1;
-    int          chunk      = 512;
-    int          gpu        = 0;
+    const char *    model_path = nullptr;
+    DevicePlacement device;
+    int             stream_fd  = -1;
+    int             chunk      = 512;
 };
 
 class Gemma4Backend : public ModelBackend {

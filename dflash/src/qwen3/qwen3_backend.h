@@ -12,6 +12,7 @@
 #pragma once
 
 #include "common/model_backend.h"
+#include "common/device_placement.h"
 #include "qwen3_drafter_model.h"
 #include "qwen3_drafter.h"
 #include "common/sampler.h"
@@ -26,11 +27,10 @@
 namespace dflash27b {
 
 struct Qwen3BackendConfig {
-    const char * model_path = nullptr;
-    int          max_ctx    = 4096;
-    int          stream_fd  = -1;
-    int          chunk      = 512;
-    int          gpu        = 0;
+    const char *    model_path = nullptr;
+    DevicePlacement device;
+    int             stream_fd  = -1;
+    int             chunk      = 512;
 };
 
 // Persistent KV cache for incremental decode.

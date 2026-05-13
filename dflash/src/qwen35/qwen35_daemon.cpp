@@ -16,9 +16,8 @@ int run_qwen35_daemon(const Qwen35DaemonArgs & args) {
     Qwen35Config cfg;
     cfg.target_path        = args.target_path;
     cfg.draft_path         = args.draft_path;
-    cfg.target_gpu         = args.target_gpu;
+    cfg.device             = args.device;
     cfg.draft_gpu          = args.draft_gpu;
-    cfg.max_ctx            = args.max_ctx;
     cfg.stream_fd          = args.stream_fd;
     cfg.fa_window          = args.fa_window;
     cfg.kq_stride_pad      = args.kq_stride_pad;
@@ -38,7 +37,7 @@ int run_qwen35_daemon(const Qwen35DaemonArgs & args) {
     DaemonLoopArgs dargs;
     dargs.stream_fd = args.stream_fd;
     dargs.chunk     = args.chunk;
-    dargs.max_ctx   = args.max_ctx;
+    dargs.max_ctx   = args.device.max_ctx;
 
     return run_daemon(backend, dargs);
 }

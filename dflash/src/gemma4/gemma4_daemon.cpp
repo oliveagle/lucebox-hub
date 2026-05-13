@@ -11,10 +11,9 @@ namespace dflash27b {
 int run_gemma4_daemon(const Gemma4DaemonArgs & args) {
     Gemma4BackendConfig cfg;
     cfg.model_path = args.model_path;
-    cfg.max_ctx    = args.max_ctx;
+    cfg.device     = args.device;
     cfg.stream_fd  = args.stream_fd;
     cfg.chunk      = args.chunk;
-    cfg.gpu        = args.gpu;
 
     Gemma4Backend backend(cfg);
     if (!backend.init()) {
