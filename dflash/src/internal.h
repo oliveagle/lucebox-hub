@@ -71,6 +71,26 @@ struct TargetLayer {
     ggml_tensor * ssm_dt_bias    = nullptr;  // [dt_rank] per-head alpha bias
     ggml_tensor * ssm_norm       = nullptr;  // [head_v_dim]
     ggml_tensor * ssm_out        = nullptr;  // output projection after delta-net
+
+    // NVFP4 per-tensor weight scales (optional; 1.0f = no scaling).
+    // Each corresponds to a weight tensor above: result = mul_mat(w, x) * scale.
+    // Stored as host-side floats (read from the GGUF at load time) and applied
+    // via ggml_scale() — a compile-time scalar multiply with zero extra kernel
+    // launches, unlike ggml_mul() with a [1]-shaped GPU tensor which adds 768
+    // kernel launches per forward pass and causes catastrophic overhead in
+    // batched DDTree verify mode.
+    float w_gate_s       = 1.0f;
+    float w_up_s         = 1.0f;
+    float w_down_s       = 1.0f;
+    float wq_s           = 1.0f;
+    float wk_s           = 1.0f;
+    float wv_s           = 1.0f;
+    float wo_s           = 1.0f;
+    float wqkv_s         = 1.0f;
+    float wqkv_gate_s    = 1.0f;
+    float ssm_beta_s     = 1.0f;
+    float ssm_alpha_s    = 1.0f;
+    float ssm_out_s      = 1.0f;
 };
 
 // CPU-side embedder: keeps a mmap of the GGUF alive and knows how to

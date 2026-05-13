@@ -474,6 +474,8 @@ bool load_target_gguf_partial(const std::string & path,
         L.ssm_norm     = fnd("ssm_norm.weight");
         L.ssm_out      = fnd("ssm_out.weight");
 
+        // NVFP4 per-tensor weight scales are read after the mmap is loaded (below).
+
         // Sanity: each layer must be EITHER full-attn OR deltanet, not both, not neither.
         const bool has_attn = L.wq && L.wk && L.wv && L.wo && L.q_norm && L.k_norm;
         const bool has_ssm  = L.wqkv && L.wqkv_gate && L.ssm_conv1d && L.ssm_out;
@@ -573,6 +575,62 @@ bool load_target_gguf_partial(const std::string & path,
         }
         ggml_backend_tensor_set(t, (const uint8_t *)mm.addr + off, 0, sz);
         total += sz;
+    }
+
+    // ── 4b. Read NVFP4 per-tensor weight scales (optional; 1.0 for non-NVFP4).
+    //
+    // Scale tensors are F32 shape [1] — a single float per matmul weight.
+    // We read the value from mmap into host-side floats so the graph builder
+    // can use ggml_scale() (compile-time scalar, zero kernel launches) instead
+    // of ggml_mul() with a [1]-shaped GPU tensor. The ggml_mul approach adds
+    // 768 kernel launches per forward pass and causes catastrophic overhead
+    // (~1000ms vs ~30ms) in batched DDTree verify mode.
+    //
+    // LibertAI convention: "blk.N.ffn_gate.scale"
+    // Heretic convention: "blk.N.ffn_gate.weight.scale"
+    {
+        auto read_scale = [&](int il, const char * base) -> float {
+            char sname[128];
+            // Try "base.scale" first (LibertAI), then "base.weight.scale" (heretic)
+            std::snprintf(sname, sizeof(sname), "blk.%d.%s.scale", il, base);
+            int64_t stid = gguf_find_tensor(gctx, sname);
+            if (stid < 0) {
+                std::snprintf(sname, sizeof(sname), "blk.%d.%s.weight.scale", il, base);
+                stid = gguf_find_tensor(gctx, sname);
+            }
+            if (stid < 0) return 1.0f;
+            const size_t soff = data_start + gguf_get_tensor_offset(gctx, stid);
+            if (soff + sizeof(float) > mm.len) return 1.0f;
+            float val;
+            std::memcpy(&val, (const uint8_t *)mm.addr + soff, sizeof(float));
+            return val;
+        };
+
+        int n_scales = 0;
+        for (int il = 0; il < (int)n_layer; il++) {
+            TargetLayer & L = out.layers[il];
+            L.w_gate_s     = read_scale(il, "ffn_gate");
+            L.w_up_s       = read_scale(il, "ffn_up");
+            L.w_down_s     = read_scale(il, "ffn_down");
+            L.wq_s         = read_scale(il, "attn_q");
+            L.wk_s         = read_scale(il, "attn_k");
+            L.wv_s         = read_scale(il, "attn_v");
+            L.wo_s         = read_scale(il, "attn_output");
+            L.wqkv_s       = read_scale(il, "attn_qkv");
+            L.wqkv_gate_s  = read_scale(il, "attn_gate");
+            L.ssm_beta_s   = read_scale(il, "ssm_beta");
+            L.ssm_alpha_s  = read_scale(il, "ssm_alpha");
+            L.ssm_out_s    = read_scale(il, "ssm_out");
+            // Count non-trivial scales for the summary message.
+            auto count_s = [&](float s) { if (s != 1.0f) n_scales++; };
+            count_s(L.w_gate_s);   count_s(L.w_up_s);   count_s(L.w_down_s);
+            count_s(L.wq_s);      count_s(L.wk_s);      count_s(L.wv_s);
+            count_s(L.wo_s);      count_s(L.wqkv_s);    count_s(L.wqkv_gate_s);
+            count_s(L.ssm_beta_s); count_s(L.ssm_alpha_s); count_s(L.ssm_out_s);
+        }
+        if (n_scales > 0) {
+            std::printf("[loader] read %d NVFP4 per-tensor scale2 values (host-side, using ggml_scale)\n", n_scales);
+        }
     }
 
     gguf_free(gctx);
