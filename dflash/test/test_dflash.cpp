@@ -153,38 +153,20 @@ static int argmax_f32(const float * x, int n) {
 
 // ggml_flash_attn_ext expects kv_len aligned to KQ_MASK_PAD (32) on the
 // f16/Q* paths, and to FATTN_KQ_STRIDE (256) on the TurboQuant FA paths.
-// The global `g_kq_stride_pad` below is set at init time and applied by
-// both build_causal_mask and build_tree_mask so the mask dim matches the
-// K/V view length used in build_attn_block.
-static constexpr int KQ_MASK_PAD = 32;
+// The global `g_kq_stride_pad` below is set at init time and forwarded to
+// build_causal_mask / build_tree_mask (now in src/qwen35/attn_masks.h).
+#include "attn_masks.h"
+using dflash27b::KQ_MASK_PAD;
+using dflash27b::F16_ZERO;
+using dflash27b::F16_NEG_INF;
+using dflash27b::align_up;
+using dflash27b::build_causal_mask;
+using dflash27b::build_tree_mask;
 static int g_kq_stride_pad = KQ_MASK_PAD;   // overridden to 256 when TBQ KV is active
 static int g_max_ctx_override = 0;           // overridden by --max-ctx=N (default 4096)
 static int g_fa_window       = 2048;         // overridden by DFLASH27B_FA_WINDOW=N
 static int g_draft_swa_window = 0;           // draft SWA window (0 = disabled); --draft-swa=N
 static int g_draft_ctx_max   = 4096;        // draft context cap; --draft-ctx-max=N
-static int align_up(int x, int a) { return ((x + a - 1) / a) * a; }
-
-// F16 encoding for the two values we use: 0 and -inf.
-// 0 in F16 is 0x0000. -inf is 0xFC00.
-static constexpr uint16_t F16_ZERO = 0x0000;
-static constexpr uint16_t F16_NEG_INF = 0xFC00;
-
-static void build_causal_mask(std::vector<uint16_t> & out,
-                              int kv_len, int n_tokens, int kv_start,
-                              int win_start = 0) {
-    const int kv_pad = align_up(kv_len, g_kq_stride_pad);
-    const int q_pad  = align_up(n_tokens, KQ_MASK_PAD);
-    out.assign((size_t)kv_pad * q_pad, F16_NEG_INF);
-    const int abs_end = win_start + kv_len;
-    for (int q = 0; q < n_tokens; q++) {
-        const int abs_q = kv_start + q;
-        const int min_k = std::max(0, win_start);
-        const int max_k = abs_q;
-        for (int k = min_k; k <= max_k && k < abs_end; k++) {
-            out[(size_t)q * kv_pad + (k - win_start)] = F16_ZERO;
-        }
-    }
-}
 
 // ─── DDTree support ───────────────────────────────────────────────────
 // Extracted to src/qwen35/ddtree.{h,cpp}. Provides DDTree struct,
@@ -194,32 +176,6 @@ using dflash27b::DDTree;
 using dflash27b::extract_draft_topk;
 using dflash27b::build_ddtree;
 using dflash27b::follow_verified_tree;
-
-// Build an f16 ancestor-only attention mask for tree verify:
-//   mask[q=i][k<past_length]          = 0    (past KV cache, attend freely)
-//   mask[q=i][k=past_length+j]        = 0 iff j is an ancestor of i in the tree
-//                                              (including j == i)
-//                                     = -inf otherwise
-// Shape matches the ggml flash_attn_ext expectation: [kv_pad, q_pad] f16.
-static void build_tree_mask(const DDTree & tree, int past_length,
-                            std::vector<uint16_t> & out_mask,
-                            int win_start = 0) {
-    const int N      = 1 + tree.n_nodes;
-    const int win_len = past_length + N - win_start;
-    const int kv_pad = align_up(win_len, g_kq_stride_pad);
-    const int q_pad  = align_up(N,      KQ_MASK_PAD);
-    out_mask.assign((size_t)kv_pad * q_pad, F16_NEG_INF);
-    for (int q = 0; q < N; q++) {
-        for (int k = std::max(0, win_start); k < past_length; k++) {
-            out_mask[(size_t)q * kv_pad + (k - win_start)] = F16_ZERO;
-        }
-        for (int j = 0; j < N; j++) {
-            if (tree.visibility[(size_t)q * N + j]) {
-                out_mask[(size_t)q * kv_pad + (past_length + j - win_start)] = F16_ZERO;
-            }
-        }
-    }
-}
 
 // ─── StepGraph — rebuilt per call since kv_len varies ──
 
@@ -1739,7 +1695,7 @@ static bool run_target_layer_split_forward(
                 const int win_start_l = (g_fa_window > 0 && kv_start > g_fa_window)
                                             ? (kv_start - g_fa_window) : 0;
                 const int win_len_l = kv_len - win_start_l;
-                build_causal_mask(mask_buf, win_len_l, n, kv_start, win_start_l);
+                build_causal_mask(mask_buf, win_len_l, n, kv_start, g_kq_stride_pad, win_start_l);
                 ggml_backend_tensor_set(shard->layer_graph.attn_mask, mask_buf.data(), 0,
                                         sizeof(uint16_t) * mask_buf.size());
             }
@@ -3174,7 +3130,7 @@ int main(int argc, char ** argv) {
         {
             std::vector<uint16_t> buf;
             // 1a: standard causal mask, no window: 4 queries at positions 2-5, 6 KV
-            build_causal_mask(buf, /*kv_len=*/6, /*n_tokens=*/4, /*kv_start=*/2);
+            build_causal_mask(buf, /*kv_len=*/6, /*n_tokens=*/4, /*kv_start=*/2, g_kq_stride_pad);
             const int pad = align_up(6, g_kq_stride_pad);
             // q=0 at pos 2: attend k=[0..2], 3 zeros
             // q=3 at pos 5: attend k=[0..5], 6 zeros
@@ -3188,7 +3144,7 @@ int main(int argc, char ** argv) {
             std::vector<uint16_t> buf;
             // 1b: windowed mask: kv_start=10, n_tokens=3, win_start=8, win_len=5
             // Queries at positions 10,11,12. KV entries [8,9,10,11,12].
-            build_causal_mask(buf, /*kv_len=*/5, /*n_tokens=*/3, /*kv_start=*/10, /*win_start=*/8);
+            build_causal_mask(buf, /*kv_len=*/5, /*n_tokens=*/3, /*kv_start=*/10, g_kq_stride_pad, /*win_start=*/8);
             const int pad = align_up(5, g_kq_stride_pad);
             // q=0 (pos 10): attend k=[8..10] → indices [0..2]
             check(buf[0 * pad + 0] == F16_ZERO, "1b: q=0,k_abs=8 attendable");
@@ -3200,7 +3156,7 @@ int main(int argc, char ** argv) {
         {
             std::vector<uint16_t> buf;
             // 1c: large window > kv_start (window inactive): kv_start=100, win_start=0
-            build_causal_mask(buf, /*kv_len=*/106, /*n_tokens=*/6, /*kv_start=*/100, /*win_start=*/0);
+            build_causal_mask(buf, /*kv_len=*/106, /*n_tokens=*/6, /*kv_start=*/100, g_kq_stride_pad, /*win_start=*/0);
             const int pad = align_up(106, g_kq_stride_pad);
             // q=0 (pos 100): attend k=[0..100]
             check(buf[0 * pad + 0] == F16_ZERO, "1c: q=0,k=0 attendable (no window)");
@@ -3245,7 +3201,7 @@ int main(int argc, char ** argv) {
                 ggml_backend_tensor_set(psg.positions, pf_pos.data(), 0,
                                         sizeof(int32_t) * pf_pos.size());
                 if (with_m) {
-                    build_causal_mask(pf_mask, kv_len_p, nt, start);
+                    build_causal_mask(pf_mask, kv_len_p, nt, start, g_kq_stride_pad);
                     ggml_backend_tensor_set(psg.attn_mask, pf_mask.data(), 0,
                                             sizeof(uint16_t) * pf_mask.size());
                 }
@@ -3898,7 +3854,7 @@ int main(int argc, char ** argv) {
 
                 if (is_attn && with_mask && lsg.attn_mask) {
                     std::vector<uint16_t> mask_buf;
-                    build_causal_mask(mask_buf, kv_len, n_tokens, /*kv_start=*/start);
+                    build_causal_mask(mask_buf, kv_len, n_tokens, /*kv_start=*/start, g_kq_stride_pad);
                     ggml_backend_tensor_set(lsg.attn_mask, mask_buf.data(), 0,
                                             sizeof(uint16_t) * mask_buf.size());
                 }
@@ -4102,7 +4058,7 @@ int main(int argc, char ** argv) {
                                          ? (start - g_fa_window) : 0;
             const int pf_win_len = kv_len - pf_win_start;
             build_causal_mask(pf_mask_buf, pf_win_len, n_tokens,
-                              /*kv_start=*/start, /*win_start=*/pf_win_start);
+                              /*kv_start=*/start, g_kq_stride_pad, /*win_start=*/pf_win_start);
             ggml_backend_tensor_set(sg.attn_mask, pf_mask_buf.data(), 0,
                                     sizeof(uint16_t) * pf_mask_buf.size());
         }
@@ -4861,7 +4817,7 @@ int main(int argc, char ** argv) {
                 const int win_start_v = (verify_fa_window > 0 && committed > verify_fa_window)
                                             ? (committed - verify_fa_window) : 0;
                 const int win_len_v = committed + q_len - win_start_v;
-                build_causal_mask(mask_buf, win_len_v, q_len, committed, win_start_v);
+                build_causal_mask(mask_buf, win_len_v, q_len, committed, g_kq_stride_pad, win_start_v);
             }
             ggml_backend_tensor_set(sg.attn_mask, mask_buf.data(), 0, sizeof(uint16_t) * mask_buf.size());
             T_verify_set = sync_us();
@@ -5109,7 +5065,7 @@ int main(int argc, char ** argv) {
                 const int win_start_r = (replay_fa_window > 0 && committed > replay_fa_window)
                                             ? (committed - replay_fa_window) : 0;
                 const int win_len_r = committed + commit_n - win_start_r;
-                build_causal_mask(mask_buf, win_len_r, commit_n, committed, win_start_r);
+                build_causal_mask(mask_buf, win_len_r, commit_n, committed, g_kq_stride_pad, win_start_r);
                 ggml_backend_tensor_set(sg.attn_mask, mask_buf.data(), 0, sizeof(uint16_t) * mask_buf.size());
             }
             auto T_replay_set = sync_us();
