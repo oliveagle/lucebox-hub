@@ -215,6 +215,8 @@ add_library(dflash27b STATIC
     src/laguna/laguna_daemon.cpp
     src/laguna/laguna_backend.cpp
     src/qwen35/ddtree.cpp
+    src/qwen35/peer_access.cpp
+    src/qwen35/draft_feature_mirror.cpp
     src/common/sampler.cpp
     src/common/daemon_loop.cpp
 )
