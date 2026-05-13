@@ -26,6 +26,7 @@
 #include "laguna_daemon.h"  // arch dispatch - laguna targets are served by
                             // dflash27b::run_laguna_daemon() instead of the
                             // qwen35 + DFlash + DDTree pipeline below.
+#include "qwen35_daemon.h"  // arch dispatch - single-GPU qwen35 daemon mode
 #include "sampler.h"        // shared CPU sampler chain (SamplerCfg /
                             // sample_logits / parse_sampler_token) used by
                             // both arches; behaviour stays identical.
@@ -2274,6 +2275,36 @@ int main(int argc, char ** argv) {
                                              draft_ipc_gpu,
                                              draft_ipc_work_dir,
                                              draft_ipc_ring_cap);
+    }
+
+    // ---- Single-GPU qwen35 daemon: dispatch to run_qwen35_daemon() -----
+    // This avoids the duplicated 1800-line inline loop below. The inline
+    // loop remains for one-shot, test-window, and profile-scaling modes.
+    if (daemon_mode && target_gpus.size() <= 1) {
+        const int max_ctx_eff = g_max_ctx_override > 0 ? g_max_ctx_override : 4096;
+        dflash27b::Qwen35DaemonArgs qargs;
+        qargs.target_path       = target_path;
+        qargs.draft_path        = draft_path;
+        qargs.target_gpu        = target_gpu;
+        qargs.draft_gpu         = draft_gpu;
+        qargs.max_ctx           = max_ctx_eff;
+        qargs.stream_fd         = stream_fd;
+        qargs.chunk             = 512;
+        qargs.fa_window         = g_fa_window;
+        qargs.kq_stride_pad     = g_kq_stride_pad;
+        qargs.draft_swa_window  = g_draft_swa_window;
+        qargs.draft_ctx_max     = g_draft_ctx_max;
+        qargs.fast_rollback     = fast_rollback;
+        qargs.seq_verify        = seq_verify;
+        qargs.ddtree_mode       = ddtree_mode;
+        qargs.ddtree_budget     = ddtree_budget;
+        qargs.ddtree_temp       = ddtree_temp;
+        qargs.ddtree_chain_seed = ddtree_chain_seed;
+        qargs.use_feature_mirror = draft_feature_mirror;
+        std::fprintf(stderr,
+            "[test_dflash] arch=qwen35 daemon -> dispatching to run_qwen35_daemon "
+            "(max_ctx=%d stream_fd=%d)\n", max_ctx_eff, stream_fd);
+        return dflash27b::run_qwen35_daemon(qargs);
     }
 
     const bool split_gpus = target_gpu != draft_gpu;
