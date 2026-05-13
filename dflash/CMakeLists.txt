@@ -205,6 +205,8 @@ add_library(dflash27b STATIC
     src/qwen3/qwen3_drafter.cpp
     src/qwen3/qwen3_loader.cpp
     src/qwen3/qwen3_graph.cpp
+    src/qwen3/qwen3_backend.cpp
+    src/qwen3/qwen3_daemon.cpp
     src/flashprefill_q8.cpp
     src/kv_cache.cpp
     src/kv_quant.cpp
