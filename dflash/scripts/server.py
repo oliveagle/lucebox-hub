@@ -89,9 +89,10 @@ _ALLOWED_TEMPLATE_KWARGS = frozenset({"enable_thinking", "tools", "add_generatio
 
 
 def resolve_draft(root: Path) -> Path:
-    for st in root.rglob("model.safetensors"):
-        return st
-    raise FileNotFoundError(f"no model.safetensors under {root}")
+    for pattern in ("dflash-draft-*.gguf", "*.gguf", "model.safetensors"):
+        for draft in sorted(root.rglob(pattern)):
+            return draft
+    raise FileNotFoundError(f"no DFlash draft GGUF or model.safetensors under {root}")
 
 
 _QWEN35_FAMILY_TOKENIZERS = {
@@ -664,7 +665,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                f"--stream-fd={stream_fd_val}"]
     else:
         if draft is None:
-            raise SystemExit("qwen35 arch requires --draft model.safetensors")
+            raise SystemExit("qwen35 arch requires --draft <draft.gguf|model.safetensors>")
         cmd = [bin_abs, str(target), str(draft), "--daemon",
                "--fast-rollback", "--ddtree", f"--ddtree-budget={budget}",
                f"--max-ctx={max_ctx}",
