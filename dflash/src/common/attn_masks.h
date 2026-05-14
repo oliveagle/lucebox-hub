@@ -1,4 +1,4 @@
-// Attention mask builders for qwen35's flash-attention kernels.
+// Attention mask builders for flash-attention kernels.
 //
 // Builds f16 masks aligned to the KQ stride pad required by ggml_flash_attn_ext.
 // Used for both causal (prefill/decode) and tree-structured (DDTree verify) masks.

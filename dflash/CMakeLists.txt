@@ -221,8 +221,6 @@ add_library(dflash27b STATIC
     src/laguna/laguna_target_graph.cpp
     src/laguna/laguna_daemon.cpp
     src/laguna/laguna_backend.cpp
-    src/qwen35/ddtree.cpp
-    src/qwen35/peer_access.cpp
     src/qwen35/draft_feature_mirror.cpp
     src/qwen35/graph_builders.cpp
     src/qwen35/feature_copy.cpp
@@ -238,6 +236,8 @@ add_library(dflash27b STATIC
     src/common/daemon_loop.cpp
     src/common/gguf_inspect.cpp
     src/common/layer_split_utils.cpp
+    src/common/ddtree.cpp
+    src/common/peer_access.cpp
 )
 # BSA (Block-Sparse Attention) backs the speculative-prefill drafter scoring
 # path. Default ON so prefill is fast out of the box. Turn OFF if you don't

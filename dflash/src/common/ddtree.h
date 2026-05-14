@@ -4,8 +4,7 @@
 // Builds a best-first tree from per-position top-K log-probability
 // distributions (from the draft model) for tree-structured verify.
 //
-// Self-contained: depends only on standard library. Used by both
-// test_dflash.cpp (qwen35 daemon) and any future Qwen35Backend.
+// Self-contained: depends only on standard library.
 
 #pragma once
 

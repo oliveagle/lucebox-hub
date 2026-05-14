@@ -1,13 +1,11 @@
-// CUDA peer-access helpers for multi-GPU qwen35 (target + draft on different devices).
+// CUDA peer-access helpers for multi-GPU inference.
 //
 // Provides enable_peer_access_pair(), cross_device_peer_memcpy_ok(), and
 // copy_peer_async() — used by DraftFeatureMirror and the speculative-decode
-// loop to move data between the target and draft GPUs.
+// loop to move data between target and draft GPUs.
 //
-// Global state (opt-in flag + cache) is accessed through free functions so
-// that test_dflash.cpp's existing call sites continue to work without
-// structural changes. The globals will move into Qwen35Backend once the
-// full backend extraction is complete.
+// Global state (opt-in flag + cache) is accessed through free functions.
+// Long-term these should move into a runtime context object.
 
 #pragma once
 

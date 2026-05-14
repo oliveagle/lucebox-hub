@@ -1,4 +1,4 @@
-// StepGraph — per-forward-call compute graph container for qwen35.
+// StepGraph — per-forward-call compute graph container.
 //
 // Holds the ggml context, graph, allocator, and named tensor handles for one
 // forward step (prefill chunk, verify batch, or replay). Rebuilt per call
