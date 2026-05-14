@@ -25,7 +25,7 @@ A setup script is provided that installs everything (run as root):
 sudo bash dflash/scripts/setup_system.sh
 ```
 
-This installs build tools, `huggingface-cli` (via pipx), and the CUDA Toolkit.
+This installs build tools, `hf` (via pipx), and the CUDA Toolkit.
 
 ### Python
 
@@ -90,10 +90,10 @@ Download models before running the server:
 
 ```bash
 # Target model (Q4_K_M quantized Qwen3.6-27B)
-huggingface-cli download <repo-id> --local-dir dflash/models/
+hf download <repo-id> --local-dir dflash/models/
 
-# Draft model (safetensors format)
-# Place model.safetensors under dflash/models/draft/
+# Draft model (1.84 GB default Qwen3.6 GGUF draft)
+hf download Lucebox/Qwen3.6-27B-DFlash-GGUF dflash-draft-3.6-q8_0.gguf --local-dir dflash/models/draft/
 ```
 
 Expected layout:
@@ -102,7 +102,7 @@ Expected layout:
 dflash/models/
 ├── Qwen3.6-27B-Q4_K_M.gguf          # --target (GGUF)
 └── draft/
-    └── model.safetensors              # --draft  (safetensors)
+    └── dflash-draft-3.6-q8_0.gguf     # --draft  (GGUF)
 ```
 
 The target path can also be set via the `DFLASH_TARGET` environment variable.
@@ -190,12 +190,12 @@ cd dflash/build
 
 # Numerics tests
 ./test_vs_oracle --target ../models/Qwen3.6-27B-Q4_K_M.gguf \
-                 --draft ../models/draft/model.safetensors
+                 --draft ../models/draft/dflash-draft-3.6-q8_0.gguf
 
 # Smoke tests
 ./smoke_load_target --target ../models/Qwen3.6-27B-Q4_K_M.gguf
-./smoke_load_draft --draft ../models/draft/model.safetensors
-./smoke_draft_graph --draft ../models/draft/model.safetensors
+./smoke_load_draft --draft ../models/draft/dflash-draft-3.6-q8_0.gguf
+./smoke_draft_graph --draft ../models/draft/dflash-draft-3.6-q8_0.gguf
 ```
 
 ### Integration tests (require running server)
@@ -224,7 +224,7 @@ dflash/
 │   └── Block-Sparse-Attention/ # BSA kernels (submodule)
 ├── models/                     # Model files (not in git)
 │   ├── Qwen3.6-27B-Q4_K_M.gguf
-│   └── draft/model.safetensors
+│   └── draft/dflash-draft-3.6-q8_0.gguf
 ├── scripts/
 │   ├── server.py               # Main OpenAI/Codex server
 │   ├── prefix_cache.py         # LRU prefix cache

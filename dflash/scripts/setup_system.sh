@@ -42,18 +42,18 @@ apt-get install -y build-essential cmake git git-lfs
 git lfs install --system 2>/dev/null || git lfs install
 ok "Build tools installed."
 
-# ── huggingface-cli (pipx, installed for $SUDO_USER not root) ────────────────
+# ── hf (pipx, installed for $SUDO_USER not root) ────────────────
 
 REAL_USER="${SUDO_USER:-$USER}"
 
 apt-get install -y pipx
 
 if sudo -u "${REAL_USER}" pipx list 2>/dev/null | grep -q huggingface_hub; then
-    ok "huggingface-cli already installed for ${REAL_USER}."
+    ok "hf already installed for ${REAL_USER}."
 else
-    info "Installing huggingface-cli for ${REAL_USER}..."
+    info "Installing hf for ${REAL_USER}..."
     sudo -u "${REAL_USER}" pipx install "huggingface_hub[cli]"
-    ok "huggingface-cli installed."
+    ok "hf installed."
 fi
 
 sudo -u "${REAL_USER}" pipx ensurepath --quiet 2>/dev/null || true
