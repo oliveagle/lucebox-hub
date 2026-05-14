@@ -3,9 +3,6 @@
 #include "qwen35_dflash_target.h"
 #include "graph_builders.h"
 
-#include <cstdio>
-#include <cstring>
-
 namespace dflash27b {
 
 Qwen35DFlashTarget::Qwen35DFlashTarget(

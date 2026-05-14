@@ -7,30 +7,16 @@
 #include "gemma4_backend.h"
 #include "dflash27b.h"
 #include "common/sampler.h"
+#include "common/io_utils.h"
 
 #include "ggml-cuda.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
-#include <cstring>
 #include <cmath>
-#include <fstream>
-#include <sstream>
 
 namespace dflash27b {
-
-// ── Helpers ────────────────────────────────────────────────────────────
-
-static std::vector<int32_t> read_int32_file(const std::string & path) {
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f) return {};
-    auto sz = (size_t)f.tellg();
-    f.seekg(0);
-    std::vector<int32_t> out(sz / sizeof(int32_t));
-    f.read((char *)out.data(), sz);
-    return out;
-}
 
 // ── Ctor / dtor ────────────────────────────────────────────────────────
 

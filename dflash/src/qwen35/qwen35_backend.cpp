@@ -5,31 +5,17 @@
 #include "peer_access.h"
 #include "attn_masks.h"
 #include "common/sampler.h"
+#include "common/io_utils.h"
 #include "qwen3/qwen3_drafter.h"
 
 #include "ggml-cuda.h"
 
 #include <algorithm>
 #include <chrono>
-#include <cinttypes>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
-#include <sstream>
 
 namespace dflash27b {
-
-// ── Helpers (file-local) ────────────────────────────────────────────────
-
-static std::vector<int32_t> read_int32_file(const std::string & path) {
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f) return {};
-    auto sz = (size_t)f.tellg();
-    f.seekg(0);
-    std::vector<int32_t> out(sz / sizeof(int32_t));
-    f.read((char *)out.data(), sz);
-    return out;
-}
 
 #define IS_EOS_TOK(tok, w)                                         \
     ( ((w).eos_chat_id >= 0 && (tok) == (w).eos_chat_id)                  \
@@ -272,14 +258,6 @@ bool Qwen35Backend::try_handle_command(const std::string & line, const DaemonIO 
         }
         io.emit(-1);
         return true;
-    }
-
-    // RESTORE_CHAIN <thick_slot> [thin1,thin2,...] <prompt_path> <n_gen>
-    if (line.compare(0, 14, "RESTORE_CHAIN ") == 0) {
-        // Handled by the daemon loop's restore_and_generate path
-        // (parsed in daemon_loop.cpp as a RESTORE variant)
-        // For now, return false to let the generic loop handle it
-        return false;
     }
 
     return false;

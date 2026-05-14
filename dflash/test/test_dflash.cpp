@@ -235,10 +235,6 @@ using dflash27b::run_dflash_draft_ipc_daemon;
 
 // ─── GGUF inspection — extracted to src/common/gguf_inspect.{h,cpp} ──
 #include "gguf_inspect.h"
-static int inspect_target_layer_count(const char * target_path) {
-    auto info = dflash27b::inspect_gguf_model_info(target_path);
-    return info.n_layer;
-}
 
 // ─── Layer ranges — extracted to src/common/layer_split_utils.{h,cpp} ──
 #include "layer_split_utils.h"
@@ -320,7 +316,7 @@ static int run_target_layer_split_harness(
         std::fprintf(stderr, "target layer split requires prompt/n_gen/out positional args\n");
         return 2;
     }
-    const int n_layer = inspect_target_layer_count(target_path);
+    const int n_layer = dflash27b::inspect_gguf_model_info(target_path).n_layer;
     if (n_layer <= 0) {
         std::fprintf(stderr, "target-split could not read qwen35.block_count\n");
         return 1;

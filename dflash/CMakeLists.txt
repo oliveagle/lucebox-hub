@@ -236,7 +236,6 @@ add_library(dflash27b STATIC
     src/qwen35/qwen35_daemon.cpp
     src/common/sampler.cpp
     src/common/daemon_loop.cpp
-    src/common/spec_decode_loop.cpp
     src/common/gguf_inspect.cpp
     src/common/layer_split_utils.cpp
 )
