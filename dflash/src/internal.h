@@ -165,6 +165,12 @@ struct TargetWeights {
     int capture_layer_ids[DFLASH27B_DRAFT_N_TARGET_LAYERS] = {1, 16, 31, 46, 61};
 };
 
+// Check if a token is an end-of-sequence marker for the given target weights.
+inline bool is_eos_tok(int tok, const TargetWeights & w) {
+    return (w.eos_chat_id >= 0 && tok == w.eos_chat_id)
+        || (w.eos_id      >= 0 && tok == w.eos_id);
+}
+
 struct TargetLoadPlan {
     int  layer_begin = 0;     // inclusive
     int  layer_end   = -1;    // exclusive; <0 means all layers
