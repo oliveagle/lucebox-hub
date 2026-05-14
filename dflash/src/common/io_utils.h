@@ -27,10 +27,13 @@ namespace dflash27b {
 static inline std::vector<int32_t> read_int32_file(const std::string & path) {
     std::ifstream f(path, std::ios::binary | std::ios::ate);
     if (!f) return {};
-    auto sz = (size_t)f.tellg();
+    auto pos = f.tellg();
+    if (pos < 0) return {};
+    size_t sz = (size_t)pos;
     f.seekg(0);
-    std::vector<int32_t> out(sz / sizeof(int32_t));
-    f.read((char *)out.data(), sz);
+    size_t n = sz / sizeof(int32_t);
+    std::vector<int32_t> out(n);
+    if (n > 0) f.read((char *)out.data(), n * sizeof(int32_t));
     return out;
 }
 
