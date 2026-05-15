@@ -5,7 +5,7 @@
 
 Paths resolve from the repo root by default. Override with env vars:
     DFLASH_TARGET    path to target Qwen3.6-27B-Q4_K_M.gguf (or 3.5)
-    DFLASH_DRAFT     path to draft model.safetensors
+    DFLASH_DRAFT     path to DFlash draft GGUF or model.safetensors
     DFLASH_BIN       path to build/test_dflash
     DFLASH_BIN_AR    path to build/test_generate
     DFLASH_TOKENIZER HF tokenizer repo (default Qwen/Qwen3.5-27B; matches run.py)
@@ -25,7 +25,7 @@ TARGET = os.environ.get(
     "DFLASH_TARGET",
     str(ROOT / "models" / "Qwen3.6-27B-Q4_K_M.gguf"),
 )
-_LOCAL_DRAFT_FILE = ROOT / "models" / "draft" / "model.safetensors"
+_LOCAL_DRAFT_FILE = ROOT / "models" / "draft" / "dflash-draft-3.6-q8_0.gguf"
 _LOCAL_DRAFT_ROOT = ROOT / "models" / "draft"
 DRAFT = None
 TEST_DFLASH = os.environ.get("DFLASH_BIN", str(ROOT / "build" / f"test_dflash{BIN_SUFFIX}"))
@@ -45,31 +45,33 @@ BENCHES = [
 ]
 
 
-def _find_safetensors(root: Path) -> str | None:
+def _find_draft_model(root: Path) -> str | None:
     if root.is_file():
         return str(root)
     if not root.is_dir():
         return None
-    for st in root.rglob("model.safetensors"):
-        return str(st)
+    for pattern in ("dflash-draft-*.gguf", "*.gguf", "model.safetensors"):
+        matches = sorted(root.rglob(pattern))
+        if matches:
+            return str(matches[0])
     return None
 
 
 def _resolve_draft() -> str:
     env = os.environ.get("DFLASH_DRAFT")
     if env:
-        found = _find_safetensors(Path(env))
+        found = _find_draft_model(Path(env))
         if found:
             return found
-        raise FileNotFoundError(f"DFLASH_DRAFT does not point to model.safetensors: {env}")
+        raise FileNotFoundError(f"DFLASH_DRAFT does not point to a DFlash draft GGUF or model.safetensors: {env}")
 
     for candidate in (_LOCAL_DRAFT_FILE, _LOCAL_DRAFT_ROOT):
-        found = _find_safetensors(candidate)
+        found = _find_draft_model(candidate)
         if found:
             return found
 
     raise FileNotFoundError(
-        "draft model.safetensors not found. Expected one of:\n"
+        "DFlash draft GGUF or model.safetensors not found. Expected one of:\n"
         f"  - {_LOCAL_DRAFT_FILE}\n"
         "Download it as documented in the README, or set DFLASH_DRAFT to an explicit file or directory."
     )

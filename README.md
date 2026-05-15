@@ -16,16 +16,15 @@
 </p>
 
 <p align="center">
-  <strong>Open LLM inference, rewritten by hand for one specific chip at a time.</strong><br/>
-  Kernels, speculative decoding, and quantization, tailored per target.<br/>
-  We don't wait for better silicon. We rewrite the software.
+  <strong>Local LLM inference server built for speed. Custom kernels, speculative prefill & decoding, quantized GGUF paths.</strong><br/>
+  Each project is a new optimization to our engine for a specific model family and hardware target.
 </p>
 
 ---
 
-## Inside the box
+## Projects
 
-Three projects today, more coming. Each one is a self-contained release with its own benchmarks and paper-style writeup.
+Each directory is a self-contained project with setup instructions and benchmark notes.
 
 <p align="center">
   <a href="megakernel/"><img src="assets/svg/card-megakernel-dark.svg" alt="Megakernel" width="46%"></a>
@@ -54,7 +53,7 @@ All speedups measured vs vendored llama.cpp (`-fa 1`, matching KV quant).
 
 ## 01 · Megakernel Qwen3.5 0.8B on RTX 3090
 
-**The first megakernel for hybrid DeltaNet/Attention LLMs.** All 24 layers of Qwen 3.5-0.8B in a single CUDA dispatch, 1.87 tok/J on a 2020 GPU, matching Apple's latest silicon at 2× the throughput.
+Single-kernel CUDA inference for Qwen 3.5-0.8B on RTX 3090. All 24 layers run in one persistent dispatch.
 
 ```bash
 # 1. clone + enter
@@ -76,7 +75,7 @@ python final_bench.py
 | llama.cpp BF16 `@350W` | 11,247 | 267 | 0.76 |
 | PyTorch HF | 7,578 | 108 | n/a |
 
-**What makes it work:** 82 blocks, 512 threads, one persistent kernel. No CPU round-trips between layers. Weights streamed straight from HuggingFace. Cooperative grid sync instead of ~100 kernel launches per token. Power ceiling hit before compute ceiling, so DVFS converts tight execution straight into saved watts.
+Implementation notes: 82 blocks, 512 threads, cooperative grid sync, no CPU round trips between layers, and weights streamed from Hugging Face on first run.
 
 [Full writeup →](megakernel/README.md) · [Benchmarks →](megakernel/RESULTS.md) · [Blog post →](https://lucebox.com/blog/megakernel)
 
@@ -86,7 +85,7 @@ python final_bench.py
 
 ## 02 · DFlash DDtree Qwen3.5 & Qwen3.6 27B GGUF on RTX 3090
 
-**First GGUF port of DFlash speculative decoding.** Qwen3.5-27B on a single RTX 3090, Q4_K_M target + BF16 draft, DDTree budget=22.
+DFlash speculative decoding for Qwen3.5/Qwen3.6 27B GGUF targets on a single GPU. The default setup uses Qwen3.6-27B Q4_K_M plus the Lucebox Q8_0 GGUF DFlash draft.
 
 - **Up to 207 tok/s** in the demo (207.6 tok/s DFlash vs 38.0 tok/s AR, 5.46×)
 - **129.5 tok/s mean** on the HumanEval 10-prompt bench
@@ -99,14 +98,15 @@ python final_bench.py
 git clone --recurse-submodules https://github.com/Luce-Org/lucebox-hub && cd lucebox-hub/dflash
 
 # 2. build the C++/CUDA decoder (CUDA 12+, CMake 3.18+)
-# Default compiles for 75/80/86/89 (+120 on CUDA 12.8+, +sm_121/DGX Spark on CUDA 12.9+, +sm_110/Thor on CUDA 13.0+) so the binary runs on every supported card.
+# Default compiles for Pascal/Volta/Turing/Ampere (60/61/62/70/75/86; +120 on CUDA 12.8+, +sm_121/DGX Spark on CUDA 12.9+, +sm_110/Thor on CUDA 13.0+) so the binary runs on every supported card.
 # 3090-only users can add -DCMAKE_CUDA_ARCHITECTURES=86 to skip the other archs and build faster (~3 min).
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target test_dflash -j
+cmake --build build --target test_generate -j
 
-# 3. fetch weights: ~16 GB Q4_K_M target + 3.46 GB bf16 draft
-huggingface-cli download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
-huggingface-cli download z-lab/Qwen3.6-27B-DFlash model.safetensors --local-dir models/draft/
+# 3. fetch weights: ~16 GB Q4_K_M target + 1.84 GB Lucebox Q8_0 GGUF DFlash draft
+hf download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
+hf download Lucebox/Qwen3.6-27B-DFlash-GGUF dflash-draft-3.6-q8_0.gguf --local-dir models/draft/
 
 # 4a. one-shot streaming generate
 python3 scripts/run.py --prompt "def fibonacci(n):"
@@ -121,13 +121,13 @@ python3 scripts/bench_llm.py
 | Math500 | 37.7 | 110.5 | 2.93× |
 | GSM8K | 37.7 | 96.2 | 2.55× |
 
-**The constraint that shaped the project.** AWQ INT4 of Qwen3.5-27B plus the BF16 draft doesn't leave room for the DDTree verify state on a 24 GB card. Q4_K_M GGUF (~16 GB target) is the largest format that fits target + 3.46 GB draft + budget=22 tree state + KV cache in 24 GB on the RTX 3090. Picking it forced a new port on top of ggml, since no public DFlash runtime supports a GGUF target.
+**Why GGUF/Q4_K_M:** on 24 GB GPUs, the target, draft, DDTree verify state, and KV cache need to fit together. The default Qwen3.6 setup uses a ~16 GB Q4_K_M target and a 1.84 GB GGUF draft.
 
-**What we built vs what we didn't.** The algorithms are not ours:
+Algorithms used:
 - [**DFlash**](https://arxiv.org/abs/2602.06036) (z-lab, 2026): block-diffusion draft conditioned on target hidden states.
 - [**DDTree**](https://arxiv.org/abs/2604.12989) (Ringel et al., 2026): tree-structured verify that beats chain verify at the same compute budget.
 
-What we ported and tuned:
+Implemented here:
 - C++/CUDA decode engine on top of ggml (no libllama, no Python runtime, Q4_K_M target path).
 - Three custom CUDA kernels for tree-aware SSM state rollback: `ggml_ssm_conv_tree`, `ggml_gated_delta_net_tree`, `ggml_gated_delta_net_tree_persist`.
 - DDTree budget swept for RTX 3090 + Q4_K_M target: **budget=22** is the sweet spot.
@@ -139,6 +139,8 @@ Supported out of the box; the build just needs the right CUDA toolkit. `dflash/C
 
 | GPU | Arch | Min CUDA | Status |
 |-----|:----:|:--------:|--------|
+| Tesla P40 Pascal | `sm_61` | 12.0 | supported with scalar F16 fallback; needs 24 GB for the 27B stack |
+| Tesla V100 Volta | `sm_70` | 12.0 | supported with F16 WMMA kernels |
 | RTX 3090 Ampere | `sm_86` | 12.0 | **reference, all numbers above** |
 | RTX 2080 Ti Turing | `sm_75` | 12.0 | supported, 53 tok/s DFlash verified (FP16 draft) |
 | RTX 4090 Ada | `sm_89` | 12.0 | should work, unverified, pass `-DCMAKE_CUDA_ARCHITECTURES=89` |
@@ -170,20 +172,18 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release   # CMake auto-adds the Thor arch
 cmake --build build --target test_dflash -j
 ```
 
-**What will NOT auto-port:**
+**Retune per GPU:**
 - **DDTree `budget=22`** tuned for 3090 + Q4_K_M + 24 GB. On the RTX 5090, budget=40 is optimal (swept). On GB10 (128 GB unified), re-sweep — larger tree = more verify throughput until memory bandwidth saturates. `scripts/bench_llm.py --budget N` has the sweep hooks.
 - **TQ3_0 KV cache + sliding `target_feat` ring** was shaped by 24 GB (fits up to 256K context on a 3090). On GB10 (128 GB unified) / 5090 (32 GB) you can push context further or skip quantization entirely and keep F16 KV.
 - **Perf numbers** (207 tok/s demo, 129.5 HumanEval, 2.8× vs SGLang AWQ) are RTX 3090 @ stock. RTX 5090 numbers (205 tok/s HumanEval, 4.84×) are in [RESULTS.md](dflash/RESULTS.md). Ada/GB10/Thor not yet swept, PRs with `RESULTS.md` entries welcome.
 
 [Full writeup →](dflash/README.md) · [Benchmarks →](dflash/RESULTS.md) · [Blog post →](https://lucebox.com/blog/dflash27b)
 
-> **Qwen3.6-27B (supported, experimental draft):** same `qwen35` architecture, so the 3.6 Q4_K_M GGUF loads as a drop-in target. With z-lab's matched [Qwen3.6-27B-DFlash](https://huggingface.co/z-lab/Qwen3.6-27B-DFlash) draft (still under training, 2026-04-26 snapshot), HumanEval lands at ~78 tok/s (AL 5.05); the 3.5 draft gets ~74 tok/s. 3.5↔3.5 reference is 129.5 tok/s. AL should improve as z-lab finishes training the draft. Details in [dflash/README.md](dflash/README.md#qwen36-27b-target-experimental).
-
 ---
 
 ## 03 · PFlash speculative prefill on RTX 3090
 
-**In-process speculative prefill, C++/CUDA only.** A drafter (Qwen3-0.6B BF16) loaded directly into the dflash daemon scores per-token importance over a long prompt; the heavy target (Qwen3.6-27B Q4_K_M) only prefills the spans that matter. Both models share the same ggml allocator on a single RTX 3090. **No Python, no Triton, no PyTorch at runtime** — just the dflash binary and four custom CUDA kernels (`mean_K → score → select → sparse_fwd`) plus BSA ([mit-han-lab/Block-Sparse-Attention](https://github.com/mit-han-lab/Block-Sparse-Attention), FA-2 derived, sm_80+) for the long-context drafter forward.
+Speculative prefill for long prompts. A Qwen3-0.6B BF16 drafter scores token importance, then the 27B target prefills only the retained spans. Runtime is C++/CUDA through the dflash binaries; no PyTorch is required at serving time.
 
 - **~10.4× TTFT** on 128K context: **24.8 s** dflash daemon vs **~257 s** llama.cpp (FA on, Q4_0 KV).
 - **10.0× TTFT** on 64K context: **13.5 s** dflash vs **134.95 s** llama.cpp.
@@ -198,13 +198,13 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
 cmake --build build --target test_dflash test_flashprefill_kernels -j
 
 # 2. fetch weights: 27B Q4_K_M target + 0.6B BF16 drafter (GGUF) + DFlash spec-decode draft
-huggingface-cli download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
-huggingface-cli download unsloth/Qwen3-0.6B-GGUF Qwen3-0.6B-BF16.gguf --local-dir models/
-huggingface-cli download z-lab/Qwen3.6-27B-DFlash model.safetensors --local-dir models/draft/
+hf download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
+hf download unsloth/Qwen3-0.6B-GGUF Qwen3-0.6B-BF16.gguf --local-dir models/
+hf download Lucebox/Qwen3.6-27B-DFlash-GGUF dflash-draft-3.6-q8_0.gguf --local-dir models/draft/
 
 # 3. run the daemon: compress (drafter scoring) + generate (target spec decode)
 DFLASH_FP_USE_BSA=1 DFLASH_FP_ALPHA=0.85 \
-./build/test_dflash models/Qwen3.6-27B-Q4_K_M.gguf models/draft/model.safetensors --daemon
+./build/test_dflash models/Qwen3.6-27B-Q4_K_M.gguf models/draft/dflash-draft-3.6-q8_0.gguf --daemon
 # stdin protocol: `compress <ids.bin> <keep_x1000> <drafter.gguf>` →
 #                 stream of compressed token ids, then `generate <…>` →
 #                 stream of generated tokens.

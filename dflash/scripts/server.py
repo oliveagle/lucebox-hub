@@ -40,7 +40,7 @@ from _prefill_hook import (
     PrefillConfig, add_cli_flags, config_from_args,
     compress_text_via_daemon, _drain_until_sentinel,
 )
-from placement.backend_device import TestDflashLaunchArgs
+from placement.server_resolver import resolve_server_placement
 from prefix_cache import DaemonStdoutBus, PrefixCache
 from tool_memory import ToolMemory
 
@@ -89,9 +89,10 @@ _ALLOWED_TEMPLATE_KWARGS = frozenset({"enable_thinking", "tools", "add_generatio
 
 
 def resolve_draft(root: Path) -> Path:
-    for st in root.rglob("model.safetensors"):
-        return st
-    raise FileNotFoundError(f"no model.safetensors under {root}")
+    for pattern in ("dflash-draft-*.gguf", "*.gguf", "model.safetensors"):
+        for draft in sorted(root.rglob(pattern)):
+            return draft
+    raise FileNotFoundError(f"no DFlash draft GGUF or model.safetensors under {root}")
 
 
 _QWEN35_FAMILY_TOKENIZERS = {
@@ -479,11 +480,18 @@ class ToolDef(BaseModel):
     function: dict  # {name, description, parameters: {...JSON schema...}}
 
 
+# Default cap when the client omits ``max_tokens``. Override at start via
+# the ``DFLASH_DEFAULT_MAX_TOKENS`` env var. Set to a value < ``max_ctx`` to
+# avoid the unbounded-gen path; clients that send their own ``max_tokens``
+# are unaffected.
+DEFAULT_MAX_TOKENS = int(os.environ.get("DFLASH_DEFAULT_MAX_TOKENS", 4096))
+
+
 class ChatRequest(BaseModel):
     model: str = MODEL_NAME
     messages: list[ChatMessage]
     stream: bool = False
-    max_tokens: int = 512
+    max_tokens: int = DEFAULT_MAX_TOKENS
     max_completion_tokens: int | None = None
     temperature: float | None = None   # 0 = greedy, >0 = sample
     seed: int | None = None             # rng seed for sampling
@@ -657,7 +665,7 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
                f"--stream-fd={stream_fd_val}"]
     else:
         if draft is None:
-            raise SystemExit("qwen35 arch requires --draft model.safetensors")
+            raise SystemExit("qwen35 arch requires --draft <draft.gguf|model.safetensors>")
         cmd = [bin_abs, str(target), str(draft), "--daemon",
                "--fast-rollback", "--ddtree", f"--ddtree-budget={budget}",
                f"--max-ctx={max_ctx}",
@@ -1463,7 +1471,11 @@ def build_app(target: Path, draft: Path | None, bin_path: Path, budget: int, max
         )
 
         msg: dict = {"role": "assistant"}
-        finish_reason = "stop"
+        # length cap hit when collected token count reached gen_len; otherwise
+        # the daemon stopped naturally (EOS / stop-sequence). The previous code
+        # always emitted "stop", which hid the truncation from clients like
+        # open-webui that retry on finish_reason="length".
+        finish_reason = "length" if len(tokens) >= gen_len else "stop"
         if reasoning:
             msg["reasoning_content"] = reasoning
         if tool_calls:
@@ -2360,10 +2372,8 @@ def main():
     if args.fa_window is not None:
         os.environ["DFLASH27B_FA_WINDOW"] = str(args.fa_window)
 
-    if args.target_gpu is not None:
-        os.environ["DFLASH_TARGET_GPU"] = str(args.target_gpu)
-    if args.draft_gpu is not None:
-        os.environ["DFLASH_DRAFT_GPU"] = str(args.draft_gpu)
+    placement = resolve_server_placement(args)
+    placement.apply_env(os.environ)
 
     if args.prefill_compression != "off":
         os.environ.setdefault("DFLASH27B_LM_HEAD_FIX", "0")
@@ -2410,36 +2420,18 @@ def main():
         drafter_tokenizer = AutoTokenizer.from_pretrained(
             prefill_cfg.drafter_tokenizer_id, trust_remote_code=True)
 
-    extra_daemon_cfg = TestDflashLaunchArgs(
-        draft_feature_mirror=args.draft_feature_mirror,
-        peer_access=args.peer_access,
-    )
-    if args.target_gpus:
-        extra_daemon_cfg = TestDflashLaunchArgs(
-            draft_feature_mirror=args.draft_feature_mirror,
-            peer_access=args.peer_access,
-            target_gpus=args.target_gpus,
-            target_layer_split=args.target_layer_split,
-            # Keep sharded daemon behavior aligned with the single-GPU server path.
-            target_split_load_draft=True,
-            target_split_dflash=True,
-        )
-        # Multi-GPU daemon mode currently does not implement SNAPSHOT/RESTORE.
-        if args.prefix_cache_slots > 0 or args.prefill_cache_slots > 0:
-            print("  [cfg] target-gpus daemon mode disables prefix/full cache slots (snapshot protocol unsupported)")
-            args.prefix_cache_slots = 0
-            args.prefill_cache_slots = 0
-    extra_daemon = extra_daemon_cfg.to_cli_args()
+    if placement.cache_slots_disabled:
+        print("  [cfg] target-gpus daemon mode disables prefix/full cache slots (snapshot protocol unsupported)")
 
     app = build_app(args.target, draft, args.bin, args.budget, args.max_ctx,
                     tokenizer, stop_ids,
                     prefill_cfg=prefill_cfg if prefill_cfg.enabled else None,
                     drafter_tokenizer=drafter_tokenizer,
-                    prefix_cache_slots=args.prefix_cache_slots,
-                    prefill_cache_slots=args.prefill_cache_slots,
+                    prefix_cache_slots=placement.prefix_cache_slots,
+                    prefill_cache_slots=placement.prefill_cache_slots,
                     prefill_cache_bytes=args.prefill_cache_bytes,
                     arch=arch,
-                    extra_daemon_args=extra_daemon or None,
+                    extra_daemon_args=placement.daemon_args or None,
                     lazy_draft=args.lazy_draft,
                     verbose_daemon=args.verbose_daemon)
 
@@ -2457,6 +2449,8 @@ def main():
     print(f"  budget    = {args.budget}")
     print(f"  max_ctx   = {args.max_ctx}")
     print(f"  tokenizer = {tokenizer_id}")
+    for line in placement.log_lines():
+        print(line)
     if args.lazy_draft:
         print("  lazy_draft= ON (decode draft parked when idle)")
     if args.verbose_daemon:

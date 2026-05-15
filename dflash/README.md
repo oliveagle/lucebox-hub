@@ -9,10 +9,9 @@
 <h1 align="center">Luce DFlash</h1>
 
 <p align="center">
-  <strong>The first GGUF port of DFlash speculative decoding.</strong><br/>
-  Qwen3.5-27B at up to 207 tok/s<sup>*</sup> on a single RTX 3090 (HumanEval 10-prompt bench mean 129.5 tok/s at DDTree budget=22). 128K context on 24 GB.<br/>
-  3.43× faster than autoregressive (+15% over chain spec decoding), 2.8× faster than SGLang AWQ.<br/>
-  <sub><sup>*</sup>Demo run: 207.6 tok/s DFlash vs 38.0 tok/s AR (5.46×).</sub><br/><br/>
+  <strong>GGUF DFlash speculative decoding for Qwen3.5/Qwen3.6 27B.</strong><br/>
+  C++/CUDA runtime on top of ggml. Default path: Qwen3.6-27B Q4_K_M target + Lucebox Q8_0 GGUF DFlash draft.<br/>
+  Qwen3.5 reference: 129.5 tok/s mean on HumanEval (3.43x vs AR); best demo run: 207.6 tok/s vs 38.0 tok/s AR (5.46x).<br/><br/>
   <a href="https://lucebox.com/blog/dflash27b">Blog post</a> · <a href="RESULTS.md">Benchmarks</a> · <a href="https://discord.gg/yHfswqZmJQ">Discord</a> · <a href="https://lucebox.com">lucebox.com</a>
 </p>
 
@@ -29,21 +28,19 @@ Math500               37.71        110.51          2.93x
 GSM8K                 37.65         96.15          2.55x
 ```
 
-> Consumer GPUs can run 27B models at chat-grade speed without multi-GPU, without batching, without quantization compromises. The bottleneck was never hardware. It was the decoding algorithm.
+## Overview
 
-## The gap we filled
+DFlash is a speculative decoder. A small draft proposes multiple tokens, and the target verifies them in one forward pass. DDTree verifies a tree of candidates instead of a single chain, which improves acceptance length at the same target compute budget.
 
-On a 24 GB RTX 3090 with Q4_K_M weights, autoregressive decode of Qwen3.5-27B hits ~37.7 tok/s regardless of framework. Every token reads the full model from VRAM.
+This repo provides the GGUF target path and runtime pieces needed to run that stack on consumer GPUs:
 
-Speculative decoding breaks that ceiling: a tiny draft proposes multiple tokens per step, the target verifies them in one forward. [DFlash (z-lab, 2026)](https://arxiv.org/abs/2602.06036) takes this further with **block-diffusion drafting**: a 5-layer non-causal denoising draft conditioned on captured target hidden states. Accepts ~8 tokens/step vs ~3 for chain EAGLE. The official draft is [`z-lab/Qwen3.5-27B-DFlash`](https://huggingface.co/z-lab/Qwen3.5-27B-DFlash). [DDTree (Ringel & Romano, 2026)](https://arxiv.org/abs/2604.12989) adds tree-structured verify on top, recovering the last 30% of the speedup.
+- C++/CUDA decode loop on top of ggml, without libllama or PyTorch at runtime.
+- Qwen3.5/Qwen3.6 `qwen35` GGUF target support.
+- DFlash draft loading from GGUF or safetensors.
+- DDTree verify with tree-aware SSM rollback kernels.
+- TQ3_0 and asymmetric K/V cache quantization for long context.
 
-**What was missing:** no public implementation ran either on consumer hardware. z-lab targets BF16 on B200 (60+ GB VRAM). No GGUF path. No DDTree port. AWQ INT4 of the target + BF16 draft doesn't leave room for the verify tree on 24 GB.
-
-Q4_K_M GGUF (~16 GB) is the largest quantization that fits target + 3.46 GB draft + budget=22 tree state + KV cache on one RTX 3090. Picking it forced the port onto ggml, the only runtime with first-class Gated DeltaNet CUDA kernels and a GGUF Q4_K_M loader. This repo is that port:
-
-- ~2000 lines of C++/CUDA on top of ggml (no libllama, no Python runtime)
-- a pinned fork of llama.cpp at [`Luce-Org/llama.cpp@luce-dflash`](https://github.com/Luce-Org/llama.cpp/tree/luce-dflash) that adds three tree-mode ggml ops: `ggml_ssm_conv_tree`, `ggml_gated_delta_net_tree`, `ggml_gated_delta_net_tree_persist`
-- hardcoded for the one model pair, decoding at 129.52 tok/s mean on HumanEval
+The default setup fits on a 24 GB RTX 3090: ~16 GB Q4_K_M target, 1.84 GB GGUF draft, DDTree verify state, and KV cache.
 
 ## Results
 
@@ -129,33 +126,33 @@ python3 scripts/run.py --cache-type-k q8_0 --cache-type-v q4_0 --prompt "hello"
 
 Legacy `--kv-tq3` / `--kv-q4` / `--kv-f16` flags continue to work as symmetric shorthand for backward compatibility.
 
-## Qwen3.6-27B target (experimental)
+## Qwen3.6-27B Target
 
-Qwen3.6-27B ships the same `qwen35` architecture string and identical layer/head dims as 3.5, so `test_dflash` loads it with no code change:
+Qwen3.6-27B is the default integration path. It uses the same `qwen35` target architecture as Qwen3.5, and the docs use the Lucebox GGUF DFlash draft by default.
 
 ```bash
 # 1. target
-huggingface-cli download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
+hf download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
 
-# 2. matched 3.6 draft (gated: accept terms + set HF_TOKEN first)
-huggingface-cli download z-lab/Qwen3.6-27B-DFlash --local-dir models/draft/
+# 2. matched 3.6 draft (GGUF, used by default by scripts/run.py and server.py)
+hf download Lucebox/Qwen3.6-27B-DFlash-GGUF dflash-draft-3.6-q8_0.gguf --local-dir models/draft/
 
 # 3. bench
 DFLASH_TARGET=models/Qwen3.6-27B-Q4_K_M.gguf python3 scripts/bench_he.py --n-gen 128
 ```
 
-> The draft path is fixed at `models/draft/model.safetensors`; swapping targets requires also swapping the draft file (or pointing `DFLASH_DRAFT` at a different `model.safetensors`).
+The default draft path is discovered under `models/draft/`. Scripts prefer `dflash-draft-*.gguf`, then any `.gguf`, then `model.safetensors`. Explicit `.gguf` and safetensors drafts still work via `DFLASH_DRAFT` / `--draft`; qwen35-compatible targets remain swappable via `DFLASH_TARGET` / `--target`.
 
-**Throughput is lower than on 3.5.** z-lab published a matched [Qwen3.6-27B-DFlash](https://huggingface.co/z-lab/Qwen3.6-27B-DFlash) draft on 2026-04-26 (still under training). AL should climb as the draft matures. Measured on the same RTX 3090:
+Reference measurements from the Qwen3.6 bring-up on RTX 3090:
 
 | Target | Draft | Bench | AL | Accept | Mean tok/s |
 |---|---|---|---:|---:|---:|
 | Qwen3.5-27B Q4_K_M | z-lab/Qwen3.5-27B-DFlash | HumanEval (README config) | 8.33 | ~65% | 134.78 |
 | Qwen3.6-27B Q4_K_M | z-lab/Qwen3.5-27B-DFlash (mismatch) | HumanEval (10 prompts, n_gen=128) | 4.74 | 30.6% | 73.67 |
-| Qwen3.6-27B Q4_K_M | z-lab/Qwen3.6-27B-DFlash (still training) | HumanEval (10 prompts, n_gen=128) | 5.05 | 32.3% | 77.77 |
+| Qwen3.6-27B Q4_K_M | z-lab/Qwen3.6-27B-DFlash safetensors | HumanEval (10 prompts, n_gen=128) | 5.05 | 32.3% | 77.77 |
 | Qwen3.6-27B Q4_K_M | z-lab/Qwen3.5-27B-DFlash (mismatch) | Math (10 prompts, n_gen=128) | 3.63 | 23.7% | 57.00 |
 
-Full `bench_llm.py` suite on **Qwen3.6-27B UD-Q4_K_XL** (unsloth Dynamic 2.0, 10 prompts, n_gen=256, RTX 3090 24 GB, auto-fit `--max-ctx`):
+Full `bench_llm.py` suite on Qwen3.6-27B UD-Q4_K_XL, 10 prompts, n_gen=256, RTX 3090 24 GB, auto-fit `--max-ctx`:
 
 | Bench | AR tok/s | DFlash tok/s | AL | Speedup |
 |---|---:|---:|---:|---:|
@@ -163,10 +160,6 @@ Full `bench_llm.py` suite on **Qwen3.6-27B UD-Q4_K_XL** (unsloth Dynamic 2.0, 10
 | GSM8K | 34.89 | 59.65 | 4.43 | **1.71×** |
 | Math500 | 35.13 | 69.77 | 5.15 | **1.99×** |
 | **Mean** | 34.97 | 69.19 | 5.17 | **1.98×** |
-
-Compare to Qwen3.5-27B on the same harness: 2.87× / 2.21× / 2.56× — cross-generation drop of ~22% uniformly from the draft mismatch, but still a clean ~2× with zero retraining.
-
-Numbers will move once a Qwen3.6-matched DFlash draft lands; swap it in via `DFLASH_DRAFT=...` without rebuilding.
 
 ## Laguna-XS.2 target (experimental, Poolside MoE)
 
@@ -189,9 +182,9 @@ drives both arches end-to-end. The only thing the user changes is `--target`.
 cmake --build build --target test_dflash test_laguna_daemon pflash_daemon -j
 
 # 19 GB Q4_K_M target + 1.2 GB Qwen3-0.6B BF16 drafter + tokenizers
-huggingface-cli download Lucebox/Laguna-XS.2-GGUF laguna-xs2-Q4_K_M.gguf --local-dir models/
-huggingface-cli download unsloth/Qwen3-0.6B-GGUF Qwen3-0.6B-BF16.gguf --local-dir models/
-huggingface-cli download poolside/Laguna-XS.2 --local-dir models/Laguna-XS-2 \
+hf download Lucebox/Laguna-XS.2-GGUF laguna-xs2-Q4_K_M.gguf --local-dir models/
+hf download unsloth/Qwen3-0.6B-GGUF Qwen3-0.6B-BF16.gguf --local-dir models/
+hf download poolside/Laguna-XS.2 --local-dir models/Laguna-XS-2 \
     --include 'tokenizer*' '*.json'
 
 # OpenAI-compatible HTTP server (same scripts/server.py used for qwen35).
@@ -235,7 +228,7 @@ python3 scripts/laguna_pflash_niah.py \
 | 131 072 | Q4_0 | 0.20 |       11.20 |              13.55 |         24.75 s |  ✅  |
 | 131 072 | Q4_0 | 0.30 |       11.41 |              26.43 |         37.84 s |  ✅  |
 
-The **131K @ keep=0.10 PASS** is the surprising result. Earlier scaffolding had this point failing because pflash drops chunk-boundary tokens, truncating multi-token needles like `BLUEHORIZON-7421` to their first kept fragment (`BLUEH`). The fix lives in `scripts/laguna_pflash_niah.py::cross_tok_compressed`: recover kept-token positions by greedy subsequence-match against the original drafter IDs, group consecutive positions into runs, expand each run outward until both endpoints sit on whitespace, then decode the union once. The expanded set is a **superset** of the kept tokens, so semantic compression is preserved while broken words are pulled back together. This rescued every failing (ctx, keep) point at 64K and 131K.
+The 131K `keep=0.10` run depends on token-boundary repair in `scripts/laguna_pflash_niah.py::cross_tok_compressed`. The driver recovers kept-token positions, groups consecutive runs, expands each run to whitespace boundaries, and decodes the union once. That keeps multi-token needles intact after compression.
 
 ### Real-prompt NIAH (code corpus filler)
 
@@ -296,12 +289,12 @@ cd lucebox-hub/dflash
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=86
 cmake --build build --target test_dflash -j
 
-# Fetch models: ~16 GB target + 3.46 GB draft.
+# Fetch models: ~16 GB target + 1.84 GB Lucebox Q8_0 GGUF DFlash draft.
 # Quickstart pins to Qwen3.6-27B (latest release). For Qwen3.5-27B swap in
 # unsloth/Qwen3.5-27B-GGUF + z-lab/Qwen3.5-27B-DFlash; arch is identical so
-# no rebuild is needed (see "Qwen3.6-27B target" section above for AL deltas).
-huggingface-cli download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
-huggingface-cli download z-lab/Qwen3.6-27B-DFlash model.safetensors --local-dir models/draft/
+# no rebuild is needed.
+hf download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir models/
+hf download Lucebox/Qwen3.6-27B-DFlash-GGUF dflash-draft-3.6-q8_0.gguf --local-dir models/draft/
 
 # Streaming one-shot generate (run.py defaults to models/Qwen3.6-27B-Q4_K_M.gguf;
 # override with --target or DFLASH_TARGET=... env var).
@@ -324,7 +317,7 @@ python3 scripts/bench_he.py --n-gen 256 --ddtree-budget 22   # minimal HE bench
 ```bash
 DFLASH27B_KV_TQ3=1 DFLASH27B_PREFILL_UBATCH=16 \
   build/test_dflash models/Qwen3.6-27B-Q4_K_M.gguf \
-  models/draft/model.safetensors /tmp/long_prompt.bin 64 /tmp/out.bin \
+  models/draft/dflash-draft-3.6-q8_0.gguf /tmp/long_prompt.bin 64 /tmp/out.bin \
   --fast-rollback --ddtree --ddtree-budget=16 --max-ctx=4096   # align_up(prompt + n_gen + 64, 256); raise up to 262144 for long prompts
 ```
 
@@ -365,13 +358,14 @@ The DeltaNet primitive is already a first-class ggml op (`ggml_gated_delta_net`)
 
 ## Scope and limits
 
-Research proof-of-concept, not production.
+Current scope:
 
 - **Batch size 1**, single-user local inference target (Ollama / LM Studio use case)
-- **One model pair**: Qwen3.5-27B Q4_K_M target + z-lab DFlash BF16 draft. Does not generalize without rewriting the graph builders.
+- **Target family**: Qwen3.5/Qwen3.6 `qwen35` GGUF targets. Other architectures need their own graph builder.
+- **Draft formats**: DFlash GGUF drafts and z-lab-style safetensors drafts.
 - **Optional sampling**: `temperature`, `top_p`, `top_k`, `seed`, and `frequency_penalty` are honored on the OpenAI endpoint. The DDTree verify skeleton stays argmax (preserves accept rate); only the *committed* token at each verify step is drawn from a small CPU sampler chain (rep-pen → top-k → top-p → temp → multinomial). `temperature=0` (default) keeps the path bit-exact greedy. Full Leviathan-style rejection sampling on the tree is still a future addition.
-- **CUDA sm_60+ / sm_110 Thor**. Pascal (sm_60–69) uses scalar fallback with no tensor cores; Volta (sm_70) and Turing (sm_75) use F16 WMMA kernels; Ampere (sm_86+) and later use native BF16 WMMA. No Metal, ROCm, multi-GPU.
-- **Q4_K_M target** costs ~30 points of per-position accept vs the paper's BF16. Q5_K_M / Q6_K would recover most of it, if they fit.
+- **Backends**: CUDA is the primary path. CUDA sm_60+ is supported: Pascal (sm_60-69) uses scalar F16 fallback, Volta/Turing (sm_70-75) use F16 WMMA kernels, and Ampere+ use native BF16 WMMA. HIP support exists for the documented AMD path. No Metal.
+- **Quantized target**: Q4_K_M fits the full stack on 24 GB. Higher target quantizations may improve acceptance if they fit.
 
 Correctness: `test_vs_oracle` validates the draft graph at cos sim 0.999812 vs the PyTorch reference. The target graph matches llama.cpp's `models/qwen35.cpp` semantically and produces bit-identical output to `test_generate` in autoregressive mode.
 

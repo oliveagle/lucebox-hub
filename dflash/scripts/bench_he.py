@@ -16,7 +16,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from placement.backend_device import apply_backend_visible_devices, TestDflashLaunchArgs
+from placement.backend_device import apply_backend_visible_devices
+from placement.test_dflash_args import TestDflashLaunchArgs
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,7 +26,7 @@ TARGET = os.environ.get(
     "DFLASH_TARGET",
     str(ROOT / "models" / "Qwen3.6-27B-Q4_K_M.gguf"),
 )
-_LOCAL_DRAFT_FILE = ROOT / "models" / "draft" / "model.safetensors"
+_LOCAL_DRAFT_FILE = ROOT / "models" / "draft" / "dflash-draft-3.6-q8_0.gguf"
 _LOCAL_DRAFT_ROOT = ROOT / "models" / "draft"
 DRAFT = None
 TEST_DFLASH = os.environ.get(
@@ -185,10 +186,10 @@ def _find_draft_file(root: Path) -> str | None:
         return str(root) if root.suffix in (".safetensors", ".gguf") else None
     if not root.is_dir():
         return None
-    for st in root.rglob("model.safetensors"):
-        return str(st)
-    for gguf in root.rglob("*.gguf"):
-        return str(gguf)
+    for pattern in ("dflash-draft-*.gguf", "*.gguf", "model.safetensors"):
+        matches = sorted(root.rglob(pattern))
+        if matches:
+            return str(matches[0])
     return None
 
 

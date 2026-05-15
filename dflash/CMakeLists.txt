@@ -98,7 +98,8 @@ option(DFLASH27B_HIP_SM80_EQUIV
 # (defaulting to gfx1151 / Strix Halo) and pass it through to the HIP
 # toolchain and ggml backend.
 if(DFLASH27B_GPU_BACKEND STREQUAL "cuda")
-    # Volta (70), Turing (75) and Ampere (86) always; Blackwell consumer (120) and Thor
+    # Pascal (60/61/62), Volta (70), Turing (75) and Ampere (86) always;
+    # Blackwell consumer (120) and Thor
     # (110 on CUDA 13+) added when nvcc supports them. DGX Spark /
     # GB10 is compute capability 12.1 (121), added at CUDA 12.9+.
     if(DFLASH27B_USER_CUDA_ARCHITECTURES)
@@ -193,6 +194,7 @@ set(DFLASH27B_SRC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/qwen35
     ${CMAKE_CURRENT_SOURCE_DIR}/src/laguna
     ${CMAKE_CURRENT_SOURCE_DIR}/src/qwen3
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/gemma4
 )
 
 add_library(dflash27b STATIC
@@ -205,6 +207,12 @@ add_library(dflash27b STATIC
     src/qwen3/qwen3_drafter.cpp
     src/qwen3/qwen3_loader.cpp
     src/qwen3/qwen3_graph.cpp
+    src/qwen3/qwen3_backend.cpp
+    src/qwen3/qwen3_daemon.cpp
+    src/gemma4/gemma4_loader.cpp
+    src/gemma4/gemma4_graph.cpp
+    src/gemma4/gemma4_backend.cpp
+    src/gemma4/gemma4_daemon.cpp
     src/flashprefill_q8.cpp
     src/kv_cache.cpp
     src/kv_quant.cpp
@@ -213,7 +221,24 @@ add_library(dflash27b STATIC
     src/laguna/laguna_target_loader.cpp
     src/laguna/laguna_target_graph.cpp
     src/laguna/laguna_daemon.cpp
+    src/laguna/laguna_backend.cpp
+    src/qwen35/draft_feature_mirror.cpp
+    src/qwen35/graph_builders.cpp
+    src/qwen35/feature_copy.cpp
+    src/qwen35/draft_ipc.cpp
+    src/qwen35/layer_split_forward.cpp
+    src/qwen35/layer_split_daemon.cpp
+    src/qwen35/spec_decode.cpp
+    src/qwen35/qwen35_backend.cpp
+    src/qwen35/qwen35_dflash_target.cpp
+    src/qwen35/layer_split_daemon_loop.cpp
+    src/qwen35/qwen35_daemon.cpp
     src/common/sampler.cpp
+    src/common/daemon_loop.cpp
+    src/common/gguf_inspect.cpp
+    src/common/layer_split_utils.cpp
+    src/common/ddtree.cpp
+    src/common/peer_access.cpp
 )
 # BSA (Block-Sparse Attention) backs the speculative-prefill drafter scoring
 # path. Default ON so prefill is fast out of the box. Turn OFF if you don't
@@ -240,7 +265,8 @@ if(DFLASH27B_GPU_BACKEND STREQUAL "cuda")
     string(REGEX REPLACE "[^0-9]" "" _dflash27b_cuda_min_sm "${_dflash27b_cuda_min_sm}")
     target_compile_definitions(dflash27b PRIVATE
         DFLASH27B_BACKEND_CUDA=1
-        DFLASH27B_CUDA_MIN_SM=${_dflash27b_cuda_min_sm})
+        DFLASH27B_CUDA_MIN_SM=${_dflash27b_cuda_min_sm}
+        DFLASH27B_MIN_SM=${_dflash27b_cuda_min_sm})
 elseif(DFLASH27B_GPU_BACKEND STREQUAL "hip")
     set_target_properties(dflash27b PROPERTIES HIP_ARCHITECTURES "${_dflash27b_archs}")
     target_compile_definitions(dflash27b PRIVATE DFLASH27B_BACKEND_HIP=1 GGML_USE_HIP)
@@ -315,7 +341,9 @@ elseif(DFLASH27B_GPU_BACKEND STREQUAL "cuda")
     endif()
 
     if(_dflash_has_sm80)
-        target_sources(dflash27b PRIVATE src/flashprefill_kernels.cu)
+        target_sources(dflash27b PRIVATE
+            src/flashprefill_kernels.cu
+            src/pflash_ggml_adapter.cpp)
         target_compile_definitions(dflash27b PRIVATE
             DFLASH27B_HAVE_CUDA_WMMA_FLASHPREFILL=1
             DFLASH27B_HAVE_SM80_FLASHPREFILL=1)
@@ -583,5 +611,18 @@ if(DFLASH27B_TESTS)
             target_link_libraries(${_t} PRIVATE CUDA::cudart)
         endif()
     endforeach()
+
+    # Gated on the same condition as src/pflash_ggml_adapter.cpp above:
+    # the adapter is only compiled into dflash27b when the CUDA arch list
+    # includes an sm_80+ target, so this test can only link there too.
+    if(DFLASH27B_GPU_BACKEND STREQUAL "cuda" AND _dflash_has_sm80
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_flash_attn_sparse.cpp")
+        add_executable(test_flash_attn_sparse test/test_flash_attn_sparse.cpp)
+        target_link_libraries(test_flash_attn_sparse PRIVATE dflash27b ggml ggml-cuda ggml-base)
+        target_include_directories(test_flash_attn_sparse PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/ggml/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/ggml/src
+            ${DFLASH27B_SRC_INCLUDE_DIRS})
+    endif()
     endif()
 endif()

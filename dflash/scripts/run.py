@@ -41,11 +41,12 @@ def resolve_draft(draft_dir: str) -> str:
     if p.is_file():
         return str(p)
     if p.is_dir():
-        for st in p.rglob("model.safetensors"):
-            return str(st)
+        for pattern in ("dflash-draft-*.gguf", "*.gguf", "model.safetensors"):
+            for draft in sorted(p.rglob(pattern)):
+                return str(draft)
 
     raise FileNotFoundError(
-        f"no model.safetensors under {draft_dir}. Download it as documented in the README, or pass --draft explicitly."
+        f"no DFlash draft GGUF or model.safetensors under {draft_dir}. Download it as documented in the README, or pass --draft explicitly."
     )
 
 
