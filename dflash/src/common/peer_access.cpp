@@ -1,7 +1,10 @@
 #include "peer_access.h"
 #include "internal.h"   // dflash_cuda_copy_between_devices
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <vector>
 
 namespace dflash27b {
 

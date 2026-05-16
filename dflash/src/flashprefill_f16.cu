@@ -241,15 +241,22 @@ __global__ void sparse_flash_forward_kernel_f16(
     const int lane = threadIdx.x & 31;        // 0..31 (lane within warp)
 
     // Shared memory: Q + KV (aliased) + P + row max/logsum
+    // Each warp (wid=0,1) needs its own Q_TILE floats of row_m and row_l.
+    // Total: Q_TILE*2 floats for row_m + Q_TILE*2 floats for row_l.
+    // Q_TILE*2 = 128, so we need 128 floats for row_m + 128 for row_l.
+    // P_sh starts at offset Q_TILE*K_TILE. We need row_m + row_l after that.
+    // Since P_sh is Q_TILE*K_TILE = 64*64 = 4096 halfs.
     extern __shared__ unsigned char smem_raw[];
     half * Q_sh  = reinterpret_cast<half*>(smem_raw);
     half * KV_sh = Q_sh + (size_t)Q_TILE * D_HEAD;
     half * P_sh  = KV_sh + (size_t)K_TILE * D_HEAD;
     float * row_m = reinterpret_cast<float*>(P_sh + (size_t)Q_TILE * K_TILE);
-    float * row_l = row_m + Q_TILE;
+    float * row_l = row_m + Q_TILE * 2;  // Separate space for each warp's row_l
 
-    if (threadIdx.x < Q_TILE) {
+    if (threadIdx.x < Q_TILE * 2) {
         row_m[threadIdx.x] = -INFINITY;
+    }
+    if (threadIdx.x < Q_TILE * 2) {
         row_l[threadIdx.x] = 0.0f;
     }
 
@@ -384,7 +391,7 @@ __global__ void sparse_flash_forward_kernel_f16(
                 float val = lm[row];
                 #pragma unroll
                 for (int mask = 16; mask > 0; mask >>= 1) {
-                    val = fmaxf(val, __shfl_xor_sync(0xffffffff, val, mask));
+                    val = fmaxf(val, __shfl_xor_sync(0xffffffff, val, mask, 32));
                 }
                 lm[row] = val;
             }
@@ -435,7 +442,7 @@ __global__ void sparse_flash_forward_kernel_f16(
                 float val = rs[row];
                 #pragma unroll
                 for (int mask = 16; mask > 0; mask >>= 1) {
-                    val += __shfl_xor_sync(0xffffffff, val, mask);
+                    val += __shfl_xor_sync(0xffffffff, val, mask, 32);
                 }
                 rs[row] = val;
             }
@@ -557,7 +564,7 @@ extern "C" void launch_sparse_flash_forward_f16(
         size_t smem_bytes = sizeof(half) * (Q_TILE * D_HEAD)
                            + sizeof(half) * (K_TILE * D_HEAD)
                            + sizeof(half) * (Q_TILE * K_TILE)
-                           + sizeof(float) * (2 * Q_TILE);
+                           + sizeof(float) * (Q_TILE * 4);  // row_m (Q_TILE*2) + row_l (Q_TILE*2)
         dim3 block64(64, 1, 1);
         cudaFuncSetAttribute(
             (const void*)sparse_flash_forward_kernel_f16<Q_TILE, K_TILE, BLOCK, D_HEAD>,
@@ -574,6 +581,11 @@ extern "C" void launch_sparse_flash_forward_f16(
             s_O_b, s_O_n, s_O_h, s_O_d,
             s_idx_b, s_idx_m, s_idx_n, s_idx_h,
             s_cnt_b, s_cnt_m, s_cnt_h);
+        // Check for async errors immediately after kernel launch
+        cudaError_t e = cudaGetLastError();
+        if (e != cudaSuccess) {
+            return;  // Error will be caught by the sync wrapper
+        }
     }
 }
 
@@ -616,7 +628,7 @@ __global__ void block_select_kernel(
     }
     #pragma unroll
     for (int off = 16; off > 0; off >>= 1)
-        local_max = fmaxf(local_max, __shfl_xor_sync(0xffffffff, local_max, off));
+        local_max = fmaxf(local_max, __shfl_xor_sync(0xffffffff, local_max, off, 32));
     const float max_score = local_max;
     const float thresh = max_score * alpha;
 
