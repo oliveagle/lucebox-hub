@@ -1,6 +1,8 @@
-// GGUF loader for Qwen3-0.6B drafter. Reads weights from a BF16 GGUF file
-// produced by `convert_hf_to_gguf.py Qwen/Qwen3-0.6B`. Sets up ggml tensors
-// on the requested backend.
+// GGUF loader for Qwen3-0.6B drafter. Reads weights from a GGUF file produced
+// by `convert_hf_to_gguf.py Qwen/Qwen3-0.6B`. Sets up ggml tensors on the
+// requested backend. On GPUs with native BF16 tensor cores (sm_80+), weights
+// are kept as BF16; on older GPUs (sm_70 V100, sm_75 Turing) they are converted
+// to F16 at load time for WMMA acceleration.
 //
 // Tensor layout (verified via gguf reader):
 //   token_embd.weight                 BF16 [hidden=1024, vocab=151936]
@@ -41,14 +43,49 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+#if defined(DFLASH27B_BACKEND_CUDA)
+#include <cuda_runtime.h>
+#endif
 
 namespace dflash27b {
 
 namespace {
 
+// Detect whether the GPU supports native BF16 tensor cores.
+// sm_80+ (Ampere+) has native BF16 WMMA; sm_70 (Volta) and sm_75 (Turing) do not.
+static bool gpu_has_native_bf16() {
+#if defined(DFLASH27B_BACKEND_CUDA)
+    cudaDeviceProp prop{};
+    if (cudaGetDeviceProperties(&prop, 0) == cudaSuccess) {
+        const int sm = prop.major * 10 + prop.minor;
+        return sm >= 80;
+    }
+#endif
+    // Fallback: assume no native BF16.
+    return false;
+}
+
+// Convert an array of bf16 values to fp16 via f32 intermediate.
+static void bf16_to_f16_array(const uint16_t * src, uint16_t * dst, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        uint32_t bits = ((uint32_t)src[i]) << 16;
+        float f;
+        std::memcpy(&f, &bits, 4);
+        uint32_t u;
+        std::memcpy(&u, &f, 4);
+        uint32_t sign = (u >> 16) & 0x8000;
+        int32_t  exp  = ((u >> 23) & 0xFF) - 127 + 15;
+        uint32_t mant = (u >> 13) & 0x03FF;
+        if (exp <= 0)       dst[i] = (uint16_t)sign;
+        else if (exp >= 31) dst[i] = (uint16_t)(sign | 0x7C00);
+        else                dst[i] = (uint16_t)(sign | (exp << 10) | mant);
+    }
+}
+
 bool copy_tensor_from_file(gguf_context * gctx, const char * name,
                            const void * mmap_base, size_t data_offset,
-                           ggml_tensor * dst) {
+                           ggml_tensor * dst,
+                           const bool is_bf16_in_file, const bool convert_to_f16) {
     int idx = gguf_find_tensor(gctx, name);
     if (idx < 0) {
         std::fprintf(stderr, "[qwen3-0.6b] missing tensor: %s\n", name);
@@ -57,7 +94,16 @@ bool copy_tensor_from_file(gguf_context * gctx, const char * name,
     const size_t off = gguf_get_tensor_offset(gctx, idx);
     const size_t bytes = ggml_nbytes(dst);
     const uint8_t * src = (const uint8_t *)mmap_base + data_offset + off;
-    ggml_backend_tensor_set(dst, src, 0, bytes);
+
+    if (is_bf16_in_file && convert_to_f16) {
+        // File has BF16 data but we allocated an F16 tensor: convert.
+        const size_t n = bytes / 2;  // half the bytes for F16
+        std::vector<uint16_t> f16(n);
+        bf16_to_f16_array((const uint16_t *)src, f16.data(), n);
+        ggml_backend_tensor_set(dst, f16.data(), 0, n * sizeof(uint16_t));
+    } else {
+        ggml_backend_tensor_set(dst, src, 0, bytes);
+    }
     return true;
 }
 
@@ -96,6 +142,37 @@ bool load_qwen3_drafter_model(const std::string & path,
     out.head_dim   = (int)get_u32(gctx, "qwen3.attention.key_length", 128);
     out.rope_theta = get_f32(gctx, "qwen3.rope.freq_base", 1000000.0f);
 
+    // Detect the actual weight tensor type from the GGUF file.
+    // Skip the first few tensors which may be metadata (e.g., token_embd.weight is the first weight).
+    // We look for token_embd.weight specifically.
+    const int embd_idx = gguf_find_tensor(gctx, "token_embd.weight");
+    const ggml_type file_tensor_type = (embd_idx >= 0)
+        ? gguf_get_tensor_type(gctx, embd_idx)
+        : GGML_TYPE_BF16;  // default guess
+
+    const bool file_has_bf16 = (file_tensor_type == GGML_TYPE_BF16);
+    const bool file_has_f16 = (file_tensor_type == GGML_TYPE_F16);
+    const bool file_has_quantized = !file_has_bf16 && !file_has_f16;
+
+    if (file_has_quantized) {
+        const char* type_name = ggml_type_name(file_tensor_type);
+        std::fprintf(stderr, "[qwen3-0.6b] ERROR: GGUF file has quantized weights (%s), "
+                        "but the drafter only supports BF16/F16 weights.\n", type_name);
+        std::fprintf(stderr, "[qwen3-0.6b] Please use a BF16 or F16 GGUF file, "
+                        "or convert from HF: python convert_hf_to_gguf.py Qwen/Qwen3-0.6B --outtype f16\n");
+        gguf_free(gctx);
+        return false;
+    }
+
+    // On sm_70/75, convert BF16 weights to F16 for WMMA acceleration.
+    const bool gpu_native_bf16 = gpu_has_native_bf16();
+    const bool use_f16 = !gpu_native_bf16 && file_has_bf16;
+
+    const ggml_type wtype = use_f16 ? GGML_TYPE_F16 : file_tensor_type;
+
+    std::fprintf(stderr, "[qwen3-0.6b] file_type=%s target_type=%s (native_bf16=%d)\n",
+                ggml_type_name(file_tensor_type), ggml_type_name(wtype), gpu_native_bf16);
+
     // Compute total tensor metadata size for context allocation.
     const int n_layer = out.n_layer;
     const int n_tensors_per_layer = 11;
@@ -118,9 +195,9 @@ bool load_qwen3_drafter_model(const std::string & path,
     const int kv_dim    = n_head_kv * head_dim;
 
     // Top-level tensors.
-    out.tok_embd = ggml_new_tensor_2d(out.ctx, GGML_TYPE_BF16, n_embd, n_vocab);
+    out.tok_embd = ggml_new_tensor_2d(out.ctx, wtype, n_embd, n_vocab);
     out.out_norm = ggml_new_tensor_1d(out.ctx, GGML_TYPE_F32, n_embd);
-    out.output   = ggml_new_tensor_2d(out.ctx, GGML_TYPE_BF16, n_embd, n_vocab);
+    out.output   = ggml_new_tensor_2d(out.ctx, wtype, n_embd, n_vocab);
     ggml_set_name(out.tok_embd, "token_embd.weight");
     ggml_set_name(out.out_norm, "output_norm.weight");
     ggml_set_name(out.output,   "output.weight");
@@ -129,16 +206,16 @@ bool load_qwen3_drafter_model(const std::string & path,
     for (int il = 0; il < n_layer; ++il) {
         auto & L = out.layers[il];
         L.attn_norm = ggml_new_tensor_1d(out.ctx, GGML_TYPE_F32, n_embd);
-        L.wq        = ggml_new_tensor_2d(out.ctx, GGML_TYPE_BF16, n_embd, q_dim);
-        L.wk        = ggml_new_tensor_2d(out.ctx, GGML_TYPE_BF16, n_embd, kv_dim);
-        L.wv        = ggml_new_tensor_2d(out.ctx, GGML_TYPE_BF16, n_embd, kv_dim);
-        L.wo        = ggml_new_tensor_2d(out.ctx, GGML_TYPE_BF16, q_dim, n_embd);
+        L.wq        = ggml_new_tensor_2d(out.ctx, wtype, n_embd, q_dim);
+        L.wk        = ggml_new_tensor_2d(out.ctx, wtype, n_embd, kv_dim);
+        L.wv        = ggml_new_tensor_2d(out.ctx, wtype, n_embd, kv_dim);
+        L.wo        = ggml_new_tensor_2d(out.ctx, wtype, q_dim, n_embd);
         L.q_norm    = ggml_new_tensor_1d(out.ctx, GGML_TYPE_F32, head_dim);
         L.k_norm    = ggml_new_tensor_1d(out.ctx, GGML_TYPE_F32, head_dim);
         L.ffn_norm  = ggml_new_tensor_1d(out.ctx, GGML_TYPE_F32, n_embd);
-        L.ffn_gate  = ggml_new_tensor_2d(out.ctx, GGML_TYPE_BF16, n_embd, n_ff);
-        L.ffn_up    = ggml_new_tensor_2d(out.ctx, GGML_TYPE_BF16, n_embd, n_ff);
-        L.ffn_down  = ggml_new_tensor_2d(out.ctx, GGML_TYPE_BF16, n_ff, n_embd);
+        L.ffn_gate  = ggml_new_tensor_2d(out.ctx, wtype, n_embd, n_ff);
+        L.ffn_up    = ggml_new_tensor_2d(out.ctx, wtype, n_embd, n_ff);
+        L.ffn_down  = ggml_new_tensor_2d(out.ctx, wtype, n_ff, n_embd);
     }
 
     out.buf = ggml_backend_alloc_ctx_tensors(out.ctx, backend);
@@ -197,14 +274,19 @@ bool load_qwen3_drafter_model(const std::string & path,
 #endif
 
     bool ok = true;
-    ok &= copy_tensor_from_file(gctx, "token_embd.weight", mm, data_off, out.tok_embd);
-    ok &= copy_tensor_from_file(gctx, "output_norm.weight", mm, data_off, out.out_norm);
+    // All weight tensors in the GGUF file are BF16/F16 (not quantized).
+    const bool is_bf16_in_file = file_has_bf16;
+    const bool convert_to_f16 = use_f16;
+    ok &= copy_tensor_from_file(gctx, "token_embd.weight", mm, data_off, out.tok_embd,
+                                is_bf16_in_file, convert_to_f16);
+    ok &= copy_tensor_from_file(gctx, "output_norm.weight", mm, data_off, out.out_norm,
+                                /*is_bf16_in_file=*/false, convert_to_f16);
     // Qwen3-0.6B ties lm_head to embed; output.weight is optional.
     if (gguf_find_tensor(gctx, "output.weight") >= 0) {
-        ok &= copy_tensor_from_file(gctx, "output.weight", mm, data_off, out.output);
+        ok &= copy_tensor_from_file(gctx, "output.weight", mm, data_off, out.output,
+                                    is_bf16_in_file, convert_to_f16);
     } else {
         // Tied weights: copy tok_embd data into output tensor
-        // Both are [n_embd, n_vocab] BF16, so sizes match
         std::vector<uint8_t> tmp(ggml_nbytes(out.tok_embd));
         ggml_backend_tensor_get(out.tok_embd, tmp.data(), 0, tmp.size());
         ggml_backend_tensor_set(out.output, tmp.data(), 0, tmp.size());
@@ -212,17 +294,39 @@ bool load_qwen3_drafter_model(const std::string & path,
     char nm[128];
     for (int il = 0; il < n_layer; ++il) {
         const auto & L = out.layers[il];
-        std::snprintf(nm, sizeof(nm), "blk.%d.attn_norm.weight",   il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.attn_norm);
-        std::snprintf(nm, sizeof(nm), "blk.%d.attn_q.weight",      il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.wq);
-        std::snprintf(nm, sizeof(nm), "blk.%d.attn_k.weight",      il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.wk);
-        std::snprintf(nm, sizeof(nm), "blk.%d.attn_v.weight",      il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.wv);
-        std::snprintf(nm, sizeof(nm), "blk.%d.attn_output.weight", il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.wo);
-        std::snprintf(nm, sizeof(nm), "blk.%d.attn_q_norm.weight", il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.q_norm);
-        std::snprintf(nm, sizeof(nm), "blk.%d.attn_k_norm.weight", il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.k_norm);
-        std::snprintf(nm, sizeof(nm), "blk.%d.ffn_norm.weight",    il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.ffn_norm);
-        std::snprintf(nm, sizeof(nm), "blk.%d.ffn_gate.weight",    il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.ffn_gate);
-        std::snprintf(nm, sizeof(nm), "blk.%d.ffn_up.weight",      il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.ffn_up);
-        std::snprintf(nm, sizeof(nm), "blk.%d.ffn_down.weight",    il); ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.ffn_down);
+        std::snprintf(nm, sizeof(nm), "blk.%d.attn_norm.weight",   il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.attn_norm,
+                                    /*is_bf16_in_file=*/false, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.attn_q.weight",      il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.wq,
+                                    is_bf16_in_file, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.attn_k.weight",      il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.wk,
+                                    is_bf16_in_file, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.attn_v.weight",      il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.wv,
+                                    is_bf16_in_file, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.attn_output.weight", il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.wo,
+                                    is_bf16_in_file, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.attn_q_norm.weight", il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.q_norm,
+                                    /*is_bf16_in_file=*/false, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.attn_k_norm.weight", il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.k_norm,
+                                    /*is_bf16_in_file=*/false, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.ffn_norm.weight",    il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.ffn_norm,
+                                    /*is_bf16_in_file=*/false, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.ffn_gate.weight",    il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.ffn_gate,
+                                    is_bf16_in_file, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.ffn_up.weight",      il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.ffn_up,
+                                    is_bf16_in_file, convert_to_f16);
+        std::snprintf(nm, sizeof(nm), "blk.%d.ffn_down.weight",    il);
+        ok &= copy_tensor_from_file(gctx, nm, mm, data_off, L.ffn_down,
+                                    is_bf16_in_file, convert_to_f16);
     }
 #if defined(_WIN32)
     UnmapViewOfFile(mm);

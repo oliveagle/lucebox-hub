@@ -56,6 +56,10 @@ int flash_prefill_forward_q8(
     ggml_gallocr_t galloc = ggml_gallocr_new(
         ggml_backend_get_default_buffer_type(backend));
 
+    // Mask buffer: reused across chunks to avoid reallocation.
+    static std::vector<uint16_t> mask_data;
+    static size_t mask_capacity = 0;
+
     for (int cs = 0; cs < S; cs += CHUNK_S) {
         const int cl     = std::min(CHUNK_S, S - cs);
         const int kv_len = cs + cl;
@@ -120,9 +124,22 @@ int flash_prefill_forward_q8(
         ggml_tensor * V_fa = ggml_cont(ctx, ggml_permute(ctx, V_view, 0, 2, 1, 3));
 
         // Causal mask: [kv_len, cl] f16
+        const size_t needed = (size_t)kv_len * cl;
+        if (needed > mask_capacity) {
+            mask_data.resize(needed * 2);
+            mask_capacity = needed * 2;
+        }
+
+        // Fill causal mask — vectorized std::fill (faster than element-wise loop).
+        for (int q_local = 0; q_local < cl; ++q_local) {
+            int q_global = cs + q_local;
+            uint16_t * row = mask_data.data() + (size_t)q_local * kv_len;
+            std::fill(row, row + q_global + 1, (uint16_t)0);
+            std::fill(row + q_global + 1, row + kv_len, (uint16_t)0xFC00);
+        }
+
         ggml_tensor * mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, kv_len, cl);
         ggml_set_name(mask, "causal_mask");
-        ggml_set_input(mask);
 
         ggml_tensor * attn = ggml_flash_attn_ext(ctx, Q_fa, K_fa, V_fa,
                                                  mask, scale, 0.0f, 0.0f);
@@ -140,21 +157,8 @@ int flash_prefill_forward_q8(
             return -1;
         }
 
-        // Fill causal mask
-        {
-            std::vector<uint16_t> mask_data((size_t)kv_len * cl);
-            const uint16_t zero_f16 = 0;
-            const uint16_t ninf_f16 = 0xFC00;
-            for (int q_local = 0; q_local < cl; ++q_local) {
-                int q_global = cs + q_local;
-                for (int k = 0; k < kv_len; ++k) {
-                    mask_data[(size_t)q_local * kv_len + k] =
-                        (k <= q_global) ? zero_f16 : ninf_f16;
-                }
-            }
-            ggml_backend_tensor_set(mask, mask_data.data(), 0,
-                                    (size_t)kv_len * cl * sizeof(uint16_t));
-        }
+        // Copy mask data to the allocated buffer after graph allocation
+        ggml_backend_tensor_set(mask, mask_data.data(), 0, needed * sizeof(uint16_t));
 
         ggml_backend_graph_compute(backend, gf);
         ggml_backend_synchronize(backend);
