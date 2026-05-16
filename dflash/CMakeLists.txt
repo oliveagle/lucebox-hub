@@ -303,6 +303,7 @@ if(DFLASH27B_GPU_BACKEND STREQUAL "hip")
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_compat)
         target_compile_definitions(dflash27b PRIVATE
             DFLASH27B_HAVE_FLASHPREFILL=1
+            DFLASH27B_HAVE_SM80_FLASHPREFILL=1
             DFLASH27B_CUDA_MIN_SM=80)
         message(STATUS "dflash: HIP Phase 2 - rocWMMA flashprefill kernels enabled")
     else()
