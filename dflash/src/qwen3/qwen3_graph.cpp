@@ -479,7 +479,10 @@ bool forward_qwen3_drafter_model(
             t_a_alloc += std::chrono::duration<double>(tA_alloc1 - tA_alloc0).count();
             auto tA0 = std::chrono::steady_clock::now();
             ggml_backend_graph_compute(w.backend, gfA);
-            ggml_backend_synchronize(w.backend);
+            // Production: skip sync for perf; use DFLASH_DEBUG_SYNC=1 to enable
+            if (std::getenv("DFLASH_DEBUG_SYNC") != nullptr) {
+                ggml_backend_synchronize(w.backend);
+            }
             auto tA1 = std::chrono::steady_clock::now();
             t_compute_a += std::chrono::duration<double>(tA1 - tA0).count();
             if (debug_first_layer) {
@@ -535,7 +538,10 @@ bool forward_qwen3_drafter_model(
                 set_last_error(std::string("flash_prefill cuda error: ") + cudaGetErrorString(e));
                 ggml_gallocr_free(galloc); cleanup_all(); return false;
             }
-            cudaDeviceSynchronize();
+            // Production: skip sync for perf; use DFLASH_DEBUG_SYNC=1 to enable
+            if (std::getenv("DFLASH_DEBUG_SYNC") != nullptr) {
+                cudaDeviceSynchronize();
+            }
 #endif
         } else if (use_f16_fp) {
 #if defined(DFLASH27B_HAVE_VOLTA_FLASHPREFILL) || defined(DFLASH27B_HAVE_PASCAL_FLASHPREFILL)
@@ -577,20 +583,22 @@ bool forward_qwen3_drafter_model(
                 ggml_gallocr_free(galloc); cleanup_all(); return false;
             }
         }
-        auto tF1 = std::chrono::steady_clock::now();
-        t_fp += std::chrono::duration<double>(tF1 - tF0).count();
-        if (debug_first_layer) {
-            std::fprintf(stderr, "[qwen3-0.6b-fp dbg] layer0 FP done compute=%.3fs\n",
-                         std::chrono::duration<double>(tF1 - tF0).count());
-            std::fflush(stderr);
-        }
-        // Debug: sync after each FP to catch memory corruption early
-        cudaError_t e_sync = cudaDeviceSynchronize();
-        if (e_sync != cudaSuccess) {
-            std::fprintf(stderr, "[qwen3-0.6b-fp] ERROR: cuda sync failed after layer %d FP: %s\n",
-                         il, cudaGetErrorString(e_sync));
-            ggml_gallocr_free(galloc); cleanup_all(); return false;
-        }
+            auto tF1 = std::chrono::steady_clock::now();
+            t_fp += std::chrono::duration<double>(tF1 - tF0).count();
+            if (debug_first_layer) {
+                std::fprintf(stderr, "[qwen3-0.6b-fp dbg] layer0 FP done compute=%.3fs\n",
+                             std::chrono::duration<double>(tF1 - tF0).count());
+                std::fflush(stderr);
+            }
+            // Production: skip sync for perf; use DFLASH_DEBUG_SYNC=1 to enable
+            if (std::getenv("DFLASH_DEBUG_SYNC") != nullptr) {
+                cudaError_t e_sync = cudaDeviceSynchronize();
+                if (e_sync != cudaSuccess) {
+                    std::fprintf(stderr, "[qwen3-0.6b-fp] ERROR: cuda sync failed after layer %d FP: %s\n",
+                                 il, cudaGetErrorString(e_sync));
+                    ggml_gallocr_free(galloc); cleanup_all(); return false;
+                }
+            }
 
         // ── Graph B (chunked, reusable): o_proj + residual + ffn + write hidden_buf ──
 #if defined(DFLASH27B_BACKEND_HIP)

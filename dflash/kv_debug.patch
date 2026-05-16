@@ -1,0 +1,16 @@
+diff --git a/dflash/src/qwen3/qwen3_drafter.cpp b/dflash/src/qwen3/qwen3_drafter.cpp
+index old..new 100644
+--- a/dflash/src/qwen3/qwen3_drafter.cpp
++++ b/dflash/src/qwen3/qwen3_drafter.cpp
+@@ -234,15 +234,20 @@
+
+     TargetCache cache;
++    // Note: DFLASH27B_KV_K / DFLASH27B_KV_V env vars control KV quantization.
++    // The drafter now respects user settings instead of forcing F16.
+     if (!create_target_cache(w, S, 0, w.backend, cache, true)) {
+         return {};
+     }
++    fprintf(stderr, "[drafter] KV types: K=%s V=%s, max_ctx=%d\n",
++        kv_type_name(cache.kv_k_type), kv_type_name(cache.kv_v_type), S);
+
+     ggml_init_params act_ip{};

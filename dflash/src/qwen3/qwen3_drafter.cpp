@@ -16,6 +16,7 @@
 #include "qwen3_drafter.h"
 #include "qwen3_drafter_model.h"
 #include "internal.h"
+#include "kv_quant.h"
 
 #include "ggml.h"
 #include "ggml-alloc.h"
@@ -231,11 +232,14 @@ static std::vector<int32_t> qwen35_score_and_compress(
     std::vector<float> running_max((size_t)n_lookahead * S, -INFINITY);
 
     TargetCache cache;
-    // Note: DFLASH27B_KV_K / DFLASH27B_KV_V env vars control KV quantization.
-    // The drafter now respects user settings instead of forcing F16.
+    // Note: Target cache is only used for Qwen35-0.8B scoring path above.
+    // Qwen3-0.6B uses forward_qwen3_drafter_model with its own persistent K/V buffers.
     if (!create_target_cache(w, S, 0, w.backend, cache, true)) {
         return {};
     }
+    // Debug: log actual KV types
+    fprintf(stderr, "[drafter] KV: K=%s V=%s max_ctx=%d\n",
+        dflash::kv_type_name(cache.kv_k_type), dflash::kv_type_name(cache.kv_v_type), S);
 
     ggml_init_params act_ip{};
     act_ip.mem_size = (size_t)8 * ggml_tensor_overhead() + 4096;
