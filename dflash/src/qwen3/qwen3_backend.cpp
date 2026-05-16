@@ -531,8 +531,11 @@ GenerateResult Qwen3Backend::generate(const GenerateRequest & req,
 
     cache_.cur_pos = 0;  // reset cache for fresh generation
 
-    // Prefill
+    // Prefill with timing
+    auto t_pf0 = std::chrono::high_resolution_clock::now();
     const int committed = do_prefill(req.prompt, io);
+    auto t_pf1 = std::chrono::high_resolution_clock::now();
+    result.prefill_s = std::chrono::duration<double>(t_pf1 - t_pf0).count();
     if (committed < 0) {
         result.error = "prefill";
         return result;
@@ -603,6 +606,7 @@ GenerateResult Qwen3Backend::generate(const GenerateRequest & req,
 
         // Continue decode — embed the first sampled token to get logits for next step
         int cur_committed = committed;
+        auto t_dec0 = std::chrono::high_resolution_clock::now();
         if (req.n_gen > 1) {
             // Embed 'first' token to get logits for the next iteration
             int32_t ft = first;
@@ -643,6 +647,8 @@ GenerateResult Qwen3Backend::generate(const GenerateRequest & req,
                 return result;
             }
         }
+        auto t_dec1 = std::chrono::high_resolution_clock::now();
+        result.decode_s = std::chrono::duration<double>(t_dec1 - t_dec0).count();
     }
 
     io.emit(-1);
