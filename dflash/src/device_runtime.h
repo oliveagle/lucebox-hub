@@ -48,6 +48,7 @@ using __nv_bfloat16 = __hip_bfloat16;
 #define cudaDeviceDisablePeerAccess hipDeviceDisablePeerAccess
 #define cudaDeviceProp hipDeviceProp_t
 #define cudaGetDeviceProperties hipGetDeviceProperties
+#define cudaMemGetInfo hipMemGetInfo
 #endif
 #else
 #include <cuda_runtime.h>
