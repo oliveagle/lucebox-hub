@@ -231,33 +231,11 @@ static std::vector<int32_t> qwen35_score_and_compress(
     std::vector<float> running_max((size_t)n_lookahead * S, -INFINITY);
 
     TargetCache cache;
-#if defined(_WIN32)
-    char *  old_tq3_raw = nullptr;
-    size_t  old_tq3_len = 0;
-    _dupenv_s(&old_tq3_raw, &old_tq3_len, "DFLASH27B_KV_TQ3");
-    const bool had_old_tq3 = (old_tq3_raw != nullptr);
-    std::string old_tq3_s  = had_old_tq3 ? old_tq3_raw : "";
-    free(old_tq3_raw);
-    _putenv_s("DFLASH27B_KV_TQ3", "0");
-    auto restore_tq3 = [&]() {
-        // _putenv_s with empty value removes the variable on MSVCRT.
-        _putenv_s("DFLASH27B_KV_TQ3", had_old_tq3 ? old_tq3_s.c_str() : "");
-    };
-#else
-    const char * old_tq3 = std::getenv("DFLASH27B_KV_TQ3");
-    std::string old_tq3_s = old_tq3 ? old_tq3 : "";
-    const bool had_old_tq3 = (old_tq3 != nullptr);
-    setenv("DFLASH27B_KV_TQ3", "0", 1);
-    auto restore_tq3 = [&]() {
-        if (had_old_tq3) setenv("DFLASH27B_KV_TQ3", old_tq3_s.c_str(), 1);
-        else unsetenv("DFLASH27B_KV_TQ3");
-    };
-#endif
+    // Note: DFLASH27B_KV_K / DFLASH27B_KV_V env vars control KV quantization.
+    // The drafter now respects user settings instead of forcing F16.
     if (!create_target_cache(w, S, 0, w.backend, cache, true)) {
-        restore_tq3();
         return {};
     }
-    restore_tq3();
 
     ggml_init_params act_ip{};
     act_ip.mem_size = (size_t)8 * ggml_tensor_overhead() + 4096;
