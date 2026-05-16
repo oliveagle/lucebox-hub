@@ -308,20 +308,26 @@ GenerateResult Qwen35Backend::generate(const GenerateRequest & req,
         sampler_rng_.seed(sampler_.seed);
     }
 
-    // Prefill
+    // Prefill with timing
+    auto t_pf0 = std::chrono::high_resolution_clock::now();
     const int committed = do_prefill(req.prompt, io, req.snap_pos, req.snap_slot);
+    auto t_pf1 = std::chrono::high_resolution_clock::now();
+    result.prefill_s = std::chrono::duration<double>(t_pf1 - t_pf0).count();
     if (committed < 0) {
         result.error = "prefill";
         return result;
     }
 
-    // Decode (speculative)
+    // Decode (speculative) with timing
+    auto t_dec0 = std::chrono::high_resolution_clock::now();
     if (req.n_gen > 0) {
         if (!do_spec_decode(committed, req.n_gen, result.tokens, io)) {
             result.error = "decode";
             return result;
         }
     }
+    auto t_dec1 = std::chrono::high_resolution_clock::now();
+    result.decode_s = std::chrono::duration<double>(t_dec1 - t_dec0).count();
 
     result.ok = true;
     return result;

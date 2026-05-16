@@ -139,6 +139,17 @@ void launch_compute_block_score_f16(
     int s_M_b, int s_M_m, int s_M_n, int s_M_h,
     cudaStream_t stream);
 
+// V100 GEMM block_score kernel (enabled via DFLASH27B_V100_GEMM_SCORE=1)
+void launch_compute_block_score_gemm_f16(
+    const void * mean_Q, const void * mean_K, float sm_scale,
+    void * score,
+    int batch, int n_q_heads, int n_k_heads,
+    int M, int head_dim,
+    int s_mQ_b, int s_mQ_m, int s_mQ_h,
+    int s_mK_b, int s_mK_m, int s_mK_h,
+    int s_S_b, int s_S_m, int s_S_n, int s_S_h,
+    cudaStream_t stream);
+
 void launch_sparse_flash_forward_f16(
     const void * Q, const void * K, const void * V, void * O,
     const int32_t * block_index, const int32_t * counts,
@@ -397,7 +408,7 @@ int flash_prefill_forward_f16_volta(
     int s_cnt_b = M * H, s_cnt_m = H, s_cnt_h = 1;
 
     // F16 mean_K (2 bytes per element, same as bf16)
-    void * dmK = nullptr;
+    void * dmK = nullptr, * dmQ = nullptr;
     float * dS = nullptr, * dM = nullptr;
     int32_t * dIdx = nullptr, * dCnt = nullptr;
     cudaError_t e;
@@ -406,6 +417,11 @@ int flash_prefill_forward_f16_volta(
     if ((e = cudaMalloc(&dM,   (size_t)B * M * N * H * sizeof(float))) != cudaSuccess) goto err;
     if ((e = cudaMalloc(&dIdx, (size_t)B * M * N * H * sizeof(int32_t))) != cudaSuccess) goto err;
     if ((e = cudaMalloc(&dCnt, (size_t)B * M * H * sizeof(int32_t))) != cudaSuccess) goto err;
+
+    static const bool use_gemm = (std::getenv("DFLASH27B_V100_GEMM_SCORE") != nullptr);
+    if (use_gemm) {
+        if ((e = cudaMalloc(&dmQ,  (size_t)B * M * H  * D * 2)) != cudaSuccess) goto err;
+    }
 
     static const bool prof = (std::getenv("DFLASH_FP_PROFILE") != nullptr);
     cudaEvent_t pE[5];
@@ -419,13 +435,28 @@ int flash_prefill_forward_f16_volta(
 
     if (prof) cudaEventRecord(pE[1]);
     // 2. block scores
-    launch_compute_block_score_f16(
-        Q, dmK, scale, dS, dM,
-        B, H, Hk, S, D, BLOCK,
-        s_Q_b, s_Q_n, s_Q_h, s_Q_d,
-        s_mK_b, s_mK_m, s_mK_h, s_mK_d,
-        s_S_b, s_S_m, s_S_n, s_S_h,
-        s_S_b, s_S_m, s_S_n, s_S_h, 0);
+    if (use_gemm) {
+        // WMMA GEMM path: mean_Q @ mean_K^T, skips the O(M²×D) scalar kernel.
+        int s_mQ_b = M * H * D, s_mQ_m = H * D, s_mQ_h = D;
+        launch_compute_mean_vector_f16(
+            Q, dmQ, B, S, H, D, BLOCK,
+            s_Q_b, s_Q_n, s_Q_h, s_Q_d,
+            s_mQ_b, s_mQ_m, s_mQ_h, 1, 0);
+        launch_compute_block_score_gemm_f16(
+            dmQ, dmK, scale, dS,
+            B, H, Hk, M, D,
+            s_mQ_b, s_mQ_m, s_mQ_h,
+            s_mK_b, s_mK_m, s_mK_h,
+            s_S_b, s_S_m, s_S_n, s_S_h, 0);
+    } else {
+        launch_compute_block_score_f16(
+            Q, dmK, scale, dS, dM,
+            B, H, Hk, S, D, BLOCK,
+            s_Q_b, s_Q_n, s_Q_h, s_Q_d,
+            s_mK_b, s_mK_m, s_mK_h, s_mK_d,
+            s_S_b, s_S_m, s_S_n, s_S_h,
+            s_S_b, s_S_m, s_S_n, s_S_h, 0);
+    }
 
     if (prof) cudaEventRecord(pE[2]);
     // 3. block_select on GPU.
@@ -463,6 +494,7 @@ int flash_prefill_forward_f16_volta(
         for (int i=0;i<5;i++) cudaEventDestroy(pE[i]);
     }
     cudaFree(dmK); cudaFree(dS); cudaFree(dM); cudaFree(dIdx); cudaFree(dCnt);
+    if (dmQ) cudaFree(dmQ);
     return 0;
 
 err:
@@ -471,6 +503,7 @@ err:
     if (dM)   cudaFree(dM);
     if (dIdx) cudaFree(dIdx);
     if (dCnt) cudaFree(dCnt);
+    if (dmQ)  cudaFree(dmQ);
     std::fprintf(stderr, "[flashprefill-f16] cudaMalloc failed: %s\n", cudaGetErrorString(e));
     return -1;
 }

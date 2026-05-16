@@ -353,13 +353,17 @@ elseif(DFLASH27B_GPU_BACKEND STREQUAL "cuda")
             CUDA_ARCHITECTURES "80;86;90;100;110;120;121")
     endif()
     if(_dflash_has_sm70)
-        target_sources(dflash27b PRIVATE src/flashprefill_f16.cu)
+        target_sources(dflash27b PRIVATE
+            src/flashprefill_f16.cu
+            src/flashprefill_f16_gemm.cu)
         target_compile_definitions(dflash27b PRIVATE
             DFLASH27B_HAVE_CUDA_WMMA_FLASHPREFILL=1
             DFLASH27B_HAVE_VOLTA_FLASHPREFILL=1)
         # F16 WMMA kernels require sm_70+.  Restrict compilation to Volta/Turing
         # so nvcuda::wmma is never instantiated for Pascal (sm_60-69).
         set_source_files_properties(src/flashprefill_f16.cu PROPERTIES
+            CUDA_ARCHITECTURES "70;75")
+        set_source_files_properties(src/flashprefill_f16_gemm.cu PROPERTIES
             CUDA_ARCHITECTURES "70;75")
     endif()
     if(_dflash_has_sm60)
@@ -624,5 +628,14 @@ if(DFLASH27B_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/ggml/src
             ${DFLASH27B_SRC_INCLUDE_DIRS})
     endif()
+    endif()
+
+    # V100 GEMM smoke test (sm_70 only)
+    if(DFLASH27B_GPU_BACKEND STREQUAL "cuda" AND _dflash_has_sm70
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_gemm_smoke.cu")
+        add_executable(test_gemm_smoke test/test_gemm_smoke.cu src/flashprefill_f16_gemm.cu)
+        set_target_properties(test_gemm_smoke PROPERTIES CUDA_ARCHITECTURES "70")
+        target_include_directories(test_gemm_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(test_gemm_smoke PRIVATE CUDA::cudart)
     endif()
 endif()

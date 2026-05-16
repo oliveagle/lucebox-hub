@@ -504,6 +504,7 @@ bool forward_qwen3_drafter_model(
         // to force the ggml path, or DFLASH_FP_USE_VOLTA_FP=1 to enable the buggy path
         // for benchmarking purposes.
         auto tF0 = std::chrono::steady_clock::now();
+        // Force ggml path for sm_70 (V100) - F16 WMMA has memory corruption bugs
         const bool use_volta_fp = std::getenv("DFLASH_FP_USE_VOLTA_FP") != nullptr;
         const bool use_bf16_fp = (Q_buf.t->type == GGML_TYPE_BF16)
 #if defined(DFLASH27B_HAVE_FLASHPREFILL) || defined(DFLASH27B_HAVE_SM80_FLASHPREFILL)
@@ -553,7 +554,13 @@ bool forward_qwen3_drafter_model(
                 set_last_error(std::string("flash_prefill-f16 cuda error: ") + cudaGetErrorString(e));
                 ggml_gallocr_free(galloc); cleanup_all(); return false;
             }
-            cudaDeviceSynchronize();
+            // Force sync to catch async errors
+            cudaError_t e_sync = cudaDeviceSynchronize();
+            if (e_sync != cudaSuccess) {
+                std::fprintf(stderr, "[qwen3-0.6b-fp] F16 cuda sync failed after layer %d: %s\n",
+                             il, cudaGetErrorString(e_sync));
+                ggml_gallocr_free(galloc); cleanup_all(); return false;
+            }
 #endif
         } else {
             int rc = flashprefill::flash_prefill_forward_q8(
@@ -576,6 +583,13 @@ bool forward_qwen3_drafter_model(
             std::fprintf(stderr, "[qwen3-0.6b-fp dbg] layer0 FP done compute=%.3fs\n",
                          std::chrono::duration<double>(tF1 - tF0).count());
             std::fflush(stderr);
+        }
+        // Debug: sync after each FP to catch memory corruption early
+        cudaError_t e_sync = cudaDeviceSynchronize();
+        if (e_sync != cudaSuccess) {
+            std::fprintf(stderr, "[qwen3-0.6b-fp] ERROR: cuda sync failed after layer %d FP: %s\n",
+                         il, cudaGetErrorString(e_sync));
+            ggml_gallocr_free(galloc); cleanup_all(); return false;
         }
 
         // ── Graph B (chunked, reusable): o_proj + residual + ffn + write hidden_buf ──

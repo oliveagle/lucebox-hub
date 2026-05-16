@@ -74,11 +74,11 @@ __global__ void __launch_bounds__(512) compute_block_score_gemm_kernel_f16(
                 const int row = idx / D_HEAD;
                 const int col = idx % D_HEAD;
                 if (row < k_limit) {
-                    K_sh[col * K_TILE + row] = mean_K[
+                    K_sh[(size_t)row * D_HEAD + col] = mean_K[
                         (size_t)b * s_mK_b + (size_t)(k_base + row) * s_mK_m
                         + (size_t)kh * s_mK_h + col];
                 } else {
-                    K_sh[col * K_TILE + row] = __float2half(0.0f);
+                    K_sh[(size_t)row * D_HEAD + col] = __float2half(0.0f);
                 }
             }
             __syncthreads();
@@ -90,7 +90,7 @@ __global__ void __launch_bounds__(512) compute_block_score_gemm_kernel_f16(
                 wmma::load_matrix_sync(Af,
                     Q_sh + (size_t)(mq * MMA_M) * D_HEAD + dk * MMA_K, D_HEAD);
                 wmma::load_matrix_sync(Bf,
-                    K_sh + (size_t)dk * MMA_K * K_TILE + nk * MMA_N, K_TILE);
+                    K_sh + (size_t)dk * MMA_K, D_HEAD);
                 wmma::mma_sync(S_frag, Af, Bf, S_frag);
             }
 
@@ -181,11 +181,11 @@ __global__ void __launch_bounds__(512) compute_block_score_gemm_kernel_f16_multi
                 const int row = idx / D_HEAD;
                 const int col = idx % D_HEAD;
                 if (row < k_limit) {
-                    K_sh[col * K_TILE + row] = mean_K[
+                    K_sh[(size_t)row * D_HEAD + col] = mean_K[
                         (size_t)b * s_mK_b + (size_t)(k_base + row) * s_mK_m
                         + (size_t)kh * s_mK_h + col];
                 } else {
-                    K_sh[col * K_TILE + row] = __float2half(0.0f);
+                    K_sh[(size_t)row * D_HEAD + col] = __float2half(0.0f);
                 }
             }
             __syncthreads();
@@ -197,7 +197,7 @@ __global__ void __launch_bounds__(512) compute_block_score_gemm_kernel_f16_multi
                 wmma::load_matrix_sync(Af,
                     Q_sh + (size_t)(mq * MMA_M) * D_HEAD + dk * MMA_K, D_HEAD);
                 wmma::load_matrix_sync(Bf,
-                    K_sh + (size_t)dk * MMA_K * K_TILE + nk * MMA_N, K_TILE);
+                    K_sh + (size_t)dk * MMA_K, D_HEAD);
                 wmma::mma_sync(S_frag, Af, Bf, S_frag);
             }
 
@@ -238,7 +238,7 @@ extern "C" void launch_compute_block_score_gemm_f16(
     dim3 grid(cta_per_head, n_heads, 1);
     dim3 block(512);
 
-    size_t smem = sizeof(half) * (Q_TILE * D_HEAD + D_HEAD * K_TILE);
+    size_t smem = sizeof(half) * (Q_TILE * D_HEAD + K_TILE * D_HEAD);
 
     if (cta_per_head == 5) {
         compute_block_score_gemm_kernel_f16_multi_cta<Q_TILE, K_TILE, D_HEAD, 5>
