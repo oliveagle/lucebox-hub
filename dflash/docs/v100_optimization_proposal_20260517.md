@@ -288,10 +288,51 @@ done
 
 ---
 
-## 7. 最终建议
+## 7. 优化结果 ✅
 
-1. **短期**: 启用 `DFLASH27B_V100_GEMM_SCORE=1` (已有)
-2. **中期**: 实现 Multi-CTA 并行化 (方案 A)
-3. **长期**: 考虑迁移到 Ampere/Ada 架构 GPU
-4. **替代方案**: 使用更低 keep_ratio (0.05 → 0.02) 减少 selected blocks 数量
+### 原始性能基线
+
+| Context | Time (s) | 瓶颈 |
+|---------|----------|------|
+| 65536 | 81.48 | ggml flash_attn_ext (77.11s, 94.8%) |
+
+**根本原因**: Drafter 使用 `flash_prefill_forward_q8()` → `ggml_flash_attn_ext` (dense causal attention)，未使用优化的 WMMA kernels。
+
+### 优化后性能 (2026-05-17)
+
+通过混合 attention 方案（方向 C）+ GEMM block_score 优化：
+
+| Context | Scalar (s) | GEMM (s) | Speedup | vs Baseline |
+|---------|------------|----------|---------|-------------|
+| 4096 | 0.653 | 0.648 | 1.01× | - |
+| 16384 | 2.288 | 2.223 | 1.03× | - |
+| 32768 | 5.248 | 4.824 | 1.09× | - |
+| **65536** | **12.088** | **10.169** | **1.19×** | **8.0×** |
+
+### 目标达成
+
+- **目标**: 65K < 20s
+- **结果**: 10.17s (GEMM) / 12.09s (Scalar)
+- **加速**: 相比基线 81.48s，提升 **8.0×**
+
+### 关键改进
+
+1. **混合 Attention**: 使用 `ggml_flash_attn_sparse` + 注册 pFlash kernel
+2. **GEMM block_score**: 长序列下提供 19% 加速
+3. **Block sparsity**: keep_ratio=0.10，实际保留 10% tokens
+
+### 已实施优化
+
+- ✅ 方向 A: ggml WMMA kernel 集成（通过 flash_attn_sparse）
+- ✅ 方向 B: DFlash F16 WMMA Kernel（部分，GEMM block_score）
+- ✅ 方向 C: 混合方案（完整实现）
+
+---
+
+## 8. 最终建议
+
+1. **✅ 已完成**: 混合 attention + GEMM block_score
+2. **未来优化**: Multi-CTA 并行化（可进一步加速 2-4×）
+3. **架构升级**: Ampere/Ada GPU 有 3× Tensor Core 性能
+4. **替代方案**: 更低 keep_ratio (0.05 → 0.02) 减少 selected blocks 数量
 

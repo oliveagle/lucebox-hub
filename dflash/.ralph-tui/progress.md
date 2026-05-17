@@ -239,3 +239,24 @@ after each iteration and it's included in prompts for context.
   - **Status: 所有 context sizes 测试通过，无崩溃**
 
 ---
+
+## 2026-05-17 - dflash-v100-flashprefill-optimization-v3i.6
+- **Bead**: dflash-v100-flashprefill-optimization-v3i.6 - 写性能报告
+- **What was implemented**: 生成最终 benchmark 报告，更新优化方案文档
+- **Files changed**:
+  - `docs/v100_optimization_proposal_20260517.md` - 添加第 7 节"优化结果"，汇总性能数据
+  - `docs/v100_flashprefill_optimization_final_report_20260517.md` - 创建最终综合报告
+- **Report Summary**:
+  - 65K tokens: 10.17s (GEMM) / 12.09s (Scalar)，目标 < 20s ✅
+  - 相比基线 81.48s，提升 **8.0×**
+  - 混合 attention 架构完整实现
+  - GEMM block_score 在长序列提供 19% 加速
+- **Learnings:**
+  - **Pattern: 最终报告结构**
+    - 执行摘要 → 优化方向 → 性能数据 → 技术细节 → 代码模式 → 未来工作 → 复现指南
+  - **Pattern: 多文档报告整合**
+    - `*_performance_*.md` - 详细性能数据和复现步骤
+    - `*_final_report_*.md` - 综合所有优化的最终报告
+    - `*_proposal_*.md` - 原始提案文档，保留原始分析和方案
+
+---
