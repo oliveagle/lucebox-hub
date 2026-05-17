@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "sessionId": "4fb3175e-9a3a-4a40-b6f5-c9e1165599cd",
+  "sessionId": "2e977459-0058-467a-8b9f-11012b15bca4",
   "status": "running",
-  "startedAt": "2026-05-17T16:41:40.889Z",
-  "updatedAt": "2026-05-17T16:44:50.907Z",
+  "startedAt": "2026-05-17T16:45:31.594Z",
+  "updatedAt": "2026-05-17T16:55:47.604Z",
   "currentIteration": 0,
   "maxIterations": 50,
   "tasksCompleted": 0,
@@ -17,19 +17,19 @@
       {
         "id": "dflash-v100-flashprefill-optimization-v3i.1",
         "title": "方向 A: 直接调用 ggml WMMA Kernel",
-        "status": "open",
+        "status": "completed",
         "completedInSession": false
       },
       {
         "id": "dflash-v100-flashprefill-optimization-v3i.2",
         "title": "方向 B: 修复 DFlash F16 WMMA Kernel",
-        "status": "open",
+        "status": "completed",
         "completedInSession": false
       },
       {
         "id": "dflash-v100-flashprefill-optimization-v3i.3",
         "title": "方向 C: 混合方案 Block-Select + GGML FA",
-        "status": "open",
+        "status": "completed",
         "completedInSession": false
       },
       {
@@ -83,7 +83,7 @@
       {
         "id": "dflash-v100-flashprefill-optimization-v3i.3.1",
         "title": "实现混合 attention",
-        "status": "open",
+        "status": "completed",
         "completedInSession": false
       },
       {
@@ -95,7 +95,7 @@
       {
         "id": "dflash-v100-flashprefill-optimization-v3i",
         "title": "V100 FlashPrefill 优化",
-        "status": "open",
+        "status": "completed",
         "completedInSession": false
       }
     ]

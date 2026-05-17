@@ -1,8 +1,8 @@
 {
-  "id": "4fb3175e-9a3a-4a40-b6f5-c9e1165599cd",
+  "id": "2e977459-0058-467a-8b9f-11012b15bca4",
   "status": "running",
-  "startedAt": "2026-05-17T16:41:40.794Z",
-  "updatedAt": "2026-05-17T16:41:40.794Z",
+  "startedAt": "2026-05-17T16:45:31.493Z",
+  "updatedAt": "2026-05-17T16:45:31.493Z",
   "agentPlugin": "claude",
   "trackerPlugin": "beads-rust-bv",
   "executionScopes": [],
