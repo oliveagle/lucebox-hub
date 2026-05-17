@@ -6,7 +6,26 @@ after each iteration and it's included in prompts for context.
 ## Codebase Patterns (Study These First)
 
 *Add reusable patterns discovered during development here.*
+- **DFlash Draft Architecture**: 5-layer decoder-only model with target hidden conditioning. Uses `Qwen3DFlashDecoderLayer` with `Qwen3DFlashAttention` (context+noise K/V concatenation). Training uses denoising cross-entropy loss on positions 1:block_size-1.
+- **Target Layer Selection**: `build_target_layer_ids(64, 5)` → `[1, 16, 31, 46, 60]` for 27B model (64 layers). Captures hidden states at regular intervals.
+- **Training Pattern**: DFlash training requires target hidden states captured at specific layers, then projecting them through `fc` + `hidden_norm` to match draft hidden dimension.
+- **Denoising Loss**: Cross-entropy between draft predictions (positions 1:block_size-1) and ground truth tokens. First position (last token) is known and skipped.
 
+---
+
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.3
+- **What was implemented**: Created complete training pipeline for Qwen3.6 DFlash draft model
+- **Files changed**: 
+  - `scripts/collect_draft_data.py` (new) - Data collection script for target hidden states
+  - `scripts/train_draft_qwen36.py` (new) - Training script with mixed precision, gradient accumulation, denoising loss
+  - `scripts/validate_draft.py` (new) - Model validation script
+  - `scripts/export_draft_hf.py` (new) - HuggingFace format export script
+- **Model specs**: 5 layers, hidden=5120, 32 heads, 8 KV heads, head_dim=128, block_size=16, ~1.8GB BF16
+- **Learnings**:
+  - DFlash draft uses non-causal denoising attention (is_causal=False)
+  - K/V concatenate context (target hidden) and noise (draft tokens) for attention
+  - Loss computed on positions 1:block_size-1, skipping first known position
+  - Training requires capturing target hidden states at 5 specific layers [1, 16, 31, 46, 60]
 ---
 
 ## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.5

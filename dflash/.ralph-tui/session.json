@@ -3,10 +3,10 @@
   "sessionId": "2e977459-0058-467a-8b9f-11012b15bca4",
   "status": "running",
   "startedAt": "2026-05-17T16:45:31.594Z",
-  "updatedAt": "2026-05-17T16:55:48.884Z",
-  "currentIteration": 1,
+  "updatedAt": "2026-05-17T17:11:48.908Z",
+  "currentIteration": 2,
   "maxIterations": 50,
-  "tasksCompleted": 1,
+  "tasksCompleted": 2,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -110,12 +110,20 @@
       "durationMs": 466667,
       "startedAt": "2026-05-17T16:48:00.926Z",
       "endedAt": "2026-05-17T16:55:47.593Z"
+    },
+    {
+      "iteration": 2,
+      "status": "completed",
+      "taskId": "dflash-dflash-qwen36-acceptance-60-yzp.5",
+      "taskTitle": "用户故事 5: 端到端验证接受率提升",
+      "taskCompleted": true,
+      "durationMs": 405632,
+      "startedAt": "2026-05-17T16:55:48.840Z",
+      "endedAt": "2026-05-17T17:02:34.472Z"
     }
   ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash",
-  "activeTaskIds": [
-    "dflash-dflash-qwen36-acceptance-60-yzp.5"
-  ],
+  "activeTaskIds": [],
   "subagentPanelVisible": false
 }
