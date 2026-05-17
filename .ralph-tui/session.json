@@ -3,10 +3,10 @@
   "sessionId": "9cca1fae-c669-4fc0-a115-f5369d63cd76",
   "status": "running",
   "startedAt": "2026-05-17T17:08:16.146Z",
-  "updatedAt": "2026-05-17T17:33:56.889Z",
-  "currentIteration": 0,
+  "updatedAt": "2026-05-17T17:41:23.174Z",
+  "currentIteration": 2,
   "maxIterations": 50,
-  "tasksCompleted": 0,
+  "tasksCompleted": 1,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -15,9 +15,32 @@
     "totalTasks": 0,
     "tasks": []
   },
-  "iterations": [],
+  "iterations": [
+    {
+      "iteration": 1,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-1oe",
+      "taskTitle": "TriAttention KV 压缩集成",
+      "taskCompleted": true,
+      "durationMs": 725557,
+      "startedAt": "2026-05-17T17:21:51.323Z",
+      "endedAt": "2026-05-17T17:33:56.880Z"
+    },
+    {
+      "iteration": 2,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-1oe.2",
+      "taskTitle": "M2: llama.cpp + TriAttention 支持",
+      "taskCompleted": false,
+      "durationMs": 276175,
+      "startedAt": "2026-05-17T17:33:57.993Z",
+      "endedAt": "2026-05-17T17:38:34.168Z"
+    }
+  ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
-  "activeTaskIds": [],
+  "activeTaskIds": [
+    "lucebox-hub-gfx1151-1oe.2"
+  ],
   "subagentPanelVisible": false
 }
