@@ -9,6 +9,18 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.5
+- **What was implemented**: Ran V100 baseline HumanEval benchmark (10 prompts, 128 output tokens). Results: MEAN AL=5.54, Accept Rate=35.6%, Decode Speed=39.98 tok/s. Current draft does NOT meet targets (AL>=8.0, AR>=60%, Speed>=60 tok/s).
+- **Files changed**: `.ralph-tui/progress.md` (updated), no code changes
+- **Learnings**:
+  - Baseline V100 (May 2026): AL 5.54, 35.6%, 39.98 tok/s (n_gen=128, 10 HumanEval prompts)
+  - Previous reported baseline: AL 6.05, 37.8%, 38.81 tok/s (similar range, n_gen likely different)
+  - Tokenizer download requires HF mirror connectivity - use cached prompts with --skip-tokenize
+  - Acceptance rate improvement requires newly trained draft on Qwen3.6 data (epic closed with training plan)
+  - No 3090 resource available - documented reference data only
+
+---
+
 ## [Date] - dflash-dflash-qwen36-acceptance-60-yzp
 
 - **What was implemented**: Analyzed Qwen3.6 draft acceptance rate issue and created comprehensive training plan
