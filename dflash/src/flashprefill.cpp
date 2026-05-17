@@ -272,6 +272,10 @@ int flash_prefill_forward_bf16(
     if ((e = cudaMalloc(&dIdx, (size_t)B * M * N * H * sizeof(int32_t))) != cudaSuccess) goto err;
     if ((e = cudaMalloc(&dCnt, (size_t)B * M * H * sizeof(int32_t))) != cudaSuccess) goto err;
 
+    // Initialize output buffers to avoid reading stale data.
+    cudaMemset(dIdx, 0xFF, (size_t)B * M * N * H * sizeof(int32_t));  // -1 sentinel
+    cudaMemset(dCnt, 0x00, (size_t)B * M * H * sizeof(int32_t));      // zero counts
+
     static const bool prof = (std::getenv("DFLASH_FP_PROFILE") != nullptr);
     cudaEvent_t pE[5];
     if (prof) for (int i=0;i<5;i++) cudaEventCreate(&pE[i]);
@@ -418,6 +422,10 @@ int flash_prefill_forward_f16_volta(
     if ((e = cudaMalloc(&dIdx, (size_t)B * M * N * H * sizeof(int32_t))) != cudaSuccess) goto err;
     if ((e = cudaMalloc(&dCnt, (size_t)B * M * H * sizeof(int32_t))) != cudaSuccess) goto err;
 
+    // Initialize output buffers to avoid reading stale data.
+    cudaMemset(dIdx, 0xFF, (size_t)B * M * N * H * sizeof(int32_t));  // -1 sentinel
+    cudaMemset(dCnt, 0x00, (size_t)B * M * H * sizeof(int32_t));      // zero counts
+
     static const bool use_gemm = (std::getenv("DFLASH27B_V100_GEMM_SCORE") != nullptr);
     if (use_gemm) {
         if ((e = cudaMalloc(&dmQ,  (size_t)B * M * H  * D * 2)) != cudaSuccess) goto err;
@@ -546,6 +554,10 @@ int flash_prefill_forward_f16_pascal(
     if ((e = cudaMalloc(&dM,   (size_t)B * M * N * H * sizeof(float))) != cudaSuccess) goto err;
     if ((e = cudaMalloc(&dIdx, (size_t)B * M * N * H * sizeof(int32_t))) != cudaSuccess) goto err;
     if ((e = cudaMalloc(&dCnt, (size_t)B * M * H * sizeof(int32_t))) != cudaSuccess) goto err;
+
+    // Initialize output buffers to avoid reading stale data.
+    cudaMemset(dIdx, 0xFF, (size_t)B * M * N * H * sizeof(int32_t));  // -1 sentinel
+    cudaMemset(dCnt, 0x00, (size_t)B * M * H * sizeof(int32_t));      // zero counts
 
     static const bool prof = (std::getenv("DFLASH_FP_PROFILE") != nullptr);
     cudaEvent_t pE[5];

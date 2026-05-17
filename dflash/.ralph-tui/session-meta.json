@@ -1,0 +1,29 @@
+{
+  "id": "80f042d2-1b01-4cd8-a40a-60e9bc6e77fa",
+  "status": "running",
+  "startedAt": "2026-05-17T08:12:09.932Z",
+  "updatedAt": "2026-05-17T08:39:32.575Z",
+  "agentPlugin": "claude",
+  "trackerPlugin": "beads-rust",
+  "epicId": "dflash-v100-flashprefill-optimization-v3i",
+  "epicIds": [
+    "dflash-v100-flashprefill-optimization-v3i"
+  ],
+  "executionScopes": [
+    {
+      "id": "dflash-v100-flashprefill-optimization-v3i",
+      "title": "V100 FlashPrefill 优化",
+      "type": "epic",
+      "description": "在 V100 (SM70) 上实现高性能 FlashPrefill，目标: 65K context 从 81.48s 降到 < 20s (5× 加速)",
+      "metadata": {
+        "dependencyCount": 0,
+        "dependentCount": 6
+      }
+    }
+  ],
+  "currentIteration": 2,
+  "maxIterations": 50,
+  "totalTasks": 0,
+  "tasksCompleted": 0,
+  "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash"
+}

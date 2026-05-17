@@ -657,4 +657,14 @@ if(DFLASH27B_TESTS)
         target_include_directories(bench_flashprefill_perf PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_link_libraries(bench_flashprefill_perf PRIVATE CUDA::cudart)
     endif()
+
+    # V100 E2E benchmark: block_score + block_select pipeline
+    if(DFLASH27B_GPU_BACKEND STREQUAL "cuda" AND _dflash_has_sm70
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/bench_flashprefill_e2e.cpp")
+        add_executable(bench_flashprefill_e2e test/bench_flashprefill_e2e.cpp
+            src/flashprefill_f16.cu src/flashprefill_f16_gemm.cu)
+        set_target_properties(bench_flashprefill_e2e PROPERTIES CUDA_ARCHITECTURES "70")
+        target_include_directories(bench_flashprefill_e2e PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(bench_flashprefill_e2e PRIVATE CUDA::cudart)
+    endif()
 endif()

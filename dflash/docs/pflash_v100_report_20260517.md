@@ -130,20 +130,17 @@ V100 上已有优化的 `compute_block_score_gemm_kernel_f16` kernel (在 `flash
 - **Multi-CTA**: 每个头使用 5 个 CTA 并行计算
 - **Shared memory**: 优化 Q/K tile 加载
 
-### GEMM vs Scalar Kernel Speedup
+### GEMM vs Scalar Kernel Speedup (Measured)
 
 | Sequence Length | Scalar (ms) | GEMM (ms) | Speedup |
 |-----------------|-------------|-----------|---------|
-| 4096 | 0.326 | 0.093 | **3.5×** |
-| 8192 | 0.827 | 0.117 | **7.0×** |
-| 16384 | 2.528 | 0.193 | **13.1×** |
-| 32768 | 8.770 | 0.384 | **22.8×** |
-| 65536 | 28.697 | 0.767 | **37.4×** |
+| 4096 | 0.30 | 0.04 | **7.7×** |
+| 8192 | 0.80 | 0.04 | **20.8×** |
+| 16384 | 2.49 | 0.06 | **38.4×** |
+| 32768 | 8.27 | 0.12 | **68.4×** |
+| 65536 | 28.24 | 0.31 | **89.7×** |
 
-**分析**: GEMM kernel 在长序列下优势显著，这是因为:
-1. WMMA Tensor Core 加速矩阵乘法
-2. 减少 global memory 访问 (shared memory tiling)
-3. 更好的并行度 (multi-CTA)
+**实测性能是之前估算的 2 倍以上!** 详见 [flashprefill_v100_gemm_benchmark_20260517.md](./flashprefill_v100_gemm_benchmark_20260517.md)
 
 ### Current Integration Status
 
@@ -187,13 +184,15 @@ echo "compress 100 8 32 13 /tmp/test_tokens.bin" | \
 2. **在 16K context 以下**，drafter 压缩时间可接受 (6.96s @ 16K)
 3. **在 32K+ context**，drafter 压缩时间变得不可接受 (22s+ @ 32K, 81s @ 65K)
 4. **PFlash 在 V100 上的瓶颈** 是 FlashPrefill (占 94.6% 的 drafter 时间)
-5. **V100 GEMM block_score kernel 已存在**，但在当前 PFlash 测试中可能未启用
-6. **启用 GEMM kernel 后预期加速**: 2.8-4.8× (取决于 context 长度)
+5. **V100 GEMM block_score kernel 已存在且经过充分验证**：
+   - **实测 90× speedup** on block_score at 65K (远超之前估算的 37×)
+   - **但 block_score 仅占总时间的 < 0.1%**，因此对总 TTFT 影响可忽略
+6. **真正瓶颈**: `launch_sparse_flash_forward_f16()` (dense attention computation)
 7. **建议**:
    - V100 适合短 context (< 16K) 的 PFlash 压缩
    - 对于长 context (32K+)，建议使用 RTX 3090 或更新架构的 GPU
-   - 启用 `DFLASH27B_V100_GEMM_SCORE=1` 来激活 V100 优化的 GEMM kernel
-   - 或者使用更低 keep_ratio (如 0.05) 来减少 drafter 的计算量
+   - **优先优化 `launch_sparse_flash_forward_f16()`**，而非 block_score
+   - 启用 `DFLASH27B_V100_GEMM_SCORE=1` 可获得 minor 加速 (但不足以改变整体性能)
 
 ---
 

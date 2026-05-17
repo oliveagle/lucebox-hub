@@ -1,0 +1,107 @@
+{
+  "project": "V100 FlashPrefill Optimization",
+  "milestone": "V100 Performance",
+  "due_date": "2026-05-24",
+  "tasks": [
+    {
+      "id": "V100-001",
+      "title": "定位 block_select bug 并修复",
+      "description": "分析 flashprefill_f16.cu 的 block_select_kernel，定位导致崩溃的内存访问问题。测试 S=320, 350, 4096 等边界情况。",
+      "priority": "critical",
+      "status": "todo",
+      "labels": ["bug", "volta", "flashprefill"],
+      "estimate": "2d",
+      "depends_on": []
+    },
+    {
+      "id": "V100-002",
+      "title": "研究直接调用 ggml WMMA kernel 的可行性",
+      "description": "在 flashprefill_q8.cpp 中直接调用 ggml_cuda_flash_attn_ext_wmma_f16，绕过 op dispatch。参考 deps/llama.cpp/ggml/src/ggml-cuda/fattn-wmma-f16.cu",
+      "priority": "high",
+      "status": "todo",
+      "labels": ["integration", "ggml", "flashprefill"],
+      "estimate": "3d",
+      "depends_on": []
+    },
+    {
+      "id": "V100-003",
+      "title": "集成 ggml WMMA kernel 并验证正确性",
+      "description": "将方向 A 的 kernel 调用集成到 flashprefill_q8.cpp，绕过 ggml op dispatch。",
+      "priority": "high",
+      "status": "todo",
+      "labels": ["integration", "flashprefill"],
+      "estimate": "2d",
+      "depends_on": ["V100-002"]
+    },
+    {
+      "id": "V100-004",
+      "title": "添加 block_select 边界检查和初始化",
+      "description": "在 block_select_kernel 中添加完整的边界检查，确保 n < N。添加 cudaMemset 确保内存初始化。",
+      "priority": "critical",
+      "status": "todo",
+      "labels": ["bugfix", "volta", "flashprefill"],
+      "estimate": "1d",
+      "depends_on": ["V100-001"]
+    },
+    {
+      "id": "V100-005",
+      "title": "验证 DFLASH_FP_USE_VOLTA_FP=1 不崩溃",
+      "description": "测试 S=320..65536 范围内所有序列长度，确保强制启用 Volta FP 不崩溃。",
+      "priority": "high",
+      "status": "todo",
+      "labels": ["testing", "volta"],
+      "estimate": "1d",
+      "depends_on": ["V100-004"]
+    },
+    {
+      "id": "V100-006",
+      "title": "实现混合方案: block-select + ggml FA",
+      "description": "结合 DFlash 的 block-select 算法和 ggml 的 flash_attn_ext: 1) 收集选中的 K block indices 2) 提取子矩阵 K_selected, V_selected 3) 调用 ggml_flash_attn_ext(Q, K_selected, V_selected) 4) 结果写回 O",
+      "priority": "medium",
+      "status": "todo",
+      "labels": ["feature", "hybrid", "flashprefill"],
+      "estimate": "5d",
+      "depends_on": ["V100-003", "V100-005"]
+    },
+    {
+      "id": "V100-007",
+      "title": "优化混合方案的数据移动",
+      "description": "最小化 K/V 数据复制，使用 inplace 操作，减少中间 buffer 分配。",
+      "priority": "medium",
+      "status": "todo",
+      "labels": ["optimization", "performance"],
+      "estimate": "2d",
+      "depends_on": ["V100-006"]
+    },
+    {
+      "id": "V100-008",
+      "title": "端到端测试: pflash_daemon",
+      "description": "运行 pflash_daemon 测试，验证 4K, 16K, 32K, 65K context 场景下的正确性和输出质量。",
+      "priority": "high",
+      "status": "todo",
+      "labels": ["testing", "e2e"],
+      "estimate": "1d",
+      "depends_on": ["V100-005", "V100-007"]
+    },
+    {
+      "id": "V100-009",
+      "title": "性能基准测试",
+      "description": "测量所有优化方向的性能，生成 benchmark 报告。对比: 16K < 3s, 32K < 8s, 65K < 20s",
+      "priority": "high",
+      "status": "todo",
+      "labels": ["benchmark", "performance"],
+      "estimate": "1d",
+      "depends_on": ["V100-008"]
+    },
+    {
+      "id": "V100-010",
+      "title": "写性能报告",
+      "description": "生成最终的 benchmark 报告，总结三个方向的优化效果。更新 docs/v100_optimization_proposal_20260517.md",
+      "priority": "medium",
+      "status": "todo",
+      "labels": ["docs"],
+      "estimate": "0.5d",
+      "depends_on": ["V100-009"]
+    }
+  ]
+}

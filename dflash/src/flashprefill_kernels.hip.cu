@@ -650,7 +650,8 @@ __global__ void block_select_kernel(
     float local_max = NEG_INF;
     for (int n_base = 0; n_base <= m; n_base += 32) {
         const int n = n_base + lane;
-        local_max = fmaxf(local_max, (n <= m) ? sp[(size_t)n * s_n] : NEG_INF);
+        const bool valid = (n <= m) && (n < N);
+        local_max = fmaxf(local_max, valid ? sp[(size_t)n * s_n] : NEG_INF);
     }
     #pragma unroll
     for (int off = 16; off > 0; off >>= 1)
@@ -661,7 +662,7 @@ __global__ void block_select_kernel(
     int total = 0;
     for (int n_base = 0; n_base <= m; n_base += 32) {
         const int n     = n_base + lane;
-        const bool valid = (n <= m);
+        const bool valid = (n <= m) && (n < N);
         bool keep = false;
         if (valid) {
             const float v = sp[(size_t)n * s_n];

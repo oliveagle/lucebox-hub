@@ -984,7 +984,7 @@ __global__ void block_select_kernel(
     float local_max = NEG_INF;
     for (int n_base = 0; n_base <= m; n_base += 32) {
         int n = n_base + lane;
-        bool valid = (n <= m);
+        bool valid = (n <= m) && (n < N);
         float v = valid ? sp[(size_t)n * s_n] : NEG_INF;
         local_max = fmaxf(local_max, v);
     }
@@ -998,7 +998,7 @@ __global__ void block_select_kernel(
     int total = 0;
     for (int n_base = 0; n_base <= m; n_base += 32) {
         int n = n_base + lane;
-        bool valid = (n <= m);
+        bool valid = (n <= m) && (n < N);
         bool keep = false;
         if (valid) {
             float v = sp[(size_t)n * s_n];
