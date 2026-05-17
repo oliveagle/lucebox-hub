@@ -3,10 +3,10 @@
   "sessionId": "2e977459-0058-467a-8b9f-11012b15bca4",
   "status": "running",
   "startedAt": "2026-05-17T16:45:31.594Z",
-  "updatedAt": "2026-05-17T17:30:50.147Z",
-  "currentIteration": 5,
+  "updatedAt": "2026-05-17T17:33:22.276Z",
+  "currentIteration": 6,
   "maxIterations": 50,
-  "tasksCompleted": 4,
+  "tasksCompleted": 5,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -150,6 +150,16 @@
       "durationMs": 454178,
       "startedAt": "2026-05-17T17:14:02.803Z",
       "endedAt": "2026-05-17T17:21:36.981Z"
+    },
+    {
+      "iteration": 6,
+      "status": "completed",
+      "taskId": "dflash-dflash-qwen36-acceptance-60-yzp.4",
+      "taskTitle": "用户故事 4: 转换并量化 Draft 为 GGUF",
+      "taskCompleted": true,
+      "durationMs": 552013,
+      "startedAt": "2026-05-17T17:21:38.123Z",
+      "endedAt": "2026-05-17T17:30:50.136Z"
     }
   ],
   "skippedTaskIds": [],

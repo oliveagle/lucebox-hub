@@ -59,6 +59,22 @@ after each iteration and it's included in prompts for context.
   - Full collection (default config) ~5200 samples, 4-6 hours, ~15GB storage
 ---
 
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.3.1
+- **What was implemented**: Verified training pipeline implementation - all 4 scripts already exist and pass syntax validation.
+- **Files changed**: None (already implemented in prior iteration)
+  - `scripts/collect_draft_data.py` - Multi-dataset collection with TARGET_LAYERS=[1, 16, 31, 46, 60]
+  - `scripts/train_draft_qwen36.py` - DFlashDraftModel with denoising loss, mixed precision
+  - `scripts/validate_draft.py` - Model validation with target model
+  - `scripts/export_draft_hf.py` - HuggingFace export with safetensors
+- **Learnings**:
+  - Training pipeline already complete from prior iteration (bead dflash-dflash-qwen36-acceptance-60-yzp.3)
+  - DFlash architecture: 5-layer decoder, block_size=16, target hidden conditioning
+  - Denoising loss computed on positions 1:block_size-1 (first position known, skipped)
+  - K/V concatenate context (target hidden) + noise (draft tokens) for non-causal attention
+  - Target layers: [1, 16, 31, 46, 60] for 64-layer Qwen3.6-27B model
+
+---
+
 ## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.3
 - **What was implemented**: Created complete training pipeline for Qwen3.6 DFlash draft model
 - **Files changed**: 
