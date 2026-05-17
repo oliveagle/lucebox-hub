@@ -3,10 +3,10 @@
   "sessionId": "2e977459-0058-467a-8b9f-11012b15bca4",
   "status": "running",
   "startedAt": "2026-05-17T16:45:31.594Z",
-  "updatedAt": "2026-05-17T17:33:22.276Z",
-  "currentIteration": 6,
+  "updatedAt": "2026-05-17T17:34:47.078Z",
+  "currentIteration": 7,
   "maxIterations": 50,
-  "tasksCompleted": 5,
+  "tasksCompleted": 6,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -160,6 +160,16 @@
       "durationMs": 552013,
       "startedAt": "2026-05-17T17:21:38.123Z",
       "endedAt": "2026-05-17T17:30:50.136Z"
+    },
+    {
+      "iteration": 7,
+      "status": "completed",
+      "taskId": "dflash-dflash-qwen36-acceptance-60-yzp.3.1",
+      "taskTitle": "实现训练 pipeline",
+      "taskCompleted": true,
+      "durationMs": 150865,
+      "startedAt": "2026-05-17T17:30:51.400Z",
+      "endedAt": "2026-05-17T17:33:22.265Z"
     }
   ],
   "skippedTaskIds": [],

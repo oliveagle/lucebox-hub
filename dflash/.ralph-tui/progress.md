@@ -13,6 +13,20 @@ after each iteration and it's included in prompts for context.
 - **Training Pattern**: DFlash training requires target hidden states captured at 5 specific layers, then projecting them through `fc` + `hidden_norm` to match draft hidden dimension.
 - **Denoising Loss**: Cross-entropy between draft predictions (positions 1:block_size-1) and ground truth tokens. First position (last token) is known and skipped.
 - **Data Collection Pattern**: Multi-dataset collection with fallback prompts. Each sample captures prompt_hidden (last token at each layer) and gen_hidden (per-generation-step hidden states). Target layers: [1, 16, 31, 46, 60] (1-indexed from model outputs, offset+1 for embedding layer).
+- **Training Loop Pattern**: `DraftTrainer.train_epoch()` implements full training loop with mixed precision (`torch.cuda.amp.autocast`), gradient accumulation, progress tracking, and denoising loss on positions 1:block_size-1.
+
+---
+
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.3.2
+- **What was implemented**: Verified training loop already fully implemented in `scripts/train_draft_qwen36.py`. `DraftTrainer` class with `train_epoch()` method includes mixed precision (AMP), gradient accumulation, denoising loss computation, checkpointing, progress bar, and early stopping.
+- **Files changed**: None (already implemented)
+- **Learnings**:
+  - Training loop was complete from prior bead dflash-dflash-qwen36-acceptance-60-yzp.3.1
+  - `DraftTrainer.train_epoch()`: iterates batches, forward with autocast, computes loss on positions 1:block_size-1, gradient accumulation, optimizer step
+  - Mixed precision: `torch.cuda.amp.GradScaler` with `autocast()` context
+  - Checkpointing: `save_checkpoint()` saves model+optimizer+config state every N epochs
+  - Early stopping: stops when loss < 0.1
+  - Syntax validation passed
 
 ---
 
