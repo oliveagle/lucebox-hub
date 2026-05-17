@@ -638,4 +638,23 @@ if(DFLASH27B_TESTS)
         target_include_directories(test_gemm_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_link_libraries(test_gemm_smoke PRIVATE CUDA::cudart)
     endif()
+
+    # V100 FlashPrefill benchmarks (sm_70 only)
+    if(DFLASH27B_GPU_BACKEND STREQUAL "cuda" AND _dflash_has_sm70
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/bench_flashprefill_sm70.cu")
+        add_executable(bench_flashprefill_sm70 test/bench_flashprefill_sm70.cu
+            src/flashprefill_f16.cu src/flashprefill_f16_gemm.cu)
+        set_target_properties(bench_flashprefill_sm70 PROPERTIES CUDA_ARCHITECTURES "70")
+        target_include_directories(bench_flashprefill_sm70 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(bench_flashprefill_sm70 PRIVATE CUDA::cudart)
+    endif()
+
+    if(DFLASH27B_GPU_BACKEND STREQUAL "cuda" AND _dflash_has_sm70
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/bench_flashprefill_perf.cu")
+        add_executable(bench_flashprefill_perf test/bench_flashprefill_perf.cu
+            src/flashprefill_f16.cu src/flashprefill_f16_gemm.cu)
+        set_target_properties(bench_flashprefill_perf PROPERTIES CUDA_ARCHITECTURES "70")
+        target_include_directories(bench_flashprefill_perf PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(bench_flashprefill_perf PRIVATE CUDA::cudart)
+    endif()
 endif()
