@@ -14,6 +14,22 @@ after each iteration and it's included in prompts for context.
 - **Denoising Loss**: Cross-entropy between draft predictions (positions 1:block_size-1) and ground truth tokens. First position (last token) is known and skipped.
 - **Data Collection Pattern**: Multi-dataset collection with fallback prompts. Each sample captures prompt_hidden (last token at each layer) and gen_hidden (per-generation-step hidden states). Target layers: [1, 16, 31, 46, 60] (1-indexed from model outputs, offset+1 for embedding layer).
 - **Training Loop Pattern**: `DraftTrainer.train_epoch()` implements full training loop with mixed precision (`torch.cuda.amp.autocast`), gradient accumulation, progress tracking, and denoising loss on positions 1:block_size-1.
+- **Training Execution Requirements**: DFlash draft training requires HuggingFace-format target model (GGUF insufficient for hidden state capture), free V100 32GB (~72h total: 24h data collection + 48h training), and training data from `collect_draft_data.py`.
+
+---
+
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.3.3
+- **What was implemented**: Verified training execution requirements. Script `scripts/train_draft_qwen36.py` is fully implemented and syntax-validated. Training requires resources that are not currently available.
+- **Files changed**: None (implementation already complete)
+- **Learnings**:
+  - **Training script complete**: `DraftTrainer.train_epoch()` implements mixed precision, gradient accumulation, checkpointing, early stopping
+  - **Execution blockers identified**:
+    1. GPU occupied: V100 has only 1324 MiB free (python process using 31GB)
+    2. Model format: Only GGUF available, data collection needs HuggingFace format
+    3. Training data: `models/training_data/` empty, requires ~24h collection
+    4. Time requirement: ~48h training time after data collection
+  - **Training flow confirmed**: Syntax validation passed, script ready to run when resources available
+  - **Resource dependencies**: 1) Free V100, 2) HF-format Qwen3.6-27B, 3) Collected training data
 
 ---
 
