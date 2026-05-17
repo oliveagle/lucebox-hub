@@ -74,3 +74,6 @@ fix-plan.md
 
 # Sisyphus working dossier (preserve outside repo)
 .sisyphus/
+
+# bv (beads viewer) local config and caches
+.bv/

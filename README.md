@@ -260,6 +260,75 @@ cmake --build build --target test_dflash -j
 
 ---
 
+## TriAttention KV Cache Compression
+
+**TriAttention** is a trigonometric frequency-domain KV cache compression system that reduces KV memory by up to **10.7x** and boosts throughput by **2.5x** on long reasoning tasks — with no accuracy loss.
+
+### Quick Start
+
+```bash
+# 1. Install TriAttention from the submodule
+pip install -e submodules/triattention
+pip install flash-attn --no-build-isolation  # optional, recommended
+
+# 2. Launch vLLM with TriAttention compression
+./scripts/run_vllm_with_triattention.sh Qwen/Qwen3-8B --max-model-len 32768
+
+# 3. Verify compression is active — look for:
+#   [TriAttention] Runtime (V2) plugin activated: patch_scheduler=True patch_worker=True
+curl http://localhost:8000/v1/models
+```
+
+### Configuration
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `TRIATTN_RUNTIME_KV_BUDGET` | `2048` | Maximum tokens retained per request |
+| `TRIATTN_RUNTIME_DIVIDE_LENGTH` | `128` | Compression trigger interval |
+| `TRIATTN_RUNTIME_WINDOW_SIZE` | `128` | Recent tokens always preserved |
+| `TRIATTN_RUNTIME_SPARSE_STATS_PATH` | — | Path to precomputed frequency stats (.pt) |
+| `ENABLE_TRIATTENTION` | `true` | Master on/off switch |
+
+### Calibration
+
+For custom models, generate frequency statistics first:
+
+```bash
+# Generate calibration stats for a custom model
+./scripts/calibrate_model.sh Qwen/Qwen3-8B stats/qwen3_8b_stats.pt --max-length 32768
+
+# Then launch with the stats file
+TRIATTN_RUNTIME_SPARSE_STATS_PATH=stats/qwen3_8b_stats.pt \
+    ./scripts/run_vllm_with_triattention.sh Qwen/Qwen3-8B
+```
+
+### Performance
+
+| Benchmark | Full Attention | TriAttention (KV Budget=2048) | Speedup |
+|-----------|---------------|-------------------------------|---------|
+| **AIME25** | 222.8 tok/s | **563.5 tok/s** | **2.5x** |
+| **MATH-500** | 222.8 tok/s | **1405.2 tok/s** | **6.3x** |
+| **AIME24** | 222.8 tok/s | **413.9 tok/s** | **1.9x** |
+
+TriAttention preserves accuracy — AIME25 scores are identical (40.8 vs 40.8) compared to full attention.
+
+### Supported Backends
+
+| Backend | Status | Notes |
+|---------|--------|-------|
+| **vLLM** | ✅ Ready | Python plugin, auto-discovered |
+| **llama.cpp (HIP/ROCm)** | Community | See [triattention-ggml](https://github.com/domvox/triattention-ggml) |
+| **SGLang** | Experimental | Use triattention submodule directly |
+
+### AMD gfx1151 Support
+
+TriAttention's vLLM backend runs on AMD GPUs via ROCm/HIP. Ensure you have:
+- ROCm compatible PyTorch
+- Triton for AMD (or use `--enforce-eager`)
+- The TriAttention submodule is initialized with `git submodule update --init --recursive`
+
+---
+
 ## Why this exists
 
 Local AI should be a default, not a privilege: private data, no per-token bill, no vendor lock-in. The hardware to run capable models already sits on desks. The software to run those chips well doesn't.
