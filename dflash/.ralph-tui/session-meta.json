@@ -1,29 +1,14 @@
 {
-  "id": "2f3b2401-202c-44d6-abce-2f14f2c828c8",
+  "id": "4fb3175e-9a3a-4a40-b6f5-c9e1165599cd",
   "status": "running",
-  "startedAt": "2026-05-17T10:19:29.382Z",
-  "updatedAt": "2026-05-17T12:02:04.407Z",
+  "startedAt": "2026-05-17T16:41:40.794Z",
+  "updatedAt": "2026-05-17T16:41:40.794Z",
   "agentPlugin": "claude",
-  "trackerPlugin": "beads-rust",
-  "epicId": "dflash-v100-flashprefill-optimization-v3i",
-  "epicIds": [
-    "dflash-v100-flashprefill-optimization-v3i"
-  ],
-  "executionScopes": [
-    {
-      "id": "dflash-v100-flashprefill-optimization-v3i",
-      "title": "V100 FlashPrefill 优化",
-      "type": "epic",
-      "description": "在 V100 (SM70) 上实现高性能 FlashPrefill，目标: 65K context 从 81.48s 降到 < 20s (5× 加速)",
-      "metadata": {
-        "dependencyCount": 0,
-        "dependentCount": 6
-      }
-    }
-  ],
-  "currentIteration": 7,
+  "trackerPlugin": "beads-rust-bv",
+  "executionScopes": [],
+  "currentIteration": 0,
   "maxIterations": 50,
   "totalTasks": 0,
-  "tasksCompleted": 5,
+  "tasksCompleted": 0,
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash"
 }

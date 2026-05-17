@@ -751,7 +751,7 @@ bool Qwen3Backend::handle_compress(const std::string & line, const DaemonIO & io
 
     auto src_ids = read_int32_file(ppath);
     if (src_ids.empty()) {
-        std::fprintf(stderr, "[compress] empty input\n");
+        std::fprintf(stderr, "[compress] empty input (path=%s)\n", ppath);
         io.emit(-1);
         return true;
     }
