@@ -3,10 +3,10 @@
   "sessionId": "2e977459-0058-467a-8b9f-11012b15bca4",
   "status": "running",
   "startedAt": "2026-05-17T16:45:31.594Z",
-  "updatedAt": "2026-05-17T17:14:01.558Z",
-  "currentIteration": 3,
+  "updatedAt": "2026-05-17T17:30:50.147Z",
+  "currentIteration": 5,
   "maxIterations": 50,
-  "tasksCompleted": 3,
+  "tasksCompleted": 4,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -130,10 +130,32 @@
       "durationMs": 553136,
       "startedAt": "2026-05-17T17:02:35.761Z",
       "endedAt": "2026-05-17T17:11:48.897Z"
+    },
+    {
+      "iteration": 4,
+      "status": "completed",
+      "taskId": "dflash-dflash-qwen36-acceptance-60-yzp.1",
+      "taskTitle": "用户故事 1: 分析 DFlash 训练需求",
+      "taskCompleted": true,
+      "durationMs": 131400,
+      "startedAt": "2026-05-17T17:11:50.148Z",
+      "endedAt": "2026-05-17T17:14:01.548Z"
+    },
+    {
+      "iteration": 5,
+      "status": "completed",
+      "taskId": "dflash-dflash-qwen36-acceptance-60-yzp.2",
+      "taskTitle": "用户故事 2: 收集 Qwen3.6 训练数据",
+      "taskCompleted": false,
+      "durationMs": 454178,
+      "startedAt": "2026-05-17T17:14:02.803Z",
+      "endedAt": "2026-05-17T17:21:36.981Z"
     }
   ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash",
-  "activeTaskIds": [],
+  "activeTaskIds": [
+    "dflash-dflash-qwen36-acceptance-60-yzp.2"
+  ],
   "subagentPanelVisible": false
 }

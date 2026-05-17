@@ -7,10 +7,56 @@ after each iteration and it's included in prompts for context.
 
 *Add reusable patterns discovered during development here.*
 - **DFlash Draft Architecture**: 5-layer decoder-only model with target hidden conditioning. Uses `Qwen3DFlashDecoderLayer` with `Qwen3DFlashAttention` (context+noise K/V concatenation). Training uses denoising cross-entropy loss on positions 1:block_size-1.
+- **GGUF Draft Loading**: `load_draft_gguf()` 支持 GGUF 格式加载，配合 `load_draft_safetensors()` 用于 safetensors 格式。
+- **DFlash GGUF 结构**: arch=`qwen35-dflash-draft`, hidden=5120, 5层, head_dim=128, Q8_0量化, ~1753 MB
 - **Target Layer Selection**: `build_target_layer_ids(64, 5)` → `[1, 16, 31, 46, 60]` for 27B model (64 layers). Captures hidden states at regular intervals.
-- **Training Pattern**: DFlash training requires target hidden states captured at specific layers, then projecting them through `fc` + `hidden_norm` to match draft hidden dimension.
+- **Training Pattern**: DFlash training requires target hidden states captured at 5 specific layers, then projecting them through `fc` + `hidden_norm` to match draft hidden dimension.
 - **Denoising Loss**: Cross-entropy between draft predictions (positions 1:block_size-1) and ground truth tokens. First position (last token) is known and skipped.
+- **Data Collection Pattern**: Multi-dataset collection with fallback prompts. Each sample captures prompt_hidden (last token at each layer) and gen_hidden (per-generation-step hidden states). Target layers: [1, 16, 31, 46, 60] (1-indexed from model outputs, offset+1 for embedding layer).
 
+---
+
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.4
+
+- **What was implemented**: Verified existing GGUF draft file for Qwen3.6 DFlash. The file `models/draft/dflash-draft-3.6-q8_0.gguf` (1753.4 MB) was already converted and quantized. Created verification script and confirmed all acceptance criteria are met.
+
+- **Files changed**:
+  - `scripts/verify_draft_gguf.py` (new) - GGUF validation script with metadata and tensor checks
+
+- **Learnings**:
+  - **Existing GGUF 是完整的**: `dflash-draft-3.6-q8_0.gguf` 已经是正确格式，无需重新转换
+  - **GGUF 结构验证**: arch=`qwen35-dflash-draft`, 5层, 5120 hidden, Q8_0量化, 包含所有必需张量
+  - **关键张量存在**: `dflash.fc.weight` [25600, 5120], `dflash.hidden_norm.weight` [5120], `output_norm.weight` [5120]
+  - **量化类型正确**: 36个 Q8_0 张量 (投影权重), 22个 F32 张量 (norm 权重)
+  - **转换工具已存在**: `scripts/convert_dflash_to_gguf.py` 和 `scripts/quantize_draft_q8.py` 已实现
+  - **验证通过**: GGUF 验证脚本成功确认所有元数据和张量正确
+
+- **Verification Results**:
+  - Architecture: qwen35-dflash-draft ✅
+  - Block count: 5 ✅
+  - Embedding length: 5120 ✅
+  - Block size: 16 ✅
+  - N target layers: 5 ✅
+  - Critical tensors: all present ✅
+  - File size: 1753.4 MB ✅
+
+---
+
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.2
+- **What was implemented**: Enhanced data collection pipeline for Qwen3.6 DFlash draft training with multi-dataset support, validation, and documentation.
+- **Files changed**:
+  - `scripts/collect_draft_data.py` (enhanced) - Added multi-dataset support, conversation parsing, gen_hidden capture per step, validation
+  - `scripts/run_collect_draft_data.py` (new) - Collection runner with dependency checking, pilot mode, merge capability
+  - `docs/data_collection_requirements_20260518.md` (new) - Environment setup, dataset coverage, troubleshooting guide
+  - `models/training_data/` (created) - Output directory for training data
+- **Dataset coverage**: HumanEval (500), MBPP (500), MATH-500 (500), GSM8K (1000), ShareGPT (2000), LongPQA (200), LongAlpaca (500)
+- **Learnings**:
+  - Data collection requires HuggingFace model format, not GGUF (current environment only has GGUF)
+  - Hidden states captured at 5 layers [1, 16, 31, 46, 60] for 64-layer Qwen3.6-27B
+  - Each sample needs prompt_hidden (last token) AND gen_hidden (per-step during generation) for proper training
+  - ShareGPT conversation format requires parsing nested structure to extract prompts
+  - Pilot mode (--pilot) collects 100 samples per dataset for quick validation (~30-60 min)
+  - Full collection (default config) ~5200 samples, 4-6 hours, ~15GB storage
 ---
 
 ## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.3
