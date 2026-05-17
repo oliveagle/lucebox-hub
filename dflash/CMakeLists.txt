@@ -355,7 +355,8 @@ elseif(DFLASH27B_GPU_BACKEND STREQUAL "cuda")
     if(_dflash_has_sm70)
         target_sources(dflash27b PRIVATE
             src/flashprefill_f16.cu
-            src/flashprefill_f16_gemm.cu)
+            src/flashprefill_f16_gemm.cu
+            src/pflash_ggml_adapter.cpp)
         target_compile_definitions(dflash27b PRIVATE
             DFLASH27B_HAVE_CUDA_WMMA_FLASHPREFILL=1
             DFLASH27B_HAVE_VOLTA_FLASHPREFILL=1)

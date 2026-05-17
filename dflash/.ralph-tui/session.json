@@ -3,10 +3,10 @@
   "sessionId": "2f3b2401-202c-44d6-abce-2f14f2c828c8",
   "status": "running",
   "startedAt": "2026-05-17T10:19:29.630Z",
-  "updatedAt": "2026-05-17T10:19:31.893Z",
-  "currentIteration": 0,
+  "updatedAt": "2026-05-17T11:28:29.933Z",
+  "currentIteration": 4,
   "maxIterations": 50,
-  "tasksCompleted": 0,
+  "tasksCompleted": 2,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -74,14 +74,14 @@
       {
         "id": "dflash-v100-flashprefill-optimization-v3i.1.2",
         "title": "集成 ggml WMMA kernel",
-        "status": "open",
-        "completedInSession": false
+        "status": "completed",
+        "completedInSession": true
       },
       {
         "id": "dflash-v100-flashprefill-optimization-v3i.2.1",
         "title": "定位 block_select bug",
-        "status": "open",
-        "completedInSession": false
+        "status": "completed",
+        "completedInSession": true
       },
       {
         "id": "dflash-v100-flashprefill-optimization-v3i.2.2",
@@ -109,11 +109,54 @@
       }
     ]
   },
-  "iterations": [],
+  "iterations": [
+    {
+      "iteration": 1,
+      "status": "completed",
+      "taskId": "dflash-v100-flashprefill-optimization-v3i.2.1",
+      "taskTitle": "定位 block_select bug",
+      "taskCompleted": true,
+      "durationMs": 241129,
+      "startedAt": "2026-05-17T10:19:31.796Z",
+      "endedAt": "2026-05-17T10:23:32.925Z"
+    },
+    {
+      "iteration": 2,
+      "status": "completed",
+      "taskId": "dflash-v100-flashprefill-optimization-v3i.1.1",
+      "taskTitle": "研究 ggml WMMA kernel",
+      "taskCompleted": false,
+      "durationMs": 116267,
+      "startedAt": "2026-05-17T10:23:34.617Z",
+      "endedAt": "2026-05-17T10:25:30.884Z"
+    },
+    {
+      "iteration": 3,
+      "status": "completed",
+      "taskId": "dflash-v100-flashprefill-optimization-v3i.1.2",
+      "taskTitle": "集成 ggml WMMA kernel",
+      "taskCompleted": true,
+      "durationMs": 2394859,
+      "startedAt": "2026-05-17T10:25:32.253Z",
+      "endedAt": "2026-05-17T11:05:27.112Z"
+    },
+    {
+      "iteration": 4,
+      "status": "completed",
+      "taskId": "dflash-v100-flashprefill-optimization-v3i.3.1",
+      "taskTitle": "实现混合 attention",
+      "taskCompleted": false,
+      "durationMs": 1379923,
+      "startedAt": "2026-05-17T11:05:28.615Z",
+      "endedAt": "2026-05-17T11:28:28.538Z"
+    }
+  ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash",
   "activeTaskIds": [
-    "dflash-v100-flashprefill-optimization-v3i.2.1"
+    "dflash-v100-flashprefill-optimization-v3i.1.1",
+    "dflash-v100-flashprefill-optimization-v3i.3.1",
+    "dflash-v100-flashprefill-optimization-v3i.3.2"
   ],
   "subagentPanelVisible": false
 }
