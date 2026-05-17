@@ -6,6 +6,7 @@ after each iteration and it's included in prompts for context.
 ## Codebase Patterns (Study These First)
 
 *Add reusable patterns discovered during development here.*
+- **Data Collection Pipeline Pattern**: Multi-dataset collection with `collect_from_dataset()` (dataset loading + prompt extraction) + `collect_from_prompts()` (fallback). Each sample captures prompt_hidden (last token per target layer) and gen_hidden (per-generation-step hidden states). Includes validation (`validate_data()`), metadata saving, and pilot mode (`--pilot-only` for 100 samples/dataset).
 - **DFlash Draft Architecture**: 5-layer decoder-only model with target hidden conditioning. Uses `Qwen3DFlashDecoderLayer` with `Qwen3DFlashAttention` (context+noise K/V concatenation). Training uses denoising cross-entropy loss on positions 1:block_size-1.
 - **GGUF Draft Loading**: `load_draft_gguf()` 支持 GGUF 格式加载，配合 `load_draft_safetensors()` 用于 safetensors 格式。
 - **DFlash GGUF 结构**: arch=`qwen35-dflash-draft`, hidden=5120, 5层, head_dim=128, Q8_0量化, ~1753 MB
@@ -15,6 +16,18 @@ after each iteration and it's included in prompts for context.
 - **Data Collection Pattern**: Multi-dataset collection with fallback prompts. Each sample captures prompt_hidden (last token at each layer) and gen_hidden (per-generation-step hidden states). Target layers: [1, 16, 31, 46, 60] (1-indexed from model outputs, offset+1 for embedding layer).
 - **Training Loop Pattern**: `DraftTrainer.train_epoch()` implements full training loop with mixed precision (`torch.cuda.amp.autocast`), gradient accumulation, progress tracking, and denoising loss on positions 1:block_size-1.
 - **Training Execution Requirements**: DFlash draft training requires HuggingFace-format target model (GGUF insufficient for hidden state capture), free V100 32GB (~72h total: 24h data collection + 48h training), and training data from `collect_draft_data.py`.
+- **Model Quality Verification**: `verify_trained_draft.py` loads training checkpoint, validates output format (shape, NaN/Inf), output distribution (entropy vs uniform), and top-1/top-5 prediction accuracy on held-out data. Requires training data for accuracy tests.
+
+---
+
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.3.4
+- **What was implemented**: Created model quality verification script `scripts/verify_trained_draft.py`. Verifies: 1) output format (shape, NaN/Inf), 2) output distribution (entropy vs uniform/degenerate), 3) top-1/top-5 prediction accuracy on held-out training data. Existing GGUF draft model `dflash-draft-3.6-q8_0.gguf` (1753.4 MB) verified as baseline - all checks pass.
+- **Files changed**:
+  - `scripts/verify_trained_draft.py` (new) - Trained model quality verification
+- **Learnings**:
+  - Trained model quality verification requires: 1) checkpoint file, 2) training data for accuracy tests
+  - Without trained checkpoint, quality checks cannot be executed (training requires resources not currently available)
+  - GGUF baseline verification confirms existing draft model is structurally complete
 
 ---
 

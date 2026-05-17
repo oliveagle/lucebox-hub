@@ -3,10 +3,10 @@
   "sessionId": "2e977459-0058-467a-8b9f-11012b15bca4",
   "status": "running",
   "startedAt": "2026-05-17T16:45:31.594Z",
-  "updatedAt": "2026-05-17T17:38:45.527Z",
-  "currentIteration": 8,
+  "updatedAt": "2026-05-17T17:46:00.395Z",
+  "currentIteration": 10,
   "maxIterations": 50,
-  "tasksCompleted": 7,
+  "tasksCompleted": 8,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -180,12 +180,33 @@
       "durationMs": 83301,
       "startedAt": "2026-05-17T17:33:23.594Z",
       "endedAt": "2026-05-17T17:34:46.895Z"
+    },
+    {
+      "iteration": 9,
+      "status": "completed",
+      "taskId": "dflash-dflash-qwen36-acceptance-60-yzp.3.3",
+      "taskTitle": "执行训练",
+      "taskCompleted": true,
+      "durationMs": 237203,
+      "startedAt": "2026-05-17T17:34:48.314Z",
+      "endedAt": "2026-05-17T17:38:45.517Z"
+    },
+    {
+      "iteration": 10,
+      "status": "completed",
+      "taskId": "dflash-dflash-qwen36-acceptance-60-yzp.3.4",
+      "taskTitle": "验证模型质量",
+      "taskCompleted": false,
+      "durationMs": 326866,
+      "startedAt": "2026-05-17T17:38:46.847Z",
+      "endedAt": "2026-05-17T17:44:13.713Z"
     }
   ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash",
   "activeTaskIds": [
-    "dflash-dflash-qwen36-acceptance-60-yzp.2"
+    "dflash-dflash-qwen36-acceptance-60-yzp.2",
+    "dflash-dflash-qwen36-acceptance-60-yzp.3.4"
   ],
   "subagentPanelVisible": false
 }
