@@ -40,6 +40,23 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.1
+- **What was implemented**: Completed training requirements analysis for Qwen3.6 DFlash draft. All 4 child tasks closed.
+- **Files changed**: No new files - all artifacts already existed from prior iterations
+- **Verification**: 
+  - Training plan: `docs/qwen36_draft_training_plan_20260518.md` (complete)
+  - Training scripts: `scripts/collect_draft_data.py`, `scripts/train_draft_qwen36.py` (implemented)
+  - Architecture analysis: 5-layer decoder, block_size=16, target hidden states at layers [1, 16, 31, 46, 60]
+  - Qwen3.6 vs 3.5: SWA layers introduced, hidden distribution mismatch requires fresh training
+  - Data requirements: 10K+ samples, diverse domains (code, math, conversation, long context)
+  - GPU resources: V100 32GB, ~88h total (24h data collection + 48h training + 16h testing)
+- **Learnings**:
+  - DFlash draft is 5-layer non-causal transformer with target hidden conditioning
+  - Loss is cross-entropy on positions 1:block_size-1 (first position skipped as known)
+  - Qwen3.6 SWA layers fundamentally change attention patterns vs Qwen3.5 full attention
+  - Draft trained on Qwen3.5 data won't transfer due to hidden state distribution mismatch
+---
+
 ## [Date] - dflash-dflash-qwen36-acceptance-60-yzp
 
 - **What was implemented**: Analyzed Qwen3.6 draft acceptance rate issue and created comprehensive training plan
