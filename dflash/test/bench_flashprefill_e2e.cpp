@@ -243,7 +243,7 @@ static StageTiming bench(int S, const Config & cfg, bool use_gemm, cudaStream_t 
 }
 
 int main() {
-    Config cfg{16, 8, 128, 128, 4, 2, 0.12f, 2.0f};
+    Config cfg{16, 8, 128, 128, 2048, 32, 0.3f, 0.0f};
     int sm_count = get_sm_count();
 
     printf("FlashPrefill E2E Benchmark (block_score + block_select)\n");

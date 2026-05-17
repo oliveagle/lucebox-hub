@@ -667,4 +667,14 @@ if(DFLASH27B_TESTS)
         target_include_directories(bench_flashprefill_e2e PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_link_libraries(bench_flashprefill_e2e PRIVATE CUDA::cudart)
     endif()
+
+    # Volta F16 FlashPrefill e2e smoke test: S=320..65536
+    if(DFLASH27B_GPU_BACKEND STREQUAL "cuda" AND _dflash_has_sm70
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_volta_f16.cpp")
+        add_executable(test_volta_f16 test/test_volta_f16.cpp src/flashprefill.cpp)
+        set_target_properties(test_volta_f16 PROPERTIES CUDA_ARCHITECTURES "70")
+        target_include_directories(test_volta_f16 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_compile_definitions(test_volta_f16 PRIVATE DFLASH27B_HAVE_VOLTA_FLASHPREFILL=1)
+        target_link_libraries(test_volta_f16 PRIVATE dflash27b CUDA::cudart)
+    endif()
 endif()

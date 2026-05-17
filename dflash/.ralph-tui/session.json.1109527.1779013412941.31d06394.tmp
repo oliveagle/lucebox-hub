@@ -3,7 +3,7 @@
   "sessionId": "2f3b2401-202c-44d6-abce-2f14f2c828c8",
   "status": "running",
   "startedAt": "2026-05-17T10:19:29.630Z",
-  "updatedAt": "2026-05-17T10:19:31.893Z",
+  "updatedAt": "2026-05-17T10:23:32.939Z",
   "currentIteration": 0,
   "maxIterations": 50,
   "tasksCompleted": 0,
@@ -112,8 +112,6 @@
   "iterations": [],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash",
-  "activeTaskIds": [
-    "dflash-v100-flashprefill-optimization-v3i.2.1"
-  ],
+  "activeTaskIds": [],
   "subagentPanelVisible": false
 }

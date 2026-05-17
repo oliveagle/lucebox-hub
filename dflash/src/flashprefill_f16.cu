@@ -240,29 +240,25 @@ __global__ void sparse_flash_forward_kernel_f16(
     if (b >= batch) return;
     const int kh = qh * n_k_heads / n_q_heads;
     const int q_block_idx = q_tile_idx * Q_TILE / BLOCK;
+    if (q_block_idx >= M_blocks) return;
 
     const int wid  = threadIdx.x / 32;        // 0..1 (warp within tile)
     const int lane = threadIdx.x & 31;        // 0..31 (lane within warp)
 
-    // Shared memory: Q + KV (aliased) + P + row max/logsum
-    // Each warp (wid=0,1) needs its own Q_TILE floats of row_m and row_l.
-    // Total: Q_TILE*2 floats for row_m + Q_TILE*2 floats for row_l.
-    // Q_TILE*2 = 128, so we need 128 floats for row_m + 128 for row_l.
-    // P_sh starts at offset Q_TILE*K_TILE. We need row_m + row_l after that.
-    // Since P_sh is Q_TILE*K_TILE = 64*64 = 4096 halfs.
+    // SMEM: Q + KV (K or V at a time, alias) + P + row state
     extern __shared__ unsigned char smem_raw[];
     half * Q_sh  = reinterpret_cast<half*>(smem_raw);
     half * KV_sh = Q_sh + (size_t)Q_TILE * D_HEAD;
     half * P_sh  = KV_sh + (size_t)K_TILE * D_HEAD;
     float * row_m = reinterpret_cast<float*>(P_sh + (size_t)Q_TILE * K_TILE);
-    float * row_l = row_m + Q_TILE * 2;  // Separate space for each warp's row_l
+    float * row_l = row_m + Q_TILE;  // Q_TILE entries per warp, not Q_TILE*2!
 
-    if (threadIdx.x < Q_TILE * 2) {
+    // Initialize row state before use
+    if (threadIdx.x < Q_TILE) {
         row_m[threadIdx.x] = -INFINITY;
-    }
-    if (threadIdx.x < Q_TILE * 2) {
         row_l[threadIdx.x] = 0.0f;
     }
+    __syncthreads();  // Ensure initialization is visible to all threads
 
     // ── Cooperative load Q [Q_TILE, D_HEAD] ──
     {
@@ -568,7 +564,7 @@ extern "C" void launch_sparse_flash_forward_f16(
         size_t smem_bytes = sizeof(half) * (Q_TILE * D_HEAD)
                            + sizeof(half) * (K_TILE * D_HEAD)
                            + sizeof(half) * (Q_TILE * K_TILE)
-                           + sizeof(float) * (Q_TILE * 4);  // row_m (Q_TILE*2) + row_l (Q_TILE*2)
+                           + sizeof(float) * (Q_TILE * 2);  // row_m (Q_TILE) + row_l (Q_TILE)
         dim3 block64(64, 1, 1);
         cudaFuncSetAttribute(
             (const void*)sparse_flash_forward_kernel_f16<Q_TILE, K_TILE, BLOCK, D_HEAD>,

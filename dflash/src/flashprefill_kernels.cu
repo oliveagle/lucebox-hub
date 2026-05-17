@@ -312,6 +312,7 @@ __global__ void sparse_flash_forward_kernel_bf16(
     if (b >= batch) return;
     const int kh = qh * n_k_heads / n_q_heads;
     const int q_block_idx = q_tile_idx * Q_TILE / BLOCK;
+    if (q_block_idx >= M_blocks) return;
 
     const int wid  = threadIdx.x / 32;        // 0..3
     const int lane = threadIdx.x & 31;

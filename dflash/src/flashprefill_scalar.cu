@@ -220,6 +220,7 @@ __global__ void sparse_flash_forward_kernel_f16(
     if (b >= batch) return;
     const int kh = qh * n_k_heads / n_q_heads;
     const int q_block_idx = q_tile_idx; // 1 q_block per CTA for scalar
+    if (q_block_idx >= M_blocks) return;
 
     const int tid = threadIdx.x;
     if (tid >= Q_TILE) return;
