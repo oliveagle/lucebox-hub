@@ -35,6 +35,57 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## 2026-05-17 - dflash-v100-flashprefill-optimization-v3i.5
+- **Bead**: dflash-v100-flashprefill-optimization-v3i.5 - 性能基准测试
+- **What was implemented**: 完成了 PFlash V100 性能基准测试，验证 65K tokens 处理 < 20s 目标
+- **Files tested**:
+  - `build/bench_flashprefill_perf` - Micro-benchmark (block_score kernel)
+  - `build/pflash_daemon` - E2E benchmark (完整 prefill + score + compress)
+- **Test Configuration**:
+  - Model: Qwen3-0.6B-BF16.gguf
+  - keep_ratio: 0.10, lookahead: 8, chunk: 32, pool: 13
+  - Context sizes: 4096, 16384, 32768, 65536
+- **E2E Results (Scalar kernel)**:
+  | Context | Time | Kept | Ratio | tok/s |
+  |---------|------|------|-------|-------|
+  | 4096 | 0.653s | 1024 | 0.2500 | 6273 |
+  | 16384 | 2.288s | 1632 | 0.0996 | 7160 |
+  | 32768 | 5.248s | 3264 | 0.0996 | 6241 |
+  | 65536 | 12.088s | 6528 | 0.0996 | 5424 |
+- **E2E Results (GEMM kernel)**:
+  | Context | Time | Kept | tok/s | Speedup |
+  |---------|------|------|-------|--------|
+  | 4096 | 0.648s | 6318 | 1.01× |
+  | 16384 | 2.223s | 7371 | 1.03× |
+  | 32768 | 4.824s | 6790 | 1.09× |
+  | 65536 | 10.169s | 6446 | **1.19×** |
+- **结论**: ✅ 目标达成 - 65K tokens < 20s (Scalar: 12.09s, GEMM: 10.17s)
+- **Files created**:
+  - `docs/pflash_v100_performance_20260517.md` - 详细性能报告
+- **Learnings:**
+  - **Pattern: pflash_daemon 测试方法**
+    - 使用 binary token 文件 (.bin) 而非文本文件
+    - 文件格式: u32 count (LE) + count × int32 token IDs
+    - 使用管道: `echo "compress ..." | ./build/pflash_daemon <gguf>`
+  - **Pattern: E2E vs Micro-benchmark**
+    - Micro-benchmark (bench_flashprefill_perf) 测量单个 kernel 时间
+    - E2E (pflash_daemon) 测量完整 pipeline: prefill + score + compress
+    - tail-score 时间差异来自 FlashPrefill 阶段 (FP: 7.63s → 5.70s with GEMM)
+  - **Pattern: GEMM 加速效果**
+    - 4K-16K: 几乎无加速 (1.01× - 1.03×)
+    - 32K+: 9% 加速
+    - 65K: **19% 加速**
+    - 原因: 长序列下 block_score 占比增加，GEMM 优势更明显
+  - **Gotcha: pflash_daemon 不接受文本文件**
+    - 需要 binary token 文件，不是 .txt 文本
+    - 使用 python 生成测试文件: `struct.pack('<I', n) + struct.pack('<i', token_id) * n`
+  - **Gotcha: Micro-benchmark 数字与 E2E 不完全对应**
+    - bench_flashprefill_perf 报告 65K GEMM: 0.766ms
+    - E2E tail-score 报告 65K GEMM: 0.74s
+    - 差异来自 E2E 中还有 prefill、head-score、chunking 等其他开销
+
+---
+
 ## 2026-05-17 - dflash-v100-flashprefill-optimization-v3i.1.2
 - **Bead**: dflash-v100-flashprefill-optimization-v3i.1.2 - 集成 ggml WMMA kernel
 - **What was implemented**: 完成了 ggml WMMA kernel 到 flashprefill_q8.cpp 的集成，通过 ggml_flash_attn_sparse 注册机制绕过 ggml op dispatch
