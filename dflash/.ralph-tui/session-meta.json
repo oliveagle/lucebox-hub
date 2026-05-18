@@ -1,14 +1,14 @@
 {
-  "id": "2e977459-0058-467a-8b9f-11012b15bca4",
+  "id": "d36f6654-9d66-4f60-9e5f-d72629b5c448",
   "status": "running",
-  "startedAt": "2026-05-17T16:45:31.493Z",
-  "updatedAt": "2026-05-17T17:50:34.117Z",
+  "startedAt": "2026-05-18T04:33:47.725Z",
+  "updatedAt": "2026-05-18T04:33:47.725Z",
   "agentPlugin": "claude",
   "trackerPlugin": "beads-rust-bv",
   "executionScopes": [],
-  "currentIteration": 12,
+  "currentIteration": 0,
   "maxIterations": 50,
   "totalTasks": 0,
-  "tasksCompleted": 10,
+  "tasksCompleted": 0,
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash"
 }
