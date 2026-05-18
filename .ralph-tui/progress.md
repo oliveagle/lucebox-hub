@@ -22,6 +22,15 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## 2026-05-19 - lucebox-hub-gfx1151-x5s
+- **What was implemented**: Closed Epic `lucebox-hub-gfx1151-dtri` (DFlash + TriAttention 纯 C++ 集成). All child tasks (vve.1-vve.5) completed and verified.
+- **Files changed**: `.beads/issues.jsonl` (updated status for dtri-vve.5 and x5s)
+- **Learnings:**
+  - Epic dtri-vve complete: TriAttention KV compression integrated into DFlash decode loop via environment variables (TRIATTN_ENABLED=1, TRIATTN_KV_BUDGET, TRIATTN_DIVIDE_LENGTH, TRIATTN_WINDOW_SIZE)
+  - Test scenarios documented in `docs/test_scenarios_triattention_20260519.md`
+  - Full benchmark execution deferred due to 32GB V100 GPU memory constraints for Qwen3.6-27B-AWQ
+---
+
 ## 2026-05-19 - lucebox-hub-gfx1151-dtri-vve.1
 - **Verified**: TriAttention C library (triattention.{c,h}) compiles and works correctly
 - **Test file created**: `dflash/test/test_triattention.c`
