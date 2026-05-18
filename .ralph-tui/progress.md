@@ -134,6 +134,23 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## 2026-05-19 - lucebox-hub-gfx1151-q32
+- **Completed**: 测试场景定义与文档化
+- **Created**: `docs/test_scenarios_triattention_20260519.md` with comprehensive test scenarios table
+- **Test scenarios defined**:
+  1. 短上下文对话 (4K → 256): HumanEval/GSM8K 常规对话测试
+  2. 中上下文文档问答 (8K → 512): Math500 文档问答测试
+  3. 长上下文检索 (32K → 512): NIAH 检索精度验证
+  4. 超长上下文极限 (64K → 1024): 极限内存压缩效果验证
+  5. 131K 极限测试: NIAH 最大上下文验证
+- **Includes**: 测试目标、验收标准、环境变量配置、编译选项、测试命令、基准对比维度、数据集选择、执行计划
+- **Learnings**:
+  - 测试场景需要覆盖从短到长的完整上下文范围，以验证 TriAttention 在不同负载下的表现
+  - 验收标准需同时考虑精度（NIAH 准确率）和性能（吞吐量、内存占用）
+  - 测试执行分三个阶段：短上下文验证 → 长上下文验证 → 极限测试
+
+---
+
 ## 2026-05-18 - lucebox-hub-gfx1151-z0k.1
 - Verified Qwen3.6-27B TriAttention stats file already exists and is valid
 - File: `submodules/triattention/triattention/vllm/stats/qwen3_6_27b_stats.pt` (1.6MB, > 1MB threshold)
