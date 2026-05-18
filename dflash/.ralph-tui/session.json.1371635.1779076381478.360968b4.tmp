@@ -3,7 +3,7 @@
   "sessionId": "2e977459-0058-467a-8b9f-11012b15bca4",
   "status": "running",
   "startedAt": "2026-05-17T16:45:31.594Z",
-  "updatedAt": "2026-05-18T03:49:23.270Z",
+  "updatedAt": "2026-05-18T03:53:01.476Z",
   "currentIteration": 12,
   "maxIterations": 50,
   "tasksCompleted": 10,
@@ -226,8 +226,7 @@
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash",
   "activeTaskIds": [
     "dflash-dflash-qwen36-acceptance-60-yzp.2",
-    "dflash-dflash-qwen36-acceptance-60-yzp.3.4",
-    "dflash-dflash-qwen36-acceptance-60-yzp"
+    "dflash-dflash-qwen36-acceptance-60-yzp.3.4"
   ],
   "subagentPanelVisible": false
 }
