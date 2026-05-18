@@ -15,6 +15,27 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## 2026-05-19 - lucebox-hub-gfx1151-dtri-vve.1
+- **Verified**: TriAttention C library (triattention.{c,h}) compiles and works correctly
+- **Test file created**: `dflash/test/test_triattention.c`
+- **Verification results**:
+  - `libtriattention.a` builds successfully (17.4K static library)
+  - `tria_load()` successfully loads v2 .bin stats files
+  - `tria_score_kv_head()` computes valid scores (finite numbers)
+  - `tria_free()` properly cleans up memory
+  - `tria_layer_budget()` correctly applies per-layer scales
+- **Available stats files**: `qwen3-1.7b.bin` (448K), `qwen3-8b.bin` (1.1M), `qwen3.5-27b.bin` (768K)
+- **Test command**: `gcc -O2 -I deps/llama.cpp/triattention test/test_triattention.c deps/llama.cpp/triattention/triattention.c -o test/test_triattention -lm && ./test/test_triattention <path_to_stats.bin>`
+- **Learnings**:
+  - TriAttention C library is self-contained — no ggml dependency
+  - Stats file format v2 includes per-layer budget scales for adaptive KV retention
+  - qwen3.5-27b stats: 64 layers, 24 heads, 4 KV heads, head_dim=64, freq_count=32
+  - The library uses `_GNU_SOURCE` for `sincosf()` optimization
+  - `tria_score_kv_head()` performs GQA aggregation across query heads per KV head
+  - Scores are z-normalized per query head, then max-aggregated across the GQA group
+
+---
+
 ## 2026-05-19 - lucebox-hub-gfx1151-dtri-vve
 - **Implemented**: DFlash + TriAttention 纯 C++ 集成 (KV cache compression)
 - **Files changed**:
