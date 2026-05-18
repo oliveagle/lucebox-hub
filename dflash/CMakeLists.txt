@@ -163,6 +163,19 @@ endif()
 # Use only the ggml subtree of llama.cpp (skip libllama).
 add_subdirectory(deps/llama.cpp/ggml EXCLUDE_FROM_ALL)
 
+# ─── TriAttention KV Compression ──────────────────────────────────────
+#
+# TriAttention provides KV cache compression for llama.cpp via trigonometric
+# frequency-domain scoring. Based on triattention-ggml by domvox.
+# Enable with -DDFLASH27B_TRIATTENTION=ON
+
+option(DFLASH27B_TRIATTENTION "Enable TriAttention KV compression" OFF)
+if(DFLASH27B_TRIATTENTION)
+    message(STATUS "TriAttention: enabled")
+    add_subdirectory(deps/llama.cpp/triattention)
+    set(GGML_TRIATTENTION ON CACHE BOOL "" FORCE)
+endif()
+
 if(DFLASH27B_GPU_BACKEND STREQUAL "hip")
     # The vendored ggml HIP shim still uses a few CUDA spellings that are not
     # mapped in this submodule snapshot. Keep the compatibility layer in this
@@ -239,11 +252,18 @@ add_library(dflash27b STATIC
     src/common/layer_split_utils.cpp
     src/common/ddtree.cpp
     src/common/peer_access.cpp
+    src/triattention_runner.cpp
 )
+
+# ─── TriAttention KV Compression (optional) ─────────────────────────────
+# When TriAttention is enabled, link the library and define the compile flag.
+if(DFLASH27B_TRIATTENTION)
+    target_compile_definitions(dflash27b PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
+    target_link_libraries(dflash27b PRIVATE triattention)
+endif()
+
 # BSA (Block-Sparse Attention) backs the speculative-prefill drafter scoring
 # path. Default ON so prefill is fast out of the box. Turn OFF if you don't
-# run the spec-prefill stack or are building without CUDA BF16 WMMA support
-# (cutlass BSA kernels need sm_80+; the auto-detect below also disables BSA on
 # legacy CUDA arches).
 if(NOT DEFINED DFLASH27B_ENABLE_BSA)
     set(DFLASH27B_ENABLE_BSA ON)

@@ -1,0 +1,2 @@
+/bin/ar qc libtriattention.a CMakeFiles/triattention.dir/triattention.c.o CMakeFiles/triattention.dir/triattention_score_ref.c.o
+/bin/ranlib libtriattention.a
