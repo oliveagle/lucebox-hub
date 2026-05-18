@@ -7,6 +7,8 @@ after each iteration and it's included in prompts for context.
 
 *Add reusable patterns discovered during development here.*
 
+- **CMake option pattern for features**: Feature flags in `dflash/CMakeLists.txt` follow a 3-part pattern: 1) `option(DFLASH27B_FEAT "description" OFF)` to define, 2) `add_subdirectory()` + `set(GGML_FEAT ON)` for library integration, 3) `target_compile_definitions(dflash27b PRIVATE DFLASH27B_FEAT_ENABLED=1)` + `target_link_libraries()` for compile-time guards.
+
 - **KV cache compaction with proper byte sizing**: When compacting KV caches, use `ggml_type_size()` and `ggml_blck_size()` to compute element sizes dynamically: `head_bytes = head_dim * ggml_type_size(type) / ggml_blck_size(type)`. This ensures correctness for any quantization type (Q4_0, Q8_0, etc.) instead of hardcoding byte sizes.
 - **In-place KV compaction uses temp buffer per position**: For each KV head, compact positions by copying one position at a time through a temp buffer. Avoids overlapping issues since each copy is a distinct src→dst pair (keep_indices[ki] → ki).
 - **tria_k_pre_rope must be compacted alongside KV cache**: The pre-RoPE K scoring buffer must be compacted in lockstep with the KV cache. After compaction, the buffer's layout at position i must correspond to the compacted KV at position i. Layout: [head_dim, max_ctx, n_head_kv] bf16.
