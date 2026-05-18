@@ -144,3 +144,51 @@ TriAttention KV cache compression integration:
 This should be done as a separate validation task after the integration is deployed.
 
 ---
+
+## 2026-05-18 - lucebox-hub-gfx1151-1oe.7
+
+### What was implemented
+
+Generated Qwen3-8B TriAttention frequency statistics file and fixed the calibrate_model.sh wrapper script to properly handle the required --input argument.
+
+### Files changed
+
+- `submodules/triattention/triattention/vllm/stats/qwen3_8b_stats.pt` — New calibration stats file (1.6 MB, 1152 heads)
+- `scripts/calibrate_model.sh` — Fixed to support required --input argument and proper option parsing
+
+### Learnings
+
+**Calibration requires text input**: The TriAttention calibrate.py script requires a --input argument with plain text. For calibration quality, diverse text covering multiple topics (CS, math, history) is recommended.
+
+**GPU driver compatibility**: The calibration on CUDA failed due to old NVIDIA driver (version 12020). Used CPU device instead, which worked but is slower.
+
+**Calibration stats format**: The output .pt file contains:
+- `metadata`: num_traces, head_dim, dtype, rope_style, rope_type, sampled_heads
+- `stats`: per-head q_mean_real, q_mean_imag, q_abs_mean tensors
+
+**Load function signature**: `load_head_frequency_stats(stats_path: Path, device: torch.device) -> tuple[metadata, stats]` (requires Path object and explicit device, returns tuple not dict).
+
+**1152 heads = 28 layers × 40 heads** for Qwen3-8B (num_layers=28, num_attention_heads=40, head_dim=128).
+
+---
+
+## 2026-05-18 - lucebox-hub-gfx1151-1oe.6
+
+### What was implemented
+
+Installed TriAttention package in editable mode using project virtual environment (`.venv/`). Also installed vLLM as a dependency.
+
+### Files changed
+
+- `.venv/` — Created Python 3.12 virtual environment
+- `submodules/triattention/` — Installed in editable mode (`pip install -e`)
+
+### Learnings
+
+**Virtual environment required for externally-managed Python**: The system Python is externally managed (PEP 668), preventing global package installation. Created `.venv/` for project-local dependencies.
+
+**TriAttention has no `__version__` attribute**: The module doesn't expose `triattention.__version__`, but `pip show triattention` correctly reports version 0.2.0.
+
+**vLLM entry point registration verified**: TriAttention plugin is correctly registered at `triattention.vllm.plugin:register_triattention_backend` in the `vllm.general_plugins` entry point group, alongside vLLM's built-in LoRA resolvers.
+
+---

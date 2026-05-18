@@ -3,10 +3,10 @@
   "sessionId": "9cca1fae-c669-4fc0-a115-f5369d63cd76",
   "status": "running",
   "startedAt": "2026-05-17T17:08:16.146Z",
-  "updatedAt": "2026-05-17T17:41:23.174Z",
-  "currentIteration": 2,
+  "updatedAt": "2026-05-18T05:06:12.084Z",
+  "currentIteration": 4,
   "maxIterations": 50,
-  "tasksCompleted": 1,
+  "tasksCompleted": 2,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -35,12 +35,33 @@
       "durationMs": 276175,
       "startedAt": "2026-05-17T17:33:57.993Z",
       "endedAt": "2026-05-17T17:38:34.168Z"
+    },
+    {
+      "iteration": 3,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-1oe.5",
+      "taskTitle": "M5: 验证测试 (基准测试报告)",
+      "taskCompleted": true,
+      "durationMs": 167889,
+      "startedAt": "2026-05-17T17:38:35.275Z",
+      "endedAt": "2026-05-17T17:41:23.164Z"
+    },
+    {
+      "iteration": 4,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-1oe.6",
+      "taskTitle": "安装 TriAttention 包并验证",
+      "taskCompleted": false,
+      "durationMs": 600918,
+      "startedAt": "2026-05-18T04:36:52.181Z",
+      "endedAt": "2026-05-18T04:46:53.099Z"
     }
   ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
   "activeTaskIds": [
-    "lucebox-hub-gfx1151-1oe.2"
+    "lucebox-hub-gfx1151-1oe.2",
+    "lucebox-hub-gfx1151-1oe.6"
   ],
   "subagentPanelVisible": false
 }
