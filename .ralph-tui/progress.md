@@ -7,10 +7,27 @@ after each iteration and it's included in prompts for context.
 
 *Add reusable patterns discovered during development here.*
 
+- **Pre-RoPE K capture for TriAttention**: In `build_full_attn_block()`, capture K after `rms_norm_mul()` but before `ggml_rope_multi()`. Store in `cache.tria_k_pre_rope` buffer (shape `[head_dim, max_ctx, n_head_kv]` bf16). Use `ggml_permute()` to transpose to `[head_dim, n_tokens, n_head_kv]` before copying to cache slot at offset `nb[1] * kv_start`. Gated by `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` compile-time guard.
 - **Qwen3.6-27B TriAttention stats**: Pre-built at `submodules/triattention/triattention/vllm/stats/qwen3_6_27b_stats.pt` (1.6MB). Covers layers 3-63 (every 4th layer), 48 heads each = 768 heads total. `head_dim=256`, `dtype=bfloat16`.
 - **DFlash + TriAttention C++ integration**: Include `triattention.h` directly in C++ wrapper. Use full struct definition (not forward declaration) to access nested fields like `layer_budget_scales`.
 
 
+---
+
+## 2026-05-19 - lucebox-hub-gfx1151-0e5
+- **Implemented**: Pre-RoPE K capture in DFlash target graph's `build_full_attn_block()` for TriAttention scoring
+- **Files changed**:
+  - `dflash/src/qwen35/qwen35_target_graph.cpp`: 
+    1. Added `tria_k_pre_rope` allocation (bf16 buffer, shape `[head_dim, max_ctx_alloc, n_head_kv]`) in `create_target_cache_partial()` gated by `#if defined(DFLASH27B_TRIATTENTION_ENABLED)`
+    2. Added pre-RoPE K capture in `build_full_attn_block()`: after K normalization, before M-RoPE, copy K to `tria_k_pre_rope` at position slot
+    3. Added `tria_k_pre_rope` parameter to `build_full_attn_block()` signature, updated both call sites (`build_single_layer` and `build_qwen35_graph`)
+    4. Added `tria_k_pre_rope = nullptr;` cleanup in `free_target_cache()`
+- **Build verification**: Successfully compiled `libdflash27b.a`, `test_dflash`, `pflash_daemon`
+- **Learnings:**
+  - `build_full_attn_block()` is called from two call sites with different signatures (one uses named params like `q_tail_capture, q_tail_start`, the other uses default params)
+  - The TriAttention pre-RoPE K buffer is separate from the quantized KV cache (uses bf16 for scoring accuracy)
+  - Capture happens inline in the compute graph via `ggml_cpy`, no extra host-side copy needed
+  - The `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` compile-time guard ensures zero overhead when TriAttention is not enabled
 ---
 
 ## 2026-05-18 - lucebox-hub-gfx1151-z0k.1

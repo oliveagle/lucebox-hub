@@ -137,7 +137,16 @@ bool create_target_cache_partial(const TargetWeights & w,
 
     // ── Base context: KV cache + SSM/conv state + target_feat ────────
     {
-        const int base_tensors = 2 * n_full_attn + 2 * n_delta + 1;
+        // Pre-RoPE K cache for TriAttention scoring: [head_dim, max_ctx_alloc, n_head_kv].
+        // Stored as bf16 alongside the quantized KV cache so TriAttention can
+        // access the original K vectors for frequency-domain scoring.
+        const bool need_triattention =
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+            true;
+#else
+            false;
+#endif
+        const int base_tensors = 2 * n_full_attn + 2 * n_delta + (need_triattention ? 1 : 0) + 1;
         ggml_init_params ip{};
         ip.mem_size   = (size_t)(base_tensors + 16) * ggml_tensor_overhead();
         ip.mem_buffer = nullptr;
@@ -180,6 +189,20 @@ bool create_target_cache_partial(const TargetWeights & w,
                 dn_idx++;
             }
         }
+
+        // ── TriAttention pre-RoPE K cache (single shared buffer for all FA layers) ──
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+        if (need_triattention) {
+            // Allocate a shared buffer for all full-attention layers' pre-RoPE K.
+            // Shape: [head_dim, max_ctx_alloc, n_head_kv] bf16
+            // This stores K vectors before RoPE for TriAttention frequency-domain scoring.
+            out.tria_k_pre_rope = ggml_new_tensor_3d(out.base_ctx, GGML_TYPE_BF16,
+                                                      head_dim, max_ctx_alloc, w.n_head_kv);
+            ggml_set_name(out.tria_k_pre_rope, "tria_k_pre_rope");
+        } else {
+            out.tria_k_pre_rope = nullptr;
+        }
+#endif
 
         constexpr int TARGET_FEAT_CAP_DEFAULT = 4096;
         out.target_feat_cap = std::min(max_ctx, TARGET_FEAT_CAP_DEFAULT);
@@ -282,6 +305,7 @@ void free_target_cache(TargetCache & c) {
     c.ssm_intermediate.clear();
     c.conv_input_cache.clear();
     c.target_feat = nullptr;
+    c.tria_k_pre_rope = nullptr;
     c.cur_pos = 0;
 }
 
@@ -457,7 +481,8 @@ static ggml_tensor * build_full_attn_block(
     bool kv_k_rotated = false,
     int fa_window = 0,
     ggml_tensor * q_tail_capture = nullptr,
-    int q_tail_start = 0
+    int q_tail_start = 0,
+    ggml_tensor * tria_k_pre_rope = nullptr
 ) {
     const int head_dim = w.n_embd_head_k;
     const int n_head = w.n_head;
@@ -492,6 +517,24 @@ static ggml_tensor * build_full_attn_block(
     Kcur = ggml_reshape_3d(ctx, Kcur, head_dim, n_head_kv, n_tokens);
     Kcur = rms_norm_mul(ctx, Kcur, L.k_norm, w.rms_eps);
     Vcur = ggml_reshape_3d(ctx, Vcur, head_dim, n_head_kv, n_tokens);
+
+    // ── TriAttention: capture pre-RoPE K for frequency-domain scoring ──
+    // Store K before RoPE is applied so TriAttention can score based on the
+    // original key vectors. This is stored in a separate bf16 buffer that
+    // persists across forward passes.
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    if (tria_k_pre_rope) {
+        // Kcur is [head_dim, n_head_kv, n_tokens] (permuted for cache write).
+        // For TriAttention scoring we need the same layout but at a position slot.
+        ggml_tensor * Kpre_T = ggml_permute(ctx, Kcur, 0, 2, 1, 3);  // [head_dim, n_tokens, n_head_kv]
+        // View the TriAttention pre-RoPE K cache at the slot for these tokens.
+        ggml_tensor * k_slot = ggml_view_3d(ctx, tria_k_pre_rope,
+            head_dim, n_tokens, n_head_kv,
+            tria_k_pre_rope->nb[1], tria_k_pre_rope->nb[2],
+            /*offset*/ tria_k_pre_rope->nb[1] * kv_start);
+        ggml_build_forward_expand(gf, ggml_cpy(ctx, Kpre_T, k_slot));
+    }
+#endif
 
     // ── M-RoPE (multi-axis rotary). n_rot = HEAD_DIM/4 * 4 ? Actually
     //    ggml_rope_multi takes n_dims = the number of dims to rotate; for
@@ -942,7 +985,8 @@ static ggml_tensor * build_single_layer(
                                     cache.kv_k_type, cache.kv_v_type,
                                     cache.kv_k_rotated,
                                     fa_window,
-                                    q_tail_capture, q_tail_start);
+                                    q_tail_capture, q_tail_start,
+                                    cache.tria_k_pre_rope);
     } else {
         int dn_idx = 0;
         for (int il = 0; il < layer_idx; il++) {
@@ -1047,7 +1091,9 @@ QwenGraphOutputs build_qwen35_graph(
                                         in.attn_mask, in.kv_start, n_tokens,
                                         cache.kv_k_type, cache.kv_v_type,
                                         cache.kv_k_rotated,
-                                        in.fa_window);
+                                        in.fa_window,
+                                        /*q_tail_capture*/ nullptr, 0,
+                                        cache.tria_k_pre_rope);
             fa_idx++;
         } else {
             DeltaNetCapture * cap_ptr = nullptr;
