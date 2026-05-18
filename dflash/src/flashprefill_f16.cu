@@ -305,8 +305,8 @@ __global__ void sparse_flash_forward_kernel_f16(
                     int j = k_lo + row8;
                     half2 * dst = reinterpret_cast<half2*>(KV_sh + row8 * D_HEAD + d8 * 8);
                     if (j < seq_len) {
-                        const half2 * src = reinterpret_cast<const half2*>(Kp)
-                            + (size_t)j * s_K_n + (size_t)(d8 * 8);
+                        const half2 * src = reinterpret_cast<const half2*>(
+                            Kp + (size_t)j * s_K_n + (size_t)(d8 * 8));
                         dst[0] = src[0]; dst[1] = src[1];
                         dst[2] = src[2]; dst[3] = src[3];
                     } else {
@@ -474,8 +474,8 @@ __global__ void sparse_flash_forward_kernel_f16(
                     int j = k_lo + row8;
                     half2 * dst = reinterpret_cast<half2*>(KV_sh + row8 * D_HEAD + d8 * 8);
                     if (j < seq_len) {
-                        const half2 * src = reinterpret_cast<const half2*>(Vp)
-                            + (size_t)j * s_V_n + (size_t)(d8 * 8);
+                        const half2 * src = reinterpret_cast<const half2*>(
+                            Vp + (size_t)j * s_V_n + (size_t)(d8 * 8));
                         dst[0] = src[0]; dst[1] = src[1];
                         dst[2] = src[2]; dst[3] = src[3];
                     } else {
@@ -583,7 +583,7 @@ extern "C" void launch_sparse_flash_forward_f16(
 // the max of scores[b,m,n,h] for the threshold, then re-scans applying the
 // keep predicate (sink | window | last_n_full | score >= max*alpha).
 
-__global__ void block_select_kernel(
+__global__ void block_select_kernel_f16(
     const float * __restrict__ score,
     int B, int M, int N, int H,
     int attention_sink, int window, int last_n_full, float alpha,
@@ -651,7 +651,7 @@ __global__ void block_select_kernel(
     }
 }
 
-extern "C" void launch_block_select(
+extern "C" void launch_block_select_f16(
     const float * score,
     int B, int M, int N, int H,
     int attention_sink, int window, int last_n_full, float alpha,
@@ -663,7 +663,7 @@ extern "C" void launch_block_select(
 {
     dim3 grid(B, M, H);
     dim3 block(32, 1, 1);
-    block_select_kernel<<<grid, block, 0, stream>>>(
+    block_select_kernel_f16<<<grid, block, 0, stream>>>(
         score, B, M, N, H,
         attention_sink, window, last_n_full, alpha,
         s_b, s_m, s_n, s_h,

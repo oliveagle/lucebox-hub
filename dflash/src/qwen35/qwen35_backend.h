@@ -16,7 +16,7 @@
 #include "common/device_placement.h"
 #include "step_graph.h"
 #include "ddtree.h"
-#include "draft_feature_mirror.h"
+#include "dflash_feature_ring.h"
 #include "internal.h"         // TargetWeights, TargetCache, DraftWeights, PrefixSnapshot
 #include "qwen3/qwen3_drafter.h"  // DrafterContext, load_drafter, free_drafter, drafter_score_and_compress
 
@@ -146,14 +146,22 @@ private:
 
     // ── Internal helpers ─────────────────────────────────────────────
     // Prefill a prompt and return the number of tokens committed to KV.
+    // kv_offset > 0 resumes from a restored snapshot: tokens are placed at
+    // KV positions [kv_offset, kv_offset + tokens.size()) instead of [0, N).
     int do_prefill(const std::vector<int32_t> & tokens,
                    const DaemonIO & io,
-                   int snap_pos = -1, int snap_slot = -1);
+                   int snap_pos = -1, int snap_slot = -1,
+                   int kv_offset = 0);
 
     // Speculative decode loop: draft → verify → accept until EOS/max.
     bool do_spec_decode(int committed, int n_gen,
                         std::vector<int32_t> & out_tokens,
                         const DaemonIO & io);
+
+    // AR decode fallback (no draft model or sampling mode).
+    bool do_ar_decode(int committed, int n_gen,
+                      std::vector<int32_t> & out_tokens,
+                      const DaemonIO & io);
 
     // Chain-mode verify (single batch of q_len tokens).
     int verify_chain(int committed, const int32_t * draft_tok, int q_len);

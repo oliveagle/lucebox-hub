@@ -12,6 +12,7 @@ from server import (
     build_app, MODEL_NAME,
     parse_tool_calls, parse_reasoning,
     normalize_stop, first_stop_match,
+    _thinking_enabled, strip_closed_think_prefill, split_unclosed_thinking,
 )
 
 
@@ -23,6 +24,7 @@ def mock_tokenizer():
     tokenizer.encode.return_value = [1]
     tokenizer.decode.return_value = "hello"
     tokenizer.apply_chat_template.return_value = "prompt"
+    tokenizer.vocab_size = 151936
     return tokenizer
 
 
@@ -75,11 +77,25 @@ class TestParseReasoning:
         assert reasoning is None
 
     def test_started_in_thinking_no_close_tag(self):
-        """Truncated reasoning when prompt started in thinking mode."""
+        """Unclosed thinking still returns visible content instead of empty text."""
         cleaned, reasoning = parse_reasoning(
             "unfinished thought", started_in_thinking=True)
-        assert cleaned == ""
-        assert reasoning == "unfinished thought"
+        assert cleaned == "unfinished thought"
+        assert reasoning is None
+
+    def test_started_in_thinking_no_close_tag_splits_final_paragraph(self):
+        cleaned, reasoning = parse_reasoning(
+            "I should answer exactly.\n\nlucebox-client-ok",
+            started_in_thinking=True)
+        assert cleaned == "lucebox-client-ok"
+        assert reasoning == "I should answer exactly."
+
+    def test_started_in_thinking_no_close_tag_splits_final_answer_marker(self):
+        cleaned, reasoning = parse_reasoning(
+            "Compute the sum.\n\nFinal Answer: 4",
+            started_in_thinking=True)
+        assert cleaned == "4"
+        assert reasoning == "Compute the sum.\n\nFinal Answer:"
 
     def test_started_in_thinking_with_close_tag(self):
         """Full reasoning block when prompt started in thinking mode."""
@@ -103,6 +119,30 @@ class TestParseReasoning:
         cleaned, reasoning = parse_reasoning("</think>\n</think>\n8")
         assert cleaned == "8"
         assert reasoning is None
+
+
+class TestThinkingDefaults:
+    def test_thinking_enabled_defaults_off(self):
+        assert _thinking_enabled(None) is False
+        assert _thinking_enabled({}) is False
+        assert _thinking_enabled({"enable_thinking": True}) is True
+        assert _thinking_enabled({"enable_thinking": False}) is False
+
+    def test_strip_closed_think_prefill_at_end(self):
+        assert strip_closed_think_prefill("prompt<think></think>\n") == "prompt"
+        assert strip_closed_think_prefill("prompt<think>\n\n</think>\n\n") == "prompt"
+
+    def test_strip_closed_think_prefill_only_at_end(self):
+        text = "prompt<think></think>\nanswer"
+        assert strip_closed_think_prefill(text) == text
+
+    def test_split_unclosed_thinking_code_block(self):
+        content, reasoning = split_unclosed_thinking(
+            "Plan the function.\n\n**Final Output:** Provide the code.\n\n"
+            "```python\ndef add(a, b):\n    return a + b\n```")
+        assert content.startswith("```python")
+        assert "return a + b" in content
+        assert "Plan the function." in reasoning
 
 
 # ─── parse_tool_calls ─────────────────────────────────────────────
@@ -486,6 +526,49 @@ def test_zero_token_prompt_is_rejected_before_daemon(
     assert data["error"]["param"] == "messages"
     assert "zero tokens" in data["error"]["message"]
     mock_os_read.assert_not_called()
+
+
+@patch("server.os.pipe")
+@patch("server.os.read")
+def test_chat_template_disables_thinking_by_default_and_strips_closed_prefill(
+        mock_os_read, mock_pipe, mock_tokenizer, app):
+    mock_pipe.return_value = (1, 2)
+    mock_tokenizer.apply_chat_template.return_value = "prompt<think></think>\n"
+    mock_os_read.side_effect = [struct.pack("<i", 10), struct.pack("<i", -1)]
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json={
+        "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": False,
+    })
+
+    assert response.status_code == 200
+    kwargs = mock_tokenizer.apply_chat_template.call_args_list[-1][1]
+    assert kwargs["enable_thinking"] is False
+    assert mock_tokenizer.encode.call_args_list[-1][0][0] == "prompt"
+
+
+@patch("server.os.pipe")
+@patch("server.os.read")
+def test_chat_template_can_explicitly_enable_thinking(
+        mock_os_read, mock_pipe, mock_tokenizer, app):
+    mock_pipe.return_value = (1, 2)
+    mock_tokenizer.apply_chat_template.return_value = "prompt<think>\n"
+    mock_os_read.side_effect = [struct.pack("<i", 10), struct.pack("<i", -1)]
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json={
+        "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": "hi"}],
+        "chat_template_kwargs": {"enable_thinking": True},
+        "stream": False,
+    })
+
+    assert response.status_code == 200
+    kwargs = mock_tokenizer.apply_chat_template.call_args_list[-1][1]
+    assert kwargs["enable_thinking"] is True
+    assert mock_tokenizer.encode.call_args_list[-1][0][0] == "prompt<think>\n"
 
 
 @patch("server.os.pipe")
@@ -939,3 +1022,60 @@ def test_responses_instructions_and_developer_merged(mock_os_read, mock_pipe,
     assert len(system_msgs) == 1
     assert "Top-level instructions." in system_msgs[0]["content"]
     assert "Developer context." in system_msgs[0]["content"]
+
+
+# ─── out-of-range token filtering (OverflowError regression) ───────
+
+@patch("server.os.pipe")
+@patch("server.os.read")
+def test_out_of_range_token_non_streaming_returns_200(
+        mock_os_read, mock_pipe, mock_tokenizer, app):
+    """Daemon emits a negative sentinel-like token (-2) that is not the EOS
+    sentinel (-1).  Without filtering, tokenizer.decode([-2]) raises
+    OverflowError → 500.  After the fix the token is silently dropped and
+    the endpoint returns 200 with empty content rather than crashing."""
+    mock_pipe.return_value = (1, 2)
+    # Make decode raise for any negative token to mirror HF tokenizer behaviour
+    def _decode(ids, **_kw):
+        if any(t < 0 or t >= 151936 for t in ids):
+            raise OverflowError("out of range integral type conversion attempted")
+        return "hello"
+    mock_tokenizer.decode.side_effect = _decode
+    # Daemon stream: bogus token (-2) then EOS sentinel (-1)
+    mock_os_read.side_effect = [struct.pack("<i", -2), struct.pack("<i", -1)]
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json={
+        "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": False,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "choices" in data
+    assert data["choices"][0]["finish_reason"] == "stop"
+
+
+@patch("server.os.pipe")
+@patch("server.os.read")
+def test_out_of_range_token_streaming_returns_200(
+        mock_os_read, mock_pipe, mock_tokenizer, app):
+    """Same contract for the streaming path: bad token is dropped, no crash."""
+    mock_pipe.return_value = (1, 2)
+    def _decode(ids, **_kw):
+        if any(t < 0 or t >= 151936 for t in ids):
+            raise OverflowError("out of range integral type conversion attempted")
+        return ""
+    mock_tokenizer.decode.side_effect = _decode
+    mock_os_read.side_effect = [struct.pack("<i", -2), struct.pack("<i", -1)]
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json={
+        "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": True,
+    })
+
+    assert response.status_code == 200
+    assert "data: [DONE]" in response.text
