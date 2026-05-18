@@ -213,7 +213,16 @@ after each iteration and it's included in prompts for context.
   - Always check for existing pre-built stats before running calibration
 ---
 
-## 2026-05-18 - lucebox-hub-gfx1151-xlc
+## 2026-05-19 - lucebox-hub-gfx1151-wqi
+- **Verified**: `tria_score_kv_head()` integration already complete in previous iterations
+- **Implementation chain**:
+  1. `build_full_attn_block()` (qwen35_target_graph.cpp:526-537): captures pre-RoPE K via `ggml_cpy()` to `tria_k_pre_rope` buffer
+  2. `tria_kv_compress()` (triattention_compress.cpp:287): calls `tria_score_kv_head()` per KV head per full-attention layer
+  3. `spec_decode.cpp` (line 249): triggers compression via `tria_kv_compress()` after each commit
+- **Architecture**: GPU forward captures K → CPU scores+compresses → D2H/H2D writes back compacted cache
+- **Build verification**: Successfully compiled `libdflash27b.a` with full TriAttention integration
+
+---
 - **Implemented**: DFlash + TriAttention integration Phase 1 (Foundation)
 - **Files changed**:
   - `dflash/src/internal.h`: Added TriAttentionState to TargetCache, tria_k_pre_rope placeholder
