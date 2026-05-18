@@ -3,10 +3,10 @@
   "sessionId": "86d47642-41ce-4ca5-9015-d2c47f059021",
   "status": "running",
   "startedAt": "2026-05-18T14:21:50.531Z",
-  "updatedAt": "2026-05-18T18:34:55.452Z",
-  "currentIteration": 7,
+  "updatedAt": "2026-05-18T18:56:57.115Z",
+  "currentIteration": 8,
   "maxIterations": 50,
-  "tasksCompleted": 6,
+  "tasksCompleted": 7,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -212,13 +212,22 @@
       "durationMs": 90851,
       "startedAt": "2026-05-18T18:33:22.974Z",
       "endedAt": "2026-05-18T18:34:53.825Z"
+    },
+    {
+      "iteration": 8,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-dtri-vve.3",
+      "taskTitle": "集成 KV Scoring 到 Decode 循环",
+      "taskCompleted": true,
+      "durationMs": 288267,
+      "startedAt": "2026-05-18T18:34:55.400Z",
+      "endedAt": "2026-05-18T18:39:43.667Z"
     }
   ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
   "activeTaskIds": [
-    "lucebox-hub-gfx1151-1oe.2",
-    "lucebox-hub-gfx1151-dtri-vve.3"
+    "lucebox-hub-gfx1151-1oe.2"
   ],
   "subagentPanelVisible": false
 }

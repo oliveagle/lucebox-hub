@@ -7,6 +7,9 @@ after each iteration and it's included in prompts for context.
 
 *Add reusable patterns discovered during development here.*
 
+- **KV cache compaction with proper byte sizing**: When compacting KV caches, use `ggml_type_size()` and `ggml_blck_size()` to compute element sizes dynamically: `head_bytes = head_dim * ggml_type_size(type) / ggml_blck_size(type)`. This ensures correctness for any quantization type (Q4_0, Q8_0, etc.) instead of hardcoding byte sizes.
+- **In-place KV compaction uses temp buffer per position**: For each KV head, compact positions by copying one position at a time through a temp buffer. Avoids overlapping issues since each copy is a distinct src→dst pair (keep_indices[ki] → ki).
+- **tria_k_pre_rope must be compacted alongside KV cache**: The pre-RoPE K scoring buffer must be compacted in lockstep with the KV cache. After compaction, the buffer's layout at position i must correspond to the compacted KV at position i. Layout: [head_dim, max_ctx, n_head_kv] bf16.
 - **Pre-RoPE K capture for TriAttention**: In `build_full_attn_block()`, capture K after `rms_norm_mul()` but before `ggml_rope_multi()`. Store in `cache.tria_k_pre_rope` buffer (shape `[head_dim, max_ctx, n_head_kv]` bf16). Use `ggml_permute()` to transpose to `[head_dim, n_tokens, n_head_kv]` before copying to cache slot at offset `nb[1] * kv_start`. Gated by `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` compile-time guard.
 - **Qwen3.6-27B TriAttention stats**: Pre-built at `submodules/triattention/triattention/vllm/stats/qwen3_6_27b_stats.pt` (1.6MB). Covers layers 3-63 (every 4th layer), 48 heads each = 768 heads total. `head_dim=256`, `dtype=bfloat16`.
 - **DFlash + TriAttention C++ integration**: Include `triattention.h` directly in C++ wrapper. Use full struct definition (not forward declaration) to access nested fields like `layer_budget_scales`.
@@ -77,6 +80,31 @@ after each iteration and it's included in prompts for context.
   - The TriAttention pre-RoPE K buffer is separate from the quantized KV cache (uses bf16 for scoring accuracy)
   - Capture happens inline in the compute graph via `ggml_cpy`, no extra host-side copy needed
   - The `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` compile-time guard ensures zero overhead when TriAttention is not enabled
+---
+
+## 2026-05-19 - lucebox-hub-gfx1151-dtri-vve.4
+- **Implemented**: KV cache in-place compaction with proper quantization type handling and tria_k_pre_rope consistency
+- **Files changed**:
+  - `dflash/src/triattention_compress.cpp`:
+    1. Refactored compaction from element-by-element D2H/H2D to efficient in-place memcpy via helper functions
+    2. Added `compact_kv_head_positions()` helper for copying KV positions within a single head
+    3. Added `compact_tria_k_pre_rope()` helper to compact the pre-RoPE K buffer in lockstep with KV cache
+    4. Added `ggml_type` parameters to `tria_kv_compress()` for dynamic element size calculation
+    5. Use `ggml_type_size()` and `ggml_blck_size()` to compute proper element sizes for any quantization type
+    6. Added diagnostic output for compaction verification
+  - `dflash/src/triattention_runner.h`:
+    1. Added `#include "ggml.h"` for `ggml_type` enum
+    2. Updated `tria_kv_compress()` signature to include `k_type` and `v_type` parameters
+  - `dflash/src/qwen35/spec_decode.cpp`:
+    1. Updated caller to pass `cache.kv_k_type` and `cache.kv_v_type` to `tria_kv_compress()`
+- **Build verification**: Successfully compiled `libdflash27b.a` with enhanced KV compaction
+- **Learnings**:
+  - **Quantization element size calculation**: `ggml_type_size()` returns bytes per block, `ggml_blck_size()` returns elements per block. For head_dim=128 with Q8_0 (1 byte/block, 1 elem/block): `k_bytes = 128 * 1 / 1 = 128`.
+  - **In-place compaction safety**: Since we copy from higher positions to lower positions (compaction), overlapping is handled correctly by processing each position independently through a temp buffer.
+  - **tria_k_pre_rope consistency**: Must compact the pre-RoPE K buffer with the same indices as KV cache. The `build_full_attn_block()` captures pre-RoPE K at `kv_start` offset; after compaction, position `i` in the buffer must correspond to position `i` in the compressed KV cache.
+  - **Layout alignment**: All buffers share the same layout `[head_dim, max_ctx, n_head_kv]`. Stride calculation: `offset = (kv_head * max_ctx + pos) * head_bytes`.
+  - **Position IDs are dynamically calculated**: The spec_decode loop uses `committed` (which is updated to `n_kept`) for position calculation in subsequent forward passes. No explicit position ID remapping needed.
+
 ---
 
 ## 2026-05-19 - lucebox-hub-gfx1151-dtri-vve.3

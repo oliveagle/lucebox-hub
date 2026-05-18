@@ -108,6 +108,71 @@ static std::vector<int> select_top_k_with_window(
     return result;
 }
 
+// ─── Helper: Copy positions from src to dst for a single KV head ─────
+// Copies positions in keep_indices order: position keep_indices[i] goes to position i
+// Uses overlapping-safe copy (handles in-place compaction correctly).
+static void compact_kv_head_positions(
+    void * cache_data,
+    int kv_head,
+    int max_ctx,
+    int kv_start,
+    const std::vector<int> & keep_indices,
+    int actual_keep,
+    size_t head_bytes)
+{
+    if (!cache_data || actual_keep == 0) return;
+
+    const size_t head_stride = max_ctx * head_bytes;
+
+    for (int ki = 0; ki < actual_keep; ki++) {
+        const int src_pos = keep_indices[ki];  // relative to kv_start
+        const int dst_pos = ki;
+
+        if (src_pos == dst_pos) continue;
+
+        const size_t src_offset = ((size_t)kv_head * head_stride) + ((size_t)kv_start + src_pos) * head_bytes;
+        const size_t dst_offset = ((size_t)kv_head * head_stride) + ((size_t)kv_start + dst_pos) * head_bytes;
+
+        std::vector<uint8_t> tmp(head_bytes);
+        std::memcpy(tmp.data(), (char*)cache_data + src_offset, head_bytes);
+        std::memcpy((char*)cache_data + dst_offset, tmp.data(), head_bytes);
+    }
+}
+
+// ─── Helper: Compact tria_k_pre_rope buffer ─────────────────────────────
+// Compacts the pre-RoPE K buffer in-place to match the KV cache compaction.
+// This ensures that subsequent forward passes read the correct pre-RoPE K data.
+static void compact_tria_k_pre_rope(
+    void * tria_data,
+    int head_dim,
+    int max_ctx,
+    int n_head_kv,
+    const std::vector<int> & keep_indices,
+    int kv_start,
+    int actual_keep)
+{
+    if (!tria_data || actual_keep == 0) return;
+
+    const size_t head_bytes = (size_t)head_dim * sizeof(uint16_t);
+    const size_t head_stride = max_ctx * head_bytes;
+
+    for (int h = 0; h < n_head_kv; h++) {
+        for (int ki = 0; ki < actual_keep; ki++) {
+            const int src_pos = keep_indices[ki];
+            const int dst_pos = ki;
+
+            if (src_pos == dst_pos) continue;
+
+            const size_t src_offset = ((size_t)h * head_stride) + ((size_t)kv_start + src_pos) * head_bytes;
+            const size_t dst_offset = ((size_t)h * head_stride) + ((size_t)kv_start + dst_pos) * head_bytes;
+
+            std::vector<uint8_t> tmp(head_bytes);
+            std::memcpy(tmp.data(), (char*)tria_data + src_offset, head_bytes);
+            std::memcpy((char*)tria_data + dst_offset, tmp.data(), head_bytes);
+        }
+    }
+}
+
 // ── Main KV compression function ────────────────────────────────────────
 
 bool tria_kv_compress(
@@ -123,8 +188,14 @@ bool tria_kv_compress(
     int cur_pos,
     int gpu_id,
     float keep_ratio,
-    int * n_kept_out)
+    int * n_kept_out,
+    enum ggml_type k_type,
+    enum ggml_type v_type)
 {
+    // Get element sizes from ggml types
+    const size_t k_bytes = head_dim * ggml_type_size(k_type) / ggml_blck_size(k_type);
+    const size_t v_bytes = head_dim * ggml_type_size(v_type) / ggml_blck_size(v_type);
+
     if (!stats || cur_pos <= 0) {
         if (n_kept_out) *n_kept_out = cur_pos;
         return true;
@@ -261,34 +332,28 @@ bool tria_kv_compress(
         gpuSetDevice(gpu_id);
     }
 
-    // Determine quantization element size (default Q8_0 = 1 byte)
-    // In a full implementation, this would come from cache metadata
-    const size_t elem_size = 1;
+    std::fprintf(stderr, "[TriAttention] Compacting %d FA layers, %d KV heads, k_bytes=%zu, v_bytes=%zu\n",
+                n_full_attn, n_head_kv, k_bytes, v_bytes);
 
     for (int fa_layer = 0; fa_layer < n_full_attn; fa_layer++) {
         if (!attn_k[fa_layer] || !attn_v[fa_layer]) continue;
 
-        // For each KV head, compact in-place: move kept positions to front
         for (int h = 0; h < n_head_kv; h++) {
-            for (int ki = 0; ki < actual_keep; ki++) {
-                const int src_pos = kv_start + keep_indices[ki];
-                const int dst_pos = kv_start + ki;
+            // K cache compaction
+            compact_kv_head_positions(attn_k[fa_layer], h, max_ctx, kv_start,
+                                     keep_indices, actual_keep, k_bytes);
 
-                if (src_pos == dst_pos) continue;
-
-                const size_t head_stride = (size_t)head_dim * elem_size;
-                const size_t k_src = ((size_t)h * max_ctx + src_pos) * head_stride;
-                const size_t k_dst = ((size_t)h * max_ctx + dst_pos) * head_stride;
-                const size_t v_src = ((size_t)h * max_ctx + src_pos) * head_stride;
-                const size_t v_dst = ((size_t)h * max_ctx + dst_pos) * head_stride;
-
-                std::vector<uint8_t> tmp(head_stride);
-                gpuMemcpy(tmp.data(), (char*)attn_k[fa_layer] + k_src, head_stride, gpuMemcpyDtoH);
-                gpuMemcpy((char*)attn_k[fa_layer] + k_dst, tmp.data(), head_stride, gpuMemcpyHtoD);
-                gpuMemcpy(tmp.data(), (char*)attn_v[fa_layer] + v_src, head_stride, gpuMemcpyDtoH);
-                gpuMemcpy((char*)attn_v[fa_layer] + v_dst, tmp.data(), head_stride, gpuMemcpyHtoD);
-            }
+            // V cache compaction
+            compact_kv_head_positions(attn_v[fa_layer], h, max_ctx, kv_start,
+                                     keep_indices, actual_keep, v_bytes);
         }
+    }
+
+    // Also compact the tria_k_pre_rope buffer to maintain consistency
+    if (k_pre_rope_gpu) {
+        std::fprintf(stderr, "[TriAttention] Compacting tria_k_pre_rope buffer\n");
+        compact_tria_k_pre_rope(k_pre_rope_gpu, head_dim, max_ctx, n_head_kv,
+                               keep_indices, kv_start, actual_keep);
     }
 #endif
 

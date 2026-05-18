@@ -29,6 +29,8 @@
 #include <string>
 #include <vector>
 
+#include "ggml.h"
+
 // Include the full TriAttention C library header for tria_stats definition
 #include "triattention.h"
 
@@ -133,6 +135,8 @@ void free_triattention();
 //   gpu_id          — GPU device ID for D2H/H2D copies
 //   keep_ratio      — fraction of positions to keep (0.0-1.0)
 //   n_kept_out      — [out] number of positions kept after compression
+//   k_type          — ggml_type of K cache (for element size calculation)
+//   v_type          — ggml_type of V cache (for element size calculation)
 //
 // Returns true on success. The KV cache is compacted in-place: kept positions
 // are moved to the front [kv_start..kv_start+n_kept). cur_pos should be updated
@@ -150,6 +154,8 @@ bool tria_kv_compress(
     int cur_pos,
     int gpu_id,
     float keep_ratio,
-    int * n_kept_out);
+    int * n_kept_out,
+    enum ggml_type k_type,
+    enum ggml_type v_type);
 
 } // namespace dflash27b

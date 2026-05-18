@@ -259,7 +259,9 @@ bool run_target_layer_split_dflash_decode(
                 committed,  // cur_pos
                 output_gpu,  // gpu_id
                 keep_ratio,
-                &n_kept);
+                &n_kept,
+                cache.kv_k_type,
+                cache.kv_v_type);
 
             if (ok && n_kept < committed) {
                 // Update cache position to compressed length
