@@ -29,25 +29,8 @@
 #include <string>
 #include <vector>
 
-// Forward declaration of the C struct
-struct tria_stats;
-
-// C linkage for the TriAttention C library functions
-extern "C" {
-    struct tria_stats * tria_load(const char *path);
-    void tria_free(struct tria_stats *stats);
-    void tria_score_kv_head(
-        const struct tria_stats *stats,
-        const float *k_pre_real,
-        const float *k_pre_imag,
-        const int   *key_pos,
-        int          cur_pos,
-        int          seq_len,
-        int          layer_idx,
-        int          kv_head_idx,
-        float       *out_scores
-    );
-}
+// Include the full TriAttention C library header for tria_stats definition
+#include "triattention.h"
 
 namespace dflash27b {
 

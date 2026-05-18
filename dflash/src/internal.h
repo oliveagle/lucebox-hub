@@ -24,6 +24,10 @@
 
 #include "dflash27b.h"
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+#include "triattention_runner.h"
+#endif
+
 namespace dflash27b {
 
 // Single source of truth for error reporting.
@@ -324,6 +328,17 @@ struct TargetCache {
     // cast (ggml_get_to_fp32_cuda).
     ggml_tensor * target_feat = nullptr;
     int target_feat_cap = 0;
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    // TriAttention KV compression state. Manages the lifecycle of
+    // per-layer frequency statistics and compression tracking.
+    TriAttentionState tria_state;
+
+    // Pre-RoPE K cache for TriAttention scoring. Shape [fc, max_ctx, n_head_kv].
+    // Stored as separate from post-RoPE K because TriAttention needs the
+    // pre-rotated K for frequency-domain scoring.
+    ggml_tensor * tria_k_pre_rope = nullptr;
+#endif
 };
 
 // Snapshot the current SSM+conv state into TargetCache::*_snap tensors.

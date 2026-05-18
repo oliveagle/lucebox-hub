@@ -8,11 +8,26 @@
 #include "qwen35_backend.h"
 #include "common/daemon_loop.h"
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+#include "triattention_runner.h"
+#endif
+
 #include <cstdio>
 
 namespace dflash27b {
 
 int run_qwen35_daemon(const Qwen35DaemonArgs & args) {
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    // Initialize TriAttention KV compression from environment variables.
+    // This loads the stats file and configures compression parameters.
+    init_triattention_from_env();
+    if (g_tria_state.enabled) {
+        std::fprintf(stderr, "[TriAttention] Enabled with stats loaded\n");
+    } else {
+        std::fprintf(stderr, "[TriAttention] Disabled (stats not found or load failed)\n");
+    }
+#endif
+
     Qwen35Config cfg;
     cfg.target_path        = args.target_path;
     cfg.draft_path         = args.draft_path;

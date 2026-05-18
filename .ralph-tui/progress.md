@@ -8,6 +8,8 @@ after each iteration and it's included in prompts for context.
 *Add reusable patterns discovered during development here.*
 
 - **Qwen3.6-27B TriAttention stats**: Pre-built at `submodules/triattention/triattention/vllm/stats/qwen3_6_27b_stats.pt` (1.6MB). Covers layers 3-63 (every 4th layer), 48 heads each = 768 heads total. `head_dim=256`, `dtype=bfloat16`.
+- **DFlash + TriAttention C++ integration**: Include `triattention.h` directly in C++ wrapper. Use full struct definition (not forward declaration) to access nested fields like `layer_budget_scales`.
+
 
 ---
 
@@ -29,3 +31,18 @@ after each iteration and it's included in prompts for context.
   - Always check for existing pre-built stats before running calibration
 ---
 
+## 2026-05-18 - lucebox-hub-gfx1151-xlc
+- **Implemented**: DFlash + TriAttention integration Phase 1 (Foundation)
+- **Files changed**:
+  - `dflash/src/internal.h`: Added TriAttentionState to TargetCache, tria_k_pre_rope placeholder
+  - `dflash/src/triattention_runner.h`: Fixed include to use full tria_stats definition (was forward decl)
+  - `dflash/src/qwen35/qwen35_daemon.cpp`: Added TriAttention initialization at daemon startup
+  - `docs/dflash_triattention_integration_status_20260518.md`: Integration status document
+- **Build verification**: Successfully compiled `test_dflash` with TriAttention enabled
+  - TriAttention C library linked: `libtriattention.a` (17.4K)
+  - Symbols verified: `tria_load`, `tria_free`, `tria_score_kv_head`, `init_triattention_from_env`
+- **Stats files verified**: `qwen3.5-27b.bin`, `qwen3-8b.bin`, `qwen3-1.7b.bin` available
+- **Learnings:**
+  - C++ integration requires including `triattention.h` directly (not forward declaration) to access nested fields like `layer_budget_scales`
+  - Full KV scoring/pruning requires architectural changes: capture pre-RoPE K, compact cache in-place, remap positions
+  - Recommended approach: Use vLLM + TriAttention (working) + DFlash (working) as separate paths
