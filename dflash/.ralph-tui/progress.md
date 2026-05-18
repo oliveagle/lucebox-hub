@@ -7,6 +7,39 @@ after each iteration and it's included in prompts for context.
 
 *Add reusable patterns discovered during development here.*
 
+**GQA 支持**: Qwen3 使用 GQA (32 query / 8 KV heads)。在 CPU 上 `F.scaled_dot_product_attention` 不支持自动 GQA，需手动扩展：`k_embed.repeat_interleave(self.num_key_value_groups, dim=1)`。
+
+**transformers 5.2.0 Qwen3 导入**: `Qwen3RMSNorm`, `Qwen3RotaryEmbedding`, `Qwen3MLP` 等类需从 `transformers.models.qwen3.modeling_qwen3` 导入，不是顶层。
+
+---
+
+## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.3.4
+
+### 完成状态: 已实现
+
+**实现内容：**
+- 为 `verify_trained_draft.py` 添加 `--mock` 模式，支持无训练模型时的模拟测试
+- 修复 `train_draft_qwen36.py` 中的 GQA (Grouped Query Attention) 支持
+- 修复 RoPE 位置编码维度处理 (target context + noise tokens)
+
+**文件变更：**
+- 修改: `scripts/verify_trained_draft.py` (添加 `--mock` 参数、`create_mock_model` 函数、`--report` JSON 输出)
+- 修改: `scripts/train_draft_qwen36.py` (修复 GQA attention head 扩展、修复 RoPE 序列长度)
+
+**关键技术修复：**
+1. **GQA 支持**: 在 `Qwen3DFlashAttention.forward` 中添加 `repeat_interleave` 扩展 K/V heads 以匹配 Q heads
+2. **RoPE 序列长度修复**: 在 `DFlashDraftModel.forward` 中计算扩展的 position_ids (block_size + 1)
+3. **transformers 导入修复**: Qwen3MLP 等类需从子模块导入
+
+**限制：**
+- 当前无真实训练模型和数据 (需要 V100 32GB + HuggingFace 格式 Qwen3.6-27B)
+- 模拟测试仅验证架构正确性，不验证训练质量
+
+**Learnings:**
+- Qwen3 使用 GQA (32 query heads / 8 KV heads)
+- CPU 上 SDPA 不支持自动 GQA 扩展，需手动 repeat_interleave
+- transformers 版本 5.2.0 中 Qwen3 类在子模块中
+
 ---
 
 ## 2026-05-18 - dflash-dflash-qwen36-acceptance-60-yzp.2

@@ -3,7 +3,7 @@
 验证训练后的 DFlash Draft 模型质量。
 
 功能:
-1. 加载训练后的 checkpoint
+1. 加载训练后的 checkpoint (或使用 --mock 进行模拟测试)
 2. 构造测试样本 (模拟目标 hidden states + 噪声)
 3. 验证 forward pass 输出格式正确
 4. 验证 top-1 预测准确率 (随机样本)
@@ -13,6 +13,9 @@
     # 验证训练后的 checkpoint
     python scripts/verify_trained_draft.py --checkpoint models/draft/dflash-draft-3.6-trained/best_model.pt
 
+    # 模拟测试 (无训练模型时使用)
+    python scripts/verify_trained_draft.py --mock
+
     # 验证指定配置下的推理
     python scripts/verify_trained_draft.py --checkpoint models/draft/dflash-draft-3.6-trained/best_model.pt --data data/draft_training_qwen36.pt --n-test 50
 """
@@ -20,6 +23,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -30,7 +34,35 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "deps" / "z-lab-dflash"))
 from train_draft_qwen36 import DFlashConfig, DFlashDraftModel, TARGET_LAYERS
 
 
-def load_trained_model(checkpoint_path: str, device: torch.device):
+def create_mock_model(device: torch.device, config: Optional[DFlashConfig] = None) -> Tuple[DFlashDraftModel, DFlashConfig]:
+    """创建模拟模型用于测试 (随机初始化权重)."""
+    if config is None:
+        config = DFlashConfig(
+            hidden_size=5120,
+            num_hidden_layers=5,
+            num_attention_heads=32,
+            num_key_value_heads=8,
+            head_dim=128,
+            intermediate_size=17408,
+            vocab_size=152064,
+            block_size=16,
+            target_layer_ids=tuple(TARGET_LAYERS),
+            num_target_layers=64,
+        )
+
+    model = DFlashDraftModel(config).to(device)
+    # 初始化权重为小随机值 (模拟刚完成训练的模型)
+    for param in model.parameters():
+        if param.dim() > 1:
+            torch.nn.init.xavier_uniform_(param, gain=0.5)
+        else:
+            torch.nn.init.zeros_(param)
+
+    print(f"[mock] 创建模拟模型: {config.num_hidden_layers} layers, hidden={config.hidden_size}")
+    return model, config
+
+
+def load_trained_model(checkpoint_path: str, device: torch.device) -> Tuple[DFlashDraftModel, DFlashConfig]:
     """加载训练后的模型 checkpoint."""
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
@@ -197,7 +229,7 @@ def test_prediction_accuracy(model, config, data_path: str, device: torch.device
     return errors, info
 
 
-def test_output_distribution(model, device: torch.device, block_size: int = 16):
+def test_output_distribution(model, device: torch.device, block_size: int = 16, mock: bool = False):
     """验证输出概率分布是否合理."""
     batch_size = 1
     hidden = model.fc.in_features
@@ -232,7 +264,11 @@ def test_output_distribution(model, device: torch.device, block_size: int = 16):
     vocab_size = 152064
     uniform_entropy = torch.log(torch.tensor(vocab_size, dtype=torch.float32)).item()
     if info["entropy"] > uniform_entropy * 0.95:
-        errors.append(f"输出分布接近均匀 (entropy={info['entropy']:.2f})，模型可能未训练")
+        # 对于模拟模型，这是预期行为
+        if mock:
+            print(f"[mock] 模拟模型输出接近均匀分布 (预期)")
+        else:
+            errors.append(f"输出分布接近均匀 (entropy={info['entropy']:.2f})，模型可能未训练")
 
     # 检查是否退化成单点分布
     if info["max_prob"] > 0.99:
@@ -243,20 +279,29 @@ def test_output_distribution(model, device: torch.device, block_size: int = 16):
 
 def main():
     parser = argparse.ArgumentParser(description="验证训练后的 DFlash Draft 模型质量")
-    parser.add_argument("--checkpoint", required=True, help="训练后的模型 checkpoint 路径")
+    parser.add_argument("--checkpoint", help="训练后的模型 checkpoint 路径")
+    parser.add_argument("--mock", action="store_true", help="使用模拟模型进行测试 (无训练模型时)")
     parser.add_argument("--data", help="训练数据路径 (用于准确率测试)")
     parser.add_argument("--n-test", type=int, default=50, help="测试样本数")
     parser.add_argument("--device", default="cuda", help="测试设备")
+    parser.add_argument("--report", help="输出 JSON 格式验证报告路径")
     args = parser.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     print(f"使用设备: {device}")
 
     # 加载模型
-    try:
-        model, config = load_trained_model(args.checkpoint, device)
-    except Exception as e:
-        print(f"[error] 加载模型失败: {e}")
+    if args.mock:
+        print("[mock] 使用模拟模式测试模型架构")
+        model, config = create_mock_model(device)
+    elif args.checkpoint:
+        try:
+            model, config = load_trained_model(args.checkpoint, device)
+        except Exception as e:
+            print(f"[error] 加载模型失败: {e}")
+            sys.exit(1)
+    else:
+        print("[error] 必须指定 --checkpoint 或 --mock")
         sys.exit(1)
 
     all_errors = []
@@ -274,7 +319,7 @@ def main():
     print("\n" + "=" * 50)
     print("2. 输出分布验证")
     print("=" * 50)
-    errors, info = test_output_distribution(model, device, config.block_size)
+    errors, info = test_output_distribution(model, device, config.block_size, args.mock)
     all_errors.extend(errors)
     all_info.update(info)
 
@@ -301,13 +346,24 @@ def main():
         print(f"\n[error] {len(all_errors)} 个问题:")
         for e in all_errors:
             print(f"  - {e}")
-        sys.exit(1)
+        all_info["validation_passed"] = False
+        all_info["errors"] = all_errors
     else:
         print("\n[ok] 所有验证通过")
+        all_info["validation_passed"] = True
         print(f"\n验证指标:")
         for k, v in all_info.items():
-            print(f"  {k}: {v}")
-        sys.exit(0)
+            if k != "validation_passed" and k != "errors":
+                print(f"  {k}: {v}")
+
+    # 保存 JSON 报告
+    if args.report:
+        with open(args.report, "w") as f:
+            json.dump(all_info, f, indent=2, default=str)
+        print(f"\n[report] 已保存到 {args.report}")
+
+    # 返回适当退出码
+    sys.exit(0 if all_info.get("validation_passed", False) else 1)
 
 
 if __name__ == "__main__":

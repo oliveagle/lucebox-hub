@@ -28,13 +28,15 @@ from tqdm import tqdm
 from transformers import (
     Qwen3Config,
     Qwen3PreTrainedModel,
+)
+from transformers.models.qwen3.modeling_qwen3 import (
     Qwen3RMSNorm,
     Qwen3RotaryEmbedding,
     Qwen3MLP,
+    rotate_half,
+    eager_attention_forward,
+    ALL_ATTENTION_FUNCTIONS,
 )
-from transformers.cache_utils import Cache
-from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers.models.qwen3.modeling_qwen3 import rotate_half, eager_attention_forward, ALL_ATTENTION_FUNCTIONS
 
 # Add deps to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "deps" / "z-lab-dflash"))
@@ -142,6 +144,7 @@ class Qwen3DFlashAttention(nn.Module):
     ) -> torch.Tensor:
         bsz, q_len = hidden_states.shape[:-1]
         ctx_len = target_hidden.shape[1]
+        total_len = ctx_len + q_len
 
         # Project queries from noise (hidden_states)
         q = self.q_proj(hidden_states)
@@ -155,18 +158,33 @@ class Qwen3DFlashAttention(nn.Module):
         v_noise = self.v_proj(hidden_states)
 
         # Concatenate context and noise for K, V
-        k = torch.cat([k_ctx, k_noise], dim=1).view(bsz, ctx_len + q_len, -1, self.head_dim)
-        v = torch.cat([v_ctx, v_noise], dim=1).view(bsz, ctx_len + q_len, -1, self.head_dim)
+        k = torch.cat([k_ctx, k_noise], dim=1).view(bsz, total_len, -1, self.head_dim)
+        v = torch.cat([v_ctx, v_noise], dim=1).view(bsz, total_len, -1, self.head_dim)
         k = self.k_norm(k).transpose(1, 2)
         v = v.transpose(1, 2)
 
         # Apply rotary embeddings
         cos, sin = position_embeddings
-        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+        cos = cos.unsqueeze(1)  # [1, 1, seq, head_dim]
+        sin = sin.unsqueeze(1)
+
+        # Q gets the last q_len positions
+        q_embed = (q * cos[..., -q_len:, :]) + (rotate_half(q) * sin[..., -q_len:, :])
+
+        # K gets all total_len positions
+        k_embed = (k * cos[..., :total_len, :]) + (rotate_half(k) * sin[..., :total_len, :])
+
+        # GQA: Expand k_embed and v to match q's num_heads for SDPA compatibility
+        # q: [batch, num_heads, seq, head_dim]
+        # k_embed: [batch, num_kv_heads, seq, head_dim]
+        # v: [batch, num_kv_heads, seq, head_dim]
+        if self.num_key_value_groups > 1:
+            k_embed = k_embed.repeat_interleave(self.num_key_value_groups, dim=1)
+            v = v.repeat_interleave(self.num_key_value_groups, dim=1)
 
         # Scaled dot-product attention
         attn_output = F.scaled_dot_product_attention(
-            q, k, v,
+            q_embed, k_embed, v,
             attn_mask=attention_mask,
             dropout_p=0.0 if not self.training else self.attention_dropout,
             scale=self.scaling,
@@ -269,12 +287,15 @@ class DFlashDraftModel(nn.Module):
             logits: [batch, block_size, vocab_size]
         """
         hidden_states = noise_embedding
+        batch_size, block_size, _ = hidden_states.shape
 
         # Project target hidden states
         target_hidden = self.hidden_norm(self.fc(target_hidden))
 
-        # Get rotary embeddings
-        position_embeddings = self.rotary_emb(hidden_states, position_ids)
+        # Get rotary embeddings for extended sequence (block_size + 1 for context + noise)
+        # We need position embeddings for: target context (1) + noise (block_size)
+        extended_position_ids = torch.arange(block_size + 1, device=hidden_states.device).unsqueeze(0).expand(batch_size, -1)
+        position_embeddings = self.rotary_emb(hidden_states, extended_position_ids)
 
         # Pass through decoder layers
         for layer in self.layers:

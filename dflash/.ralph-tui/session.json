@@ -3,10 +3,10 @@
   "sessionId": "d36f6654-9d66-4f60-9e5f-d72629b5c448",
   "status": "running",
   "startedAt": "2026-05-18T04:33:47.882Z",
-  "updatedAt": "2026-05-18T04:33:48.140Z",
-  "currentIteration": 0,
+  "updatedAt": "2026-05-18T04:55:48.751Z",
+  "currentIteration": 1,
   "maxIterations": 50,
-  "tasksCompleted": 0,
+  "tasksCompleted": 1,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -23,8 +23,8 @@
       {
         "id": "dflash-dflash-qwen36-acceptance-60-yzp.2",
         "title": "用户故事 2: 收集 Qwen3.6 训练数据",
-        "status": "open",
-        "completedInSession": false
+        "status": "completed",
+        "completedInSession": true
       },
       {
         "id": "dflash-dflash-qwen36-acceptance-60-yzp.3",
@@ -274,11 +274,20 @@
       }
     ]
   },
-  "iterations": [],
+  "iterations": [
+    {
+      "iteration": 1,
+      "status": "completed",
+      "taskId": "dflash-dflash-qwen36-acceptance-60-yzp.2",
+      "taskTitle": "用户故事 2: 收集 Qwen3.6 训练数据",
+      "taskCompleted": true,
+      "durationMs": 166421,
+      "startedAt": "2026-05-18T04:33:48.093Z",
+      "endedAt": "2026-05-18T04:36:34.514Z"
+    }
+  ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub/dflash",
-  "activeTaskIds": [
-    "dflash-dflash-qwen36-acceptance-60-yzp.2"
-  ],
+  "activeTaskIds": [],
   "subagentPanelVisible": false
 }
