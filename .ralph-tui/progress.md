@@ -11,6 +11,8 @@ after each iteration and it's included in prompts for context.
 - **Qwen3.6-27B TriAttention stats**: Pre-built at `submodules/triattention/triattention/vllm/stats/qwen3_6_27b_stats.pt` (1.6MB). Covers layers 3-63 (every 4th layer), 48 heads each = 768 heads total. `head_dim=256`, `dtype=bfloat16`.
 - **DFlash + TriAttention C++ integration**: Include `triattention.h` directly in C++ wrapper. Use full struct definition (not forward declaration) to access nested fields like `layer_budget_scales`.
 - **TriAttention KV compression in decode loop**: Integrated in `spec_decode.cpp::run_target_layer_split_dflash_decode()`. After each commit, check `g_tria_state.should_compress(committed)` and call `tria_kv_compress()` if true. Compression happens outside the compute graph via D2H/H2D copies, top-K selection, and in-place cache compaction.
+- **TriAttention frequency-domain scoring**: Implemented in `triattention_compress.cpp::tria_kv_compress()`. Uses `tria_score_kv_head()` from C library for per-KV-head scoring. Converts pre-RoPE K from bf16 to f32, splits into real/imag halves (head_dim=2*fc), builds key_pos array, aggregates scores across GQA groups (max pooling) and layers (averaging), then selects top-K positions with recent window preservation.
+- **bf16 to f32 conversion**: Manual union-based bit-cast for C++17 compatibility: `conv.bits = static_cast<uint32_t>(bf16) << 16; return conv.f;`
 
 
 ---
@@ -75,6 +77,31 @@ after each iteration and it's included in prompts for context.
   - The TriAttention pre-RoPE K buffer is separate from the quantized KV cache (uses bf16 for scoring accuracy)
   - Capture happens inline in the compute graph via `ggml_cpy`, no extra host-side copy needed
   - The `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` compile-time guard ensures zero overhead when TriAttention is not enabled
+---
+
+## 2026-05-19 - lucebox-hub-gfx1151-dtri-vve.3
+- **Implemented**: Real TriAttention frequency-domain scoring in KV compression (replacing simplified recency-based scoring)
+- **Files changed**:
+  - `dflash/src/triattention_compress.cpp`: 
+    1. Added `bf16_to_f32()` conversion function using union-based bit-cast for C++17 compatibility
+    2. Added `select_top_k_with_window()` function for top-K selection with recent window preservation
+    3. Updated `tria_kv_compress()` to use real `tria_score_kv_head()` from C library
+    4. Implemented pre-RoPE K parsing: convert bf16 to f32, split into real/imag halves (head_dim=2*fc)
+    5. Built key_pos array for position tracking
+    6. Call `tria_score_kv_head()` for each KV head per full-attention layer
+    7. Aggregate scores across GQA groups (max pooling) and layers (averaging)
+    8. Select top-K positions with window preservation via `select_top_k_with_window()`
+    9. Compact KV cache in-place for all full-attention layers
+- **Build verification**: Successfully compiled `libdflash27b.a` with real TriAttention scoring
+- **Learnings**:
+  - `tria_score_kv_head()` expects pre-RoPE K split into real/imag halves: `k_pre_real[seq_len][fc]` and `k_pre_imag[seq_len][fc]`
+  - For head_dim=128, fc=64: real half = elements [0,63], imag half = elements [64,127]
+  - GQA aggregation is handled by `tria_score_kv_head()` internally (z-normalize + max pooling per GQA group)
+  - The C library's `tria_score_kv_head()` outputs per-position scores for a single KV head
+  - For full-attention layers (every 4th layer: 3,7,11,...), map FA layer index to global layer index: `global_layer = fa_layer * 4 + 3`
+  - Window preservation: recent positions (within `window_size` of current) are always kept regardless of score
+  - bf16 to f32 conversion requires union-based bit-cast for C++17 compatibility (no `std::bit_cast`)
+
 ---
 
 ## 2026-05-18 - lucebox-hub-gfx1151-z0k.1

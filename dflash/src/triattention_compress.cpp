@@ -5,11 +5,12 @@
 //
 // Flow:
 //   1. Read pre-RoPE K from GPU buffer (tria_k_pre_rope)
-//   2. Run frequency-domain scoring per KV head on CPU
-//   3. Aggregate scores across GQA groups (max pooling)
-//   4. Select top-K positions by score
-//   5. Compact K and V caches in-place (move kept positions to front)
-//   6. Update cur_pos to new compressed length
+//   2. Run frequency-domain scoring per KV head on CPU via tria_score_kv_head()
+//   3. Aggregate scores across GQA groups (max pooling per layer)
+//   4. Average scores across full-attention layers
+//   5. Select top-K positions by score (with recent window preservation)
+//   6. Compact K and V caches in-place (move kept positions to front)
+//   7. Update cur_pos to new compressed length
 
 #include "triattention_runner.h"
 
@@ -45,24 +46,65 @@
 
 namespace dflash27b {
 
-// ── Top-K selection by score (descending) ────────────────────────────────
+// ── bf16 to f32 conversion ──────────────────────────────────────────────
 
-static std::vector<int> select_top_k(const std::vector<float> & scores, int k) {
+// Convert bfloat16 (stored as uint16_t) to float32 via union bit-cast
+static inline float bf16_to_f32(uint16_t h) {
+    union u32 { uint32_t bits; float f; } conv;
+    conv.bits = static_cast<uint32_t>(h) << 16;
+    return conv.f;
+}
+
+// ── Top-K selection by score (descending) with window preservation ─────
+
+static std::vector<int> select_top_k_with_window(
+    const std::vector<float> & scores,
+    int k,
+    int window_size,
+    int seq_start)
+{
     const int n = (int)scores.size();
+    const int total_positions = seq_start + n;
     k = std::min(k, n);
 
+    // Build index array
     std::vector<std::pair<float, int>> indexed(n);
     for (int i = 0; i < n; i++) {
         indexed[i] = {scores[i], i};
     }
 
+    // Partial sort descending by score
     std::partial_sort(indexed.begin(), indexed.begin() + k, indexed.end(),
                       [](const auto & a, const auto & b) { return a.first > b.first; });
 
-    std::vector<int> result(k);
+    // Collect top-K indices (relative to seq_start)
+    std::vector<int> result;
+    result.reserve(k);
     for (int i = 0; i < k; i++) {
-        result[i] = indexed[i].second;
+        const int global_pos = seq_start + indexed[i].second;
+        // Preserve recent window: always keep positions within window_size of current
+        if (global_pos >= total_positions - window_size) {
+            // Add to front (recent positions take priority)
+            result.insert(result.begin(), indexed[i].second);
+        } else {
+            result.push_back(indexed[i].second);
+        }
     }
+
+    // Deduplicate and sort for sequential access
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+
+    // Ensure window positions are always included
+    const int window_start = std::max(seq_start, total_positions - window_size);
+    for (int pos = window_start; pos < total_positions; pos++) {
+        const int rel_pos = pos - seq_start;
+        if (std::find(result.begin(), result.end(), rel_pos) == result.end()) {
+            result.push_back(rel_pos);
+        }
+    }
+    std::sort(result.begin(), result.end());
+
     return result;
 }
 
@@ -94,7 +136,9 @@ bool tria_kv_compress(
         return true;
     }
 
+    // Calculate actual keep count from ratio
     const int n_keep = std::max(1, (int)(seq_len * keep_ratio));
+    const int fc = (int)stats->freq_count;
 
 #if HAS_GPU
     // Get current GPU device
@@ -107,29 +151,39 @@ bool tria_kv_compress(
     }
 
     // Read pre-RoPE K from GPU if buffer is provided
-    std::vector<float> k_f32;
+    std::vector<float> k_real;
+    std::vector<float> k_imag;
     if (k_pre_rope_gpu) {
         // Allocate CPU buffer for pre-RoPE K: [head_dim, seq_len, n_head_kv]
-        const size_t k_bytes = (size_t)head_dim * seq_len * n_head_kv * sizeof(uint16_t);
-        std::vector<uint16_t> k_cpu_host(k_bytes / sizeof(uint16_t));
+        const size_t nelems = (size_t)head_dim * seq_len * n_head_kv;
+        std::vector<uint16_t> k_bf16(nelems);
 
         // Copy from GPU (only the relevant slice)
         // k_pre_rope_gpu is [head_dim, max_ctx, n_head_kv]
         const size_t src_offset = (size_t)kv_start * head_dim * n_head_kv * sizeof(uint16_t);
-        gpuMemcpy(k_cpu_host.data(), (char*)k_pre_rope_gpu + src_offset, k_bytes,
+        const size_t copy_bytes = (size_t)head_dim * seq_len * n_head_kv * sizeof(uint16_t);
+        gpuMemcpy(k_bf16.data(), (char*)k_pre_rope_gpu + src_offset, copy_bytes,
                   gpuMemcpyDtoH);
 
-        // Convert bf16 to f32
-        k_f32.resize((size_t)head_dim * seq_len * n_head_kv);
-        for (size_t i = 0; i < k_cpu_host.size(); i++) {
-            // bf16 to f32 conversion (manual bit_cast for C++17 compatibility)
-            union bf16_to_f32 {
-                uint32_t bits;
-                float f;
-            };
-            bf16_to_f32 conv;
-            conv.bits = static_cast<uint32_t>(k_cpu_host[i]) << 16;
-            k_f32[i] = conv.f;
+        // Convert bf16 to f32 and split into real/imag halves
+        // Layout: [head_dim, seq_len, n_head_kv] -> split into [fc, seq_len, n_head_kv] for real and imag
+        k_real.resize((size_t)fc * seq_len * n_head_kv);
+        k_imag.resize((size_t)fc * seq_len * n_head_kv);
+
+        for (int h = 0; h < n_head_kv; h++) {
+            for (int s = 0; s < seq_len; s++) {
+                for (int f = 0; f < fc; f++) {
+                    const size_t src_idx = ((size_t)h * seq_len + s) * head_dim + f;
+                    const size_t real_idx = ((size_t)h * seq_len + s) * fc + f;
+                    const size_t imag_idx = ((size_t)h * seq_len + s) * fc + fc + f;
+
+                    // Real half: elements [0, fc)
+                    k_real[real_idx] = bf16_to_f32(k_bf16[src_idx]);
+
+                    // Imag half: elements [fc, 2*fc)
+                    k_imag[imag_idx] = bf16_to_f32(k_bf16[src_idx + fc]);
+                }
+            }
         }
     }
 
@@ -137,6 +191,62 @@ bool tria_kv_compress(
     if (gpu_id >= 0 && gpu_id != current_device) {
         gpuSetDevice(current_device);
     }
+
+    // Build key_pos array: positions [kv_start, kv_start+1, ..., cur_pos-1]
+    std::vector<int> key_pos(seq_len);
+    for (int i = 0; i < seq_len; i++) {
+        key_pos[i] = kv_start + i;
+    }
+
+    // Score each full-attention layer via tria_score_kv_head()
+    // For each layer, we get per-position scores aggregated across KV heads
+    std::vector<float> combined_scores(seq_len, 0.0f);
+
+    for (int fa_layer = 0; fa_layer < n_full_attn; fa_layer++) {
+        // Map FA layer index to global layer index (every 4th layer)
+        const int global_layer = fa_layer * 4 + 3;  // layers 3,7,11,...
+        if (global_layer >= (int)stats->num_layers) continue;
+
+        // Score each KV head and aggregate (max pooling)
+        std::vector<float> layer_scores(seq_len, 0.0f);
+        for (int kv_h = 0; kv_h < n_head_kv; kv_h++) {
+            std::vector<float> kv_scores(seq_len, 0.0f);
+
+            // Call the real TriAttention scoring function
+            tria_score_kv_head(stats,
+                               k_real.data(), k_imag.data(),
+                               key_pos.data(),
+                               cur_pos,
+                               seq_len,
+                               global_layer,
+                               kv_h,
+                               kv_scores.data());
+
+            // Max-pool across KV heads for this layer
+            for (int s = 0; s < seq_len; s++) {
+                layer_scores[s] = std::max(layer_scores[s], kv_scores[s]);
+            }
+        }
+
+        // Accumulate layer scores
+        for (int s = 0; s < seq_len; s++) {
+            combined_scores[s] += layer_scores[s];
+        }
+    }
+
+    // Average scores across layers
+    if (n_full_attn > 0) {
+        for (int s = 0; s < seq_len; s++) {
+            combined_scores[s] /= n_full_attn;
+        }
+    }
+
+    // Select top-K positions with window preservation
+    const int window_size = g_tria_state.window_size;
+    std::vector<int> keep_indices = select_top_k_with_window(
+        combined_scores, n_keep, window_size, kv_start);
+    const int actual_keep = (int)keep_indices.size();
+
 #else
     // Non-GPU builds just report and skip
     std::fprintf(stderr, "[TriAttention] GPU not available, skipping compression\n");
@@ -144,86 +254,49 @@ bool tria_kv_compress(
     return true;
 #endif
 
-    // Score each full-attention layer independently
-    // For simplicity, aggregate across all layers (average score per position)
-    std::vector<float> combined_scores(seq_len, 0.0f);
-
-    for (int fa_layer = 0; fa_layer < n_full_attn; fa_layer++) {
-        // Map FA layer index to global layer index (every 4th layer)
-        const int global_layer = fa_layer * 4 + 3;  // layers 3,7,11,...
-
-        if (global_layer >= (int)stats->num_layers) continue;
-
-        // Simple frequency-based scoring: prioritize recent positions
-        // This is a simplified scoring scheme - full TriAttention would use
-        // the pre-computed q_mean statistics from the stats file
-        for (int i = 0; i < seq_len; i++) {
-            // Higher score for more recent positions (recency bias)
-            // Also boost positions based on layer importance
-            const float layer_scale = stats->layer_budget_scales[global_layer];
-            combined_scores[i] += (1.0f / (1.0f + (seq_len - 1 - i) * 0.01f)) * layer_scale;
-        }
-    }
-
-    // Normalize scores
-    for (int i = 0; i < seq_len; i++) {
-        combined_scores[i] /= n_full_attn;
-    }
-
-    // Select top-K positions
-    std::vector<int> keep_indices = select_top_k(combined_scores, n_keep);
-    std::sort(keep_indices.begin(), keep_indices.end());  // maintain order for sequential access
-
     // Compact KV cache for each full-attention layer
 #if HAS_GPU
+    // Set device for compression operations
+    if (gpu_id >= 0) {
+        gpuSetDevice(gpu_id);
+    }
+
+    // Determine quantization element size (default Q8_0 = 1 byte)
+    // In a full implementation, this would come from cache metadata
+    const size_t elem_size = 1;
+
     for (int fa_layer = 0; fa_layer < n_full_attn; fa_layer++) {
         if (!attn_k[fa_layer] || !attn_v[fa_layer]) continue;
 
-        // Set device for this operation
-        gpuSetDevice(gpu_id);
-
-        // For each KV head, copy kept positions to front
+        // For each KV head, compact in-place: move kept positions to front
         for (int h = 0; h < n_head_kv; h++) {
-            // K/V cache layout: [head_dim, max_ctx, n_head_kv]
-            // Element size depends on kv_k_type/kv_v_type
-            // For now, assume Q8_0 which uses ~1 byte per value
-            const size_t elem_size = 1;  // Q8_0
-            const size_t head_bytes = head_dim * elem_size;
-
-            for (int ki = 0; ki < n_keep; ki++) {
+            for (int ki = 0; ki < actual_keep; ki++) {
                 const int src_pos = kv_start + keep_indices[ki];
                 const int dst_pos = kv_start + ki;
 
                 if (src_pos == dst_pos) continue;
 
-                // Copy K: compact in-place from src to dst
-                const size_t k_src_offset = ((size_t)h * max_ctx + src_pos) * head_dim * elem_size;
-                const size_t k_dst_offset = ((size_t)h * max_ctx + dst_pos) * head_dim * elem_size;
+                const size_t head_stride = (size_t)head_dim * elem_size;
+                const size_t k_src = ((size_t)h * max_ctx + src_pos) * head_stride;
+                const size_t k_dst = ((size_t)h * max_ctx + dst_pos) * head_stride;
+                const size_t v_src = ((size_t)h * max_ctx + src_pos) * head_stride;
+                const size_t v_dst = ((size_t)h * max_ctx + dst_pos) * head_stride;
 
-                std::vector<uint8_t> k_tmp(head_bytes);
-                gpuMemcpy(k_tmp.data(), (char*)attn_k[fa_layer] + k_src_offset, head_bytes,
-                          gpuMemcpyDtoH);
-                gpuMemcpy((char*)attn_k[fa_layer] + k_dst_offset, k_tmp.data(), head_bytes,
-                          gpuMemcpyHtoD);
-
-                // Copy V: compact in-place from src to dst
-                const size_t v_src_offset = ((size_t)h * max_ctx + src_pos) * head_dim * elem_size;
-                const size_t v_dst_offset = ((size_t)h * max_ctx + dst_pos) * head_dim * elem_size;
-
-                std::vector<uint8_t> v_tmp(head_bytes);
-                gpuMemcpy(v_tmp.data(), (char*)attn_v[fa_layer] + v_src_offset, head_bytes,
-                          gpuMemcpyDtoH);
-                gpuMemcpy((char*)attn_v[fa_layer] + v_dst_offset, v_tmp.data(), head_bytes,
-                          gpuMemcpyHtoD);
+                std::vector<uint8_t> tmp(head_stride);
+                gpuMemcpy(tmp.data(), (char*)attn_k[fa_layer] + k_src, head_stride, gpuMemcpyDtoH);
+                gpuMemcpy((char*)attn_k[fa_layer] + k_dst, tmp.data(), head_stride, gpuMemcpyHtoD);
+                gpuMemcpy(tmp.data(), (char*)attn_v[fa_layer] + v_src, head_stride, gpuMemcpyDtoH);
+                gpuMemcpy((char*)attn_v[fa_layer] + v_dst, tmp.data(), head_stride, gpuMemcpyHtoD);
             }
         }
     }
 #endif
 
-    if (n_kept_out) *n_kept_out = kv_start + n_keep;
+    const int new_cur_pos = kv_start + actual_keep;
+    if (n_kept_out) *n_kept_out = new_cur_pos;
 
-    std::fprintf(stderr, "[TriAttention] Compressed %d -> %d positions (kept %.2f%%)\n",
-                seq_len, n_keep, 100.0f * n_keep / seq_len);
+    std::fprintf(stderr, "[TriAttention] Compressed %d -> %d positions (kept %.1f%%)\n",
+                seq_len, actual_keep, 100.0f * actual_keep / seq_len);
 
     return true;
 }
