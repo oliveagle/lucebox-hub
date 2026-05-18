@@ -175,6 +175,26 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## 2026-05-19 - lucebox-hub-gfx1151-5ed
+- **Located**: `qwen35_target_graph.cpp::build_full_attn_block()` at lines 466-666
+- **Function details**:
+  - 200 lines implementing the full attention block for Qwen3.5-27B
+  - 17 parameters including `tria_k_pre_rope` for TriAttention integration
+  - Called from two sites: `build_single_layer()` (line 982) and `build_qwen35_graph()` (line 1089)
+- **Key sections in order**:
+  1. Q projection with packed Q || gate (lines 492-511)
+  2. K/V projections + normalization (lines 514-519)
+  3. **TriAttention pre-RoPE K capture** (lines 521-537) - gates on `DFLASH27B_TRIATTENTION_ENABLED`
+  4. M-RoPE positional encoding (lines 539-553)
+  5. q_tail_capture for feature capture (lines 555-577)
+  6. KV cache write with optional FWHT rotation (lines 579-609)
+  7. Flash attention with windowing (lines 611-657)
+  8. Sigmoid gating + output projection (lines 659-665)
+- **Learnings:**
+  - The function is fully implemented and serves as the central integration point for TriAttention KV capture
+  - Pre-RoPE K is captured after normalization (line 518) and before M-RoPE (line 550) via `ggml_permute` + `ggml_cpy`
+---
+
 ## 2026-05-18 - lucebox-hub-gfx1151-z0k.1
 - Verified Qwen3.6-27B TriAttention stats file already exists and is valid
 - File: `submodules/triattention/triattention/vllm/stats/qwen3_6_27b_stats.pt` (1.6MB, > 1MB threshold)
