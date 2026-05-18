@@ -3,10 +3,10 @@
   "sessionId": "9cca1fae-c669-4fc0-a115-f5369d63cd76",
   "status": "running",
   "startedAt": "2026-05-17T17:08:16.146Z",
-  "updatedAt": "2026-05-18T05:19:17.786Z",
-  "currentIteration": 5,
+  "updatedAt": "2026-05-18T05:22:59.954Z",
+  "currentIteration": 6,
   "maxIterations": 50,
-  "tasksCompleted": 3,
+  "tasksCompleted": 4,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -65,6 +65,16 @@
       "durationMs": 1157848,
       "startedAt": "2026-05-18T04:46:54.226Z",
       "endedAt": "2026-05-18T05:06:12.074Z"
+    },
+    {
+      "iteration": 6,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-1oe.8",
+      "taskTitle": "测试 vLLM + TriAttention 启动",
+      "taskCompleted": true,
+      "durationMs": 784543,
+      "startedAt": "2026-05-18T05:06:13.230Z",
+      "endedAt": "2026-05-18T05:19:17.773Z"
     }
   ],
   "skippedTaskIds": [],
