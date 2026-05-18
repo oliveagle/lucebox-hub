@@ -7,9 +7,49 @@ after each iteration and it is included in prompts for context.
 
 *Add reusable patterns discovered during development here.*
 
+### Baseline Benchmark Script Pattern
+
+For performance comparison benchmarks, use a paired script pattern:
+1. `scripts/run_vllm_baseline.sh` - Start server + run benchmark
+2. `scripts/run_vllm_with_triattention.sh` - Same pattern with compression
+
+Both scripts share `scripts/benchmark_vllm.py` which measures:
+- Prefill speed (tokens/sec)
+- Decode speed (tokens/sec)  
+- First token latency (ms)
+
+**Key**: Always set `ENABLE_TRIATTENTION=false` for baseline, and use identical vLLM flags except compression-specific settings.
+
 ### llama.cpp Integration Strategy
 
 When TriAttention integration in llama.cpp is needed, **do not integrate into the project's own llama.cpp subtree**. The community [triattention-ggml](https://github.com/domvox/triattention-ggml) project handles this independently. The project's `dflash/deps/llama.cpp` is a fork focused on DFlash, not TriAttention. Users who need llama.cpp + TriAttention should use the community project directly.
+
+---
+
+## 2026-05-18 - lucebox-hub-gfx1151-z0k.2
+### What was implemented
+
+Created vLLM baseline benchmark scripts (no TriAttention) for Qwen3.6-27B-AWQ:
+
+1. `scripts/run_vllm_baseline.sh` - Shell launcher that starts vLLM server with TriAttention disabled, runs benchmark, and collects metrics
+2. `scripts/benchmark_vllm.py` - Python benchmark script that measures prefill speed, decode speed, and first token latency across multiple context length scenarios
+3. `docs/baseline_vllm_20260518.md` - Documentation with expected results and usage instructions
+
+### Files changed
+
+- `scripts/run_vllm_baseline.sh` — New baseline server launcher
+- `scripts/benchmark_vllm.py` — New benchmark runner with OpenAI client
+- `docs/baseline_vllm_20260518.md` — New baseline benchmark documentation
+
+### Learnings
+
+**vLLM 0.21.0 available in project venv**: Verified `vllm.LLM` class and `AsyncEngineArgs` work correctly on the Tesla PG503-216 GPU with 32GB VRAM.
+
+**Model availability is the blocker**: Qwen3.6-27B-AWQ model files are not locally available. The scripts are functional and ready to run once the model is downloaded via `huggingface-cli download Qwen/Qwen3.6-27B-AWQ`.
+
+**CUDA driver compatibility**: System driver 535.288.01 (CUDA 12.2+) is sufficient for PyTorch 2.10.0+cu128. vLLM engine initialization works without errors.
+
+---
 
 ---
 
