@@ -1,14 +1,14 @@
 {
-  "id": "9cca1fae-c669-4fc0-a115-f5369d63cd76",
+  "id": "b3a63c85-1aff-48e3-912c-887308021ea4",
   "status": "running",
-  "startedAt": "2026-05-17T17:08:16.076Z",
-  "updatedAt": "2026-05-18T07:13:00.570Z",
+  "startedAt": "2026-05-18T07:52:48.909Z",
+  "updatedAt": "2026-05-18T07:52:48.909Z",
   "agentPlugin": "claude",
   "trackerPlugin": "beads-rust-bv",
   "executionScopes": [],
-  "currentIteration": 9,
+  "currentIteration": 0,
   "maxIterations": 50,
   "totalTasks": 0,
-  "tasksCompleted": 7,
+  "tasksCompleted": 0,
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151"
 }
