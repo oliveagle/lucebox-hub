@@ -29,6 +29,21 @@ after each iteration and it's included in prompts for context.
   - Epic dtri-vve complete: TriAttention KV compression integrated into DFlash decode loop via environment variables (TRIATTN_ENABLED=1, TRIATTN_KV_BUDGET, TRIATTN_DIVIDE_LENGTH, TRIATTN_WINDOW_SIZE)
   - Test scenarios documented in `docs/test_scenarios_triattention_20260519.md`
   - Full benchmark execution deferred due to 32GB V100 GPU memory constraints for Qwen3.6-27B-AWQ
+
+---
+
+## 2026-05-19 - lucebox-hub-gfx1151-2d6
+- **Verified**: Pre-RoPE K capture acceptance criteria already implemented in previous iteration
+- **Implementation location**: `dflash/src/qwen35/qwen35_target_graph.cpp::build_full_attn_block()`
+- **Verification**:
+  - K projection at line 514: `Kcur = apply_scale2(ctx, ggml_mul_mat(ctx, L.wk, cur), L.wk_s);`
+  - K normalization at line 518: `Kcur = rms_norm_mul(ctx, Kcur, L.k_norm, w.rms_eps);`
+  - **TriAttention capture** at lines 526-536: copies `Kcur` to `tria_k_pre_rope` buffer via `ggml_cpy()`
+  - M-RoPE application at lines 550-553: `Kcur = ggml_rope_multi(ctx, Kcur, ...)`
+  - Buffer allocation at lines 199-201 in `create_target_cache_partial()`
+- **Acceptance criteria met**: ✅ K is captured after projection (line 514-518) and before RoPE (line 550-553)
+- **Learnings**: This task was a verification task - the work had been completed in bead `lucebox-hub-gfx1151-0e5` (closed with reason "spurious section header") and `lucebox-hub-gfx1151-dtri-vve.2` (closed with reason "已在之前迭代完成")
+
 ---
 
 ## 2026-05-19 - lucebox-hub-gfx1151-dtri-vve.1
