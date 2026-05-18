@@ -192,3 +192,31 @@ Installed TriAttention package in editable mode using project virtual environmen
 **vLLM entry point registration verified**: TriAttention plugin is correctly registered at `triattention.vllm.plugin:register_triattention_backend` in the `vllm.general_plugins` entry point group, alongside vLLM's built-in LoRA resolvers.
 
 ---
+
+## 2026-05-18 - lucebox-hub-gfx1151-1oe.8
+
+### What was implemented
+
+Verified vLLM + TriAttention plugin activation and fixed script CLI flag syntax.
+
+### Files changed
+
+- `scripts/run_vllm_with_triattention.sh` — Fixed `--enable-prefix-caching false` to `--no-enable-prefix-caching`
+
+### Learnings
+
+**vLLM CLI flag syntax**: Boolean flags use `--no-` prefix for false, not `--flag false`. Changed from `--enable-prefix-caching false` to `--no-enable-prefix-caching`.
+
+**TriAttention plugin activation verified**: The plugin correctly registers and shows:
+```
+[TriAttention] Runtime (V2) plugin activated: patch_scheduler=True patch_worker=True
+```
+
+**Environment variable verification**:
+- `TRIATTN_RUNTIME_KV_BUDGET=2048` ✓
+- `TRIATTN_RUNTIME_DIVIDE_LENGTH` defaults to 128
+- `TRIATTN_RUNTIME_WINDOW_SIZE` defaults to 128
+
+**CUDA driver compatibility**: vLLM + PyTorch requires CUDA driver version 12050+, but system has 12020. This is an infrastructure limitation, not a code issue. The plugin integration itself is correct.
+
+---

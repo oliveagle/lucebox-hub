@@ -97,5 +97,5 @@ vllm serve "$MODEL_PATH" \
     --max-model-len 32768 \
     --enforce-eager \
     --trust-remote-code \
-    --enable-prefix-caching false \
+    --no-enable-prefix-caching \
     "${ADDITIONAL_ARGS[@]}"
