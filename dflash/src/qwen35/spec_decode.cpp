@@ -9,9 +9,14 @@
 #include "feature_copy.h"
 #include "peer_access.h"
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+#include "triattention_runner.h"
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -215,6 +220,61 @@ bool run_target_layer_split_dflash_decode(
         n_generated += commit_n;
         n_accept_sum += std::min(accept_n, commit_n);
         n_draft_steps++;
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+        // TriAttention KV compression: trigger at specified intervals
+        if (g_tria_state.should_compress(committed)) {
+            auto t_c0 = std::chrono::steady_clock::now();
+
+            // Get KV cache pointers from the first shard
+            TargetCache & cache = shards.front().cache;
+            const int n_full_attn = (int)cache.attn_k.size();
+            const int n_head_kv = shards.front().weights.n_head_kv;
+            const int head_dim = shards.front().weights.n_embd_head_k;
+            const int max_ctx = cache.max_ctx;
+
+            // Prepare arrays of KV cache pointers
+            std::vector<void*> attn_k_ptrs(n_full_attn);
+            std::vector<void*> attn_v_ptrs(n_full_attn);
+            for (int i = 0; i < n_full_attn; i++) {
+                attn_k_ptrs[i] = cache.attn_k[i]->data;
+                attn_v_ptrs[i] = cache.attn_v[i]->data;
+            }
+
+            // Calculate keep ratio from kv_budget
+            const int kv_budget = g_tria_state.kv_budget;
+            const float keep_ratio = kv_budget > 0 ? (float)kv_budget / (float)std::max(committed, kv_budget) : 0.5f;
+
+            int n_kept = 0;
+            const bool ok = tria_kv_compress(
+                g_tria_state.stats_ptr,
+                cache.tria_k_pre_rope ? cache.tria_k_pre_rope->data : nullptr,
+                attn_k_ptrs.data(),
+                attn_v_ptrs.data(),
+                n_full_attn,
+                n_head_kv,
+                head_dim,
+                max_ctx,
+                0,  // kv_start (compress from beginning)
+                committed,  // cur_pos
+                output_gpu,  // gpu_id
+                keep_ratio,
+                &n_kept);
+
+            if (ok && n_kept < committed) {
+                // Update cache position to compressed length
+                cache.cur_pos = n_kept;
+                g_tria_state.mark_compressed(n_kept);
+                committed = n_kept;
+                std::fprintf(stderr, "[TriAttention] Updated cache.cur_pos to %d\n", n_kept);
+            }
+
+            auto t_c1 = std::chrono::steady_clock::now();
+            const double compress_ms = std::chrono::duration<double>(t_c1 - t_c0).count() * 1000.0;
+            std::fprintf(stderr, "[TriAttention] Compression took %.2f ms\n", compress_ms);
+        }
+#endif
+
         if (hit_eos) break;
     }
     sync_all();

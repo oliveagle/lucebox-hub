@@ -253,6 +253,7 @@ add_library(dflash27b STATIC
     src/common/ddtree.cpp
     src/common/peer_access.cpp
     src/triattention_runner.cpp
+    src/triattention_compress.cpp
 )
 
 # ─── TriAttention KV Compression (optional) ─────────────────────────────

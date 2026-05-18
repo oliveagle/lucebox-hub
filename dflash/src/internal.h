@@ -338,6 +338,10 @@ struct TargetCache {
     // Stored as separate from post-RoPE K because TriAttention needs the
     // pre-rotated K for frequency-domain scoring.
     ggml_tensor * tria_k_pre_rope = nullptr;
+
+    // Last position where TriAttention compression was performed.
+    // Used to track compression intervals and avoid redundant compressions.
+    int tria_last_compressed_pos = 0;
 #endif
 };
 

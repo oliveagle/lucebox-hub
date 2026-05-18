@@ -1,15 +1,18 @@
 // triattention_runner.cpp — TriAttention runtime implementation for DFlash
 //
 // This file implements the C++ wrapper for TriAttention KV compression.
-//
-// INTEGRATION STATUS (2026-05-18):
-//   Phase 1 (COMPLETE): C library wrapper and environment initialization
-//   Phase 2 (TODO): Pre-RoPE key capture in compute graph
-//   Phase 3 (TODO): KV scoring and pruning in decode loop
+// It provides initialization from environment variables and the compression
+// trigger logic.
 
 #include "triattention_runner.h"
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+#include "triattention.h"
+#endif
+
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
 
 namespace dflash27b {
 
@@ -17,6 +20,7 @@ namespace dflash27b {
 TriAttentionState g_tria_state;
 
 void init_triattention_from_env() {
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
     // Read stats path from environment
     const char* stats_path = std::getenv("TRIATTN_STATS_PATH");
     if (!stats_path) {
@@ -24,11 +28,25 @@ void init_triattention_from_env() {
         stats_path = "dflash/deps/llama.cpp/triattention/stats/qwen3.5-27b.bin";
     }
 
-    // Load stats
-    if (!g_tria_state.load_stats(stats_path)) {
-        // Stats loading failed - TriAttention will be disabled
+    // Check if TriAttention is enabled via env var
+    const char* tria_enabled = std::getenv("TRIATTN_ENABLED");
+    if (tria_enabled && std::strcmp(tria_enabled, "1") != 0) {
+        std::fprintf(stderr, "[TriAttention] Disabled by TRIATTN_ENABLED=%s\n", tria_enabled);
         return;
     }
+
+    // Load stats using the C library loader
+    g_tria_state.stats_ptr = tria_load(stats_path);
+    if (!g_tria_state.stats_ptr) {
+        std::fprintf(stderr, "[TriAttention] Failed to load stats from: %s\n", stats_path);
+        return;
+    }
+
+    g_tria_state.enabled = true;
+    std::fprintf(stderr, "[TriAttention] Loaded stats with %u layers, %u heads, head_dim=%u\n",
+                g_tria_state.stats_ptr->num_layers,
+                g_tria_state.stats_ptr->num_heads,
+                g_tria_state.stats_ptr->head_dim);
 
     // Read configuration from environment
     const char* kv_budget_env = std::getenv("TRIATTN_KV_BUDGET");
@@ -45,53 +63,22 @@ void init_triattention_from_env() {
     if (window_size_env) {
         g_tria_state.window_size = std::atoi(window_size_env);
     }
+
+    std::fprintf(stderr, "[TriAttention] Enabled: kv_budget=%d, divide_length=%d, window_size=%d\n",
+                g_tria_state.kv_budget, g_tria_state.divide_length, g_tria_state.window_size);
+#else
+    std::fprintf(stderr, "[TriAttention] TriAttention not compiled in (DFLASH27B_TRIATTENTION_ENABLED not set)\n");
+#endif
+}
+
+void free_triattention() {
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    if (g_tria_state.stats_ptr) {
+        tria_free(g_tria_state.stats_ptr);
+        g_tria_state.stats_ptr = nullptr;
+    }
+    g_tria_state.enabled = false;
+#endif
 }
 
 } // namespace dflash27b
-
-// NOTE: The actual KV scoring and pruning would be implemented in
-// qwen35_target_graph.cpp::build_full_attn_block() after the KV write.
-//
-// Pseudo-code for the integration:
-//
-//   // In build_full_attn_block(), after Kcur/Vcur projection but before RoPE:
-//   if (g_tria_state.enabled && g_tria_state.should_compress(kv_start + n_tokens)) {
-//       // Capture pre-RoPE K (need to store this somewhere accessible)
-//       // This requires modifying the compute graph to retain pre-RoPE K
-//
-//       // For each KV head, call tria_score_kv_head()
-//       std::vector<float> scores(seq_len * n_head_kv);
-//       for (int h = 0; h < n_head_kv; h++) {
-//           tria_score_kv_head(
-//               g_tria_state.stats_ptr,
-//               k_pre_real, k_pre_imag,  // Pre-RoPE K for this head
-//               key_positions,           // Position IDs
-//               kv_start + n_tokens,     // Current position
-//               seq_len,                 // Sequence length
-//               layer_idx,               // Layer index
-//               h,                       // KV head index
-//               scores.data() + h * seq_len  // Output scores
-//           );
-//       }
-//
-//       // Aggregate scores across GQA groups and select top-K
-//       int budget = g_tria_state.layer_budget(layer_idx, g_tria_state.stats_ptr);
-//       std::vector<int> keep_indices = select_top_k(scores, budget);
-//
-//       // Compact KV cache to keep only selected indices
-//       compact_kv_cache(cache_k, cache_v, keep_indices);
-//
-//       g_tria_state.mark_compressed(kv_start + n_tokens);
-//   }
-//
-// CHALLENGES:
-//   1. Pre-RoPE K capture: DFlash applies RoPE inline, so we need to
-//      either (a) store pre-RoPE K separately, or (b) split the RoPE op
-//   2. GPU-CPU sync: Scoring happens on CPU, KV is on GPU
-//   3. KV compaction: Need to rewrite the KV cache in-place
-//   4. Position mapping: After compaction, position IDs need remapping
-//
-// RECOMMENDED APPROACH:
-//   For now, use vLLM + TriAttention for the KV compression path,
-//   and keep DFlash focused on speculative decoding without KV compression.
-//   The two can be compared in benchmarks to quantify the trade-offs.

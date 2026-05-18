@@ -10,7 +10,33 @@ after each iteration and it's included in prompts for context.
 - **Pre-RoPE K capture for TriAttention**: In `build_full_attn_block()`, capture K after `rms_norm_mul()` but before `ggml_rope_multi()`. Store in `cache.tria_k_pre_rope` buffer (shape `[head_dim, max_ctx, n_head_kv]` bf16). Use `ggml_permute()` to transpose to `[head_dim, n_tokens, n_head_kv]` before copying to cache slot at offset `nb[1] * kv_start`. Gated by `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` compile-time guard.
 - **Qwen3.6-27B TriAttention stats**: Pre-built at `submodules/triattention/triattention/vllm/stats/qwen3_6_27b_stats.pt` (1.6MB). Covers layers 3-63 (every 4th layer), 48 heads each = 768 heads total. `head_dim=256`, `dtype=bfloat16`.
 - **DFlash + TriAttention C++ integration**: Include `triattention.h` directly in C++ wrapper. Use full struct definition (not forward declaration) to access nested fields like `layer_budget_scales`.
+- **TriAttention KV compression in decode loop**: Integrated in `spec_decode.cpp::run_target_layer_split_dflash_decode()`. After each commit, check `g_tria_state.should_compress(committed)` and call `tria_kv_compress()` if true. Compression happens outside the compute graph via D2H/H2D copies, top-K selection, and in-place cache compaction.
 
+
+---
+
+## 2026-05-19 - lucebox-hub-gfx1151-dtri-vve
+- **Implemented**: DFlash + TriAttention 纯 C++ 集成 (KV cache compression)
+- **Files changed**:
+  - `dflash/src/triattention_runner.h`: Added `tria_kv_compress()` function declaration for KV compression
+  - `dflash/src/triattention_runner.cpp`: Updated `init_triattention_from_env()` to load stats from C library via `tria_load()`, added `TRIATTN_ENABLED` env var check
+  - `dflash/src/triattention_compress.cpp`: Created new file implementing `tria_kv_compress()` - reads pre-RoPE K from GPU, scores positions, compacts KV cache in-place
+  - `dflash/src/qwen35/spec_decode.cpp`: Integrated KV compression into decode loop - triggers every `divide_length` tokens via `should_compress()`, updates `cache.cur_pos` after compression
+  - `dflash/src/internal.h`: Added `tria_last_compressed_pos` field to `TargetCache` for tracking compression state
+  - `dflash/CMakeLists.txt`: Added `src/triattention_compress.cpp` to build sources
+- **Build verification**: Successfully compiled `libdflash27b.a` and `test_dflash` with TriAttention integration
+- **Environment variables**:
+  - `TRIATTN_ENABLED=1`: Enable TriAttention KV compression (requires stats file)
+  - `TRIATTN_STATS_PATH`: Path to .bin stats file (default: `dflash/deps/llama.cpp/triattention/stats/qwen3.5-27b.bin`)
+  - `TRIATTN_KV_BUDGET`: Max tokens to retain (default: 2048)
+  - `TRIATTN_DIVIDE_LENGTH`: Compression interval in tokens (default: 128)
+  - `TRIATTN_WINDOW_SIZE`: Recent tokens always preserved (default: 128)
+- **Learnings**:
+  - HIP/CUDA API compatibility: Used macro abstraction (`gpuGetDevice`, `gpuMemcpy`, etc.) to support both CUDA and ROCm
+  - C++17 `std::bit_cast` not available on all compilers, used union-based bf16-to-f32 conversion instead
+  - KV cache compaction happens in-place via D2H/H2D copies, avoiding memory reallocation
+  - The `TriAttentionState` struct uses `stats_ptr` (C library pointer) and `divide_length` (compression interval), not `stats`/`compress_interval`
+  - TriAttention C library (`triattention.h/c`) provides `tria_load()` and `tria_free()` for stats lifecycle management
 
 ---
 

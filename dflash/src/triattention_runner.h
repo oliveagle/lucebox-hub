@@ -112,4 +112,44 @@ extern TriAttentionState g_tria_state;
 //   - TRIATTN_WINDOW_SIZE: recent tokens preserved (default 128)
 void init_triattention_from_env();
 
+// Free TriAttention resources
+void free_triattention();
+
+// TriAttention KV compression — reads pre-RoPE K from GPU, scores per head,
+// selects top-K positions, compacts KV cache in-place.
+// Gated by TRIATTN_ENABLED=1 env var (via stats file presence).
+//
+// Parameters:
+//   stats           — loaded tria_stats (from g_tria_state)
+//   k_pre_rope_gpu  — GPU bf16 buffer [head_dim, max_ctx, n_head_kv]
+//   attn_k          — array of K cache tensor ptrs (one per FA layer)
+//   attn_v          — array of V cache tensor ptrs (one per FA layer)
+//   n_full_attn     — number of full-attention layers
+//   n_head_kv       — KV heads per layer
+//   head_dim        — per-head dimension
+//   max_ctx         — allocated max context
+//   kv_start        — start of the KV range to consider compressing (0 = from beginning)
+//   cur_pos         — current context length (positions 0..cur_pos are populated)
+//   gpu_id          — GPU device ID for D2H/H2D copies
+//   keep_ratio      — fraction of positions to keep (0.0-1.0)
+//   n_kept_out      — [out] number of positions kept after compression
+//
+// Returns true on success. The KV cache is compacted in-place: kept positions
+// are moved to the front [kv_start..kv_start+n_kept). cur_pos should be updated
+// to kv_start + n_kept by the caller.
+bool tria_kv_compress(
+    const struct tria_stats * stats,
+    void * k_pre_rope_gpu,
+    void * attn_k[],
+    void * attn_v[],
+    int n_full_attn,
+    int n_head_kv,
+    int head_dim,
+    int max_ctx,
+    int kv_start,
+    int cur_pos,
+    int gpu_id,
+    float keep_ratio,
+    int * n_kept_out);
+
 } // namespace dflash27b
