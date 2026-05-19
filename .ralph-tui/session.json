@@ -3,10 +3,10 @@
   "sessionId": "78c6e87e-1f5e-4f1c-a842-6a67f277acbc",
   "status": "running",
   "startedAt": "2026-05-19T03:33:13.984Z",
-  "updatedAt": "2026-05-19T04:16:22.833Z",
-  "currentIteration": 0,
+  "updatedAt": "2026-05-19T04:47:26.034Z",
+  "currentIteration": 2,
   "maxIterations": 50,
-  "tasksCompleted": 0,
+  "tasksCompleted": 1,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -23,8 +23,8 @@
       {
         "id": "lucebox-hub-gfx1151-1oe.2",
         "title": "M2: llama.cpp + TriAttention 支持",
-        "status": "open",
-        "completedInSession": false
+        "status": "completed",
+        "completedInSession": true
       },
       {
         "id": "lucebox-hub-gfx1151-1oe.3",
@@ -376,9 +376,32 @@
       }
     ]
   },
-  "iterations": [],
+  "iterations": [
+    {
+      "iteration": 1,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-1oe.2",
+      "taskTitle": "M2: llama.cpp + TriAttention 支持",
+      "taskCompleted": true,
+      "durationMs": 2587981,
+      "startedAt": "2026-05-19T03:33:14.837Z",
+      "endedAt": "2026-05-19T04:16:22.818Z"
+    },
+    {
+      "iteration": 2,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-bnk",
+      "taskTitle": "实现步骤",
+      "taskCompleted": false,
+      "durationMs": 317435,
+      "startedAt": "2026-05-19T04:16:28.116Z",
+      "endedAt": "2026-05-19T04:21:45.551Z"
+    }
+  ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
-  "activeTaskIds": [],
+  "activeTaskIds": [
+    "lucebox-hub-gfx1151-bnk"
+  ],
   "subagentPanelVisible": false
 }

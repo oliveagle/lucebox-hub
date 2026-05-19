@@ -518,25 +518,36 @@ static ggml_tensor * build_full_attn_block(
     Kcur = rms_norm_mul(ctx, Kcur, L.k_norm, w.rms_eps);
     Vcur = ggml_reshape_3d(ctx, Vcur, head_dim, n_head_kv, n_tokens);
 
-    // ── TriAttention: DISABLED - segfault in ggml_view_3d ──
-    // Root cause: tria_k_pre_rope->nb[] values are corrupted.
-    // Tensor allocated via ggml_new_tensor_3d() at lines 199-201, allocated at line 217.
-    // Need to investigate context lifecycle and tensor initialization.
-    // TODO: fix and re-enable
-#if 0
+    // ── TriAttention: capture pre-RoPE K for frequency-domain scoring.
+    // Store Kcur before RoPE into the tria_k_pre_rope buffer so the
+    // compression path can read the original K vectors (unrotated) for
+    // frequency analysis. The layout matches the KV cache:
+    //   [head_dim, max_ctx, n_head_kv] bf16
+    // We transpose Kcur to [head_dim, n_tokens, n_head_kv] and copy into a
+    // view of the buffer starting at kv_start.
+    //
+    // IMPORTANT: recompute strides from the source tensor's ne[] dimensions
+    // and GGML_TYPE_BF16 element/block size rather than reading nb[].
+    // ggml stores contiguous tensors as [head_dim, seq_len, heads] with
+    // nb[0]=elt_size, nb[1]=elt_size*(head_dim/blck), nb[2]=nb[1]*seq_len.
+    // This avoids potential corruption of nb[] on some HIP backends.
+    // (See ggml_new_tensor_impl in ggml.c for the stride calculation.)
     if (tria_k_pre_rope) {
         if (!tria_k_pre_rope->data) {
-            // TriAttention buffer was allocated but not backed - skip capture
+            // TriAttention buffer was allocated but not backed — skip capture
         } else {
             ggml_tensor * Kpre_T = ggml_permute(ctx, Kcur, 0, 2, 1, 3);
+            const size_t elt_sz   = ggml_element_size(tria_k_pre_rope); // bf16 = 2
+            const size_t blck_sz  = (size_t)ggml_blck_size(tria_k_pre_rope->type); // bf16 = 2
+            const size_t nb1      = elt_sz * (head_dim / blck_sz);
+            const size_t nb2      = nb1 * tria_k_pre_rope->ne[1];
             ggml_tensor * k_slot = ggml_view_3d(ctx, tria_k_pre_rope,
                 head_dim, n_tokens, n_head_kv,
-                tria_k_pre_rope->nb[1], tria_k_pre_rope->nb[2],
-                /*offset*/ (size_t)kv_start * tria_k_pre_rope->nb[1]);
+                nb1, nb2,
+                /*offset*/ (size_t)kv_start * nb1);
             ggml_build_forward_expand(gf, ggml_cpy(ctx, Kpre_T, k_slot));
         }
     }
-#endif
 
     // ── M-RoPE (multi-axis rotary). n_rot = HEAD_DIM/4 * 4 ? Actually
     //    ggml_rope_multi takes n_dims = the number of dims to rotate; for
