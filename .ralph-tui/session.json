@@ -3,10 +3,10 @@
   "sessionId": "78c6e87e-1f5e-4f1c-a842-6a67f277acbc",
   "status": "running",
   "startedAt": "2026-05-19T03:33:13.984Z",
-  "updatedAt": "2026-05-19T04:47:28.710Z",
-  "currentIteration": 3,
+  "updatedAt": "2026-05-19T04:57:18.491Z",
+  "currentIteration": 5,
   "maxIterations": 50,
-  "tasksCompleted": 2,
+  "tasksCompleted": 3,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -406,13 +406,34 @@
       "durationMs": 1538308,
       "startedAt": "2026-05-19T04:21:47.690Z",
       "endedAt": "2026-05-19T04:47:25.998Z"
+    },
+    {
+      "iteration": 4,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-fix-tria-segfault-qbo",
+      "taskTitle": "修复 TriAttention pre-RoPE K capture 导致的 segfault",
+      "taskCompleted": true,
+      "durationMs": 506044,
+      "startedAt": "2026-05-19T04:47:28.549Z",
+      "endedAt": "2026-05-19T04:55:54.593Z"
+    },
+    {
+      "iteration": 5,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-c2g.1",
+      "taskTitle": "调试 tria_k_pre_rope tensor 分配问题",
+      "taskCompleted": false,
+      "durationMs": 79174,
+      "startedAt": "2026-05-19T04:55:56.895Z",
+      "endedAt": "2026-05-19T04:57:16.069Z"
     }
   ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
   "activeTaskIds": [
     "lucebox-hub-gfx1151-bnk",
-    "lucebox-hub-gfx1151-fix-tria-segfault-qbo"
+    "lucebox-hub-gfx1151-c2g.1",
+    "lucebox-hub-gfx1151-c2g.2"
   ],
   "subagentPanelVisible": false
 }

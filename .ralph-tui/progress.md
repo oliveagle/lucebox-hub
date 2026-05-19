@@ -79,3 +79,21 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## [2026-05-19] - lucebox-hub-gfx1151-c2g.2
+- **What was implemented**:
+  - Verified fix from c2g.1 is correctly applied and compiled
+  - The stride recomputation approach (lines 540-543) computes:
+    - `elt_sz = ggml_element_size(tria_k_pre_rope)` → 2 for BF16
+    - `blck_sz = ggml_blck_size(tria_k_pre_rope->type)` → 1 for BF16
+    - `nb1 = elt_sz * (head_dim / blck_sz)` = 2 * 256 = 512
+    - `nb2 = nb1 * tria_k_pre_rope->ne[1]` = 512 * max_ctx_alloc
+  - dflash27b library compiles successfully with DFLASH27B_TRIATTENTION=ON
+  - TriAttention symbols verified in libdflash27b.a: tria_free, tria_kv_compress, init_triattention_from_env
+- **Files changed**: None (fix was already implemented in c2g)
+- **Learnings**:
+  - GGML_TYPE_BF16 has blck_size=1 (not 2 as originally guessed in comments)
+  - ggml_element_size returns type_size directly for non-quantized types
+  - dflash27b compiles successfully with DFLASH27B_TRIATTENTION=ON and links correctly with TriAttention symbols
+
+---
+
