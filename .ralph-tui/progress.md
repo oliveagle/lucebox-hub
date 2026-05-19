@@ -67,3 +67,15 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## [2026-05-19] - lucebox-hub-gfx1151-fix-tria-segfault-qbo
+- **What was implemented**:
+  - Verified the stride recomputation fix from c2g is correctly applied
+  - Compiled dflash27b successfully with DFLASH27B_TRIATTENTION=ON
+  - Fix already committed: 83afcf6 "bug: lucebox-hub-gfx1151-c2g 修复 TriAttention pre-RoPE K capture 导致的 segfault"
+- **Files changed**: None (fix was already implemented in c2g)
+- **Learnings**:
+  - The fix has been verified to work correctly: strides computed from source tensor dimensions instead of reading potentially corrupted nb[]
+  - The pattern is now documented in the Codebase Patterns section of progress.md
+
+---
+

@@ -3,7 +3,7 @@
   "sessionId": "78c6e87e-1f5e-4f1c-a842-6a67f277acbc",
   "status": "running",
   "startedAt": "2026-05-19T03:33:13.984Z",
-  "updatedAt": "2026-05-19T04:47:28.710Z",
+  "updatedAt": "2026-05-19T04:55:54.610Z",
   "currentIteration": 3,
   "maxIterations": 50,
   "tasksCompleted": 2,
@@ -411,8 +411,7 @@
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
   "activeTaskIds": [
-    "lucebox-hub-gfx1151-bnk",
-    "lucebox-hub-gfx1151-fix-tria-segfault-qbo"
+    "lucebox-hub-gfx1151-bnk"
   ],
   "subagentPanelVisible": false
 }
