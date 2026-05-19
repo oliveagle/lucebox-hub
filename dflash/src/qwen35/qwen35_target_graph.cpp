@@ -199,6 +199,9 @@ bool create_target_cache_partial(const TargetWeights & w,
             out.tria_k_pre_rope = ggml_new_tensor_3d(out.base_ctx, GGML_TYPE_BF16,
                                                       head_dim, max_ctx_alloc, w.n_head_kv);
             ggml_set_name(out.tria_k_pre_rope, "tria_k_pre_rope");
+            fprintf(stderr, "[TriAttention] tria_k_pre_rope created ne=[%zu,%zu,%zu] nb=[%zu,%zu,%zu]\n",
+                    out.tria_k_pre_rope->ne[0], out.tria_k_pre_rope->ne[1], out.tria_k_pre_rope->ne[2],
+                    out.tria_k_pre_rope->nb[0], out.tria_k_pre_rope->nb[1], out.tria_k_pre_rope->nb[2]);
         } else {
             out.tria_k_pre_rope = nullptr;
         }
@@ -215,6 +218,9 @@ bool create_target_cache_partial(const TargetWeights & w,
         }
 
         out.base_buf = ggml_backend_alloc_ctx_tensors(out.base_ctx, backend);
+        fprintf(stderr, "[TriAttention] base_buf=%p tria_k_pre_rope=%p data=%p\n",
+                (void*)out.base_buf, (void*)out.tria_k_pre_rope,
+                out.tria_k_pre_rope ? out.tria_k_pre_rope->data : nullptr);
         if (!out.base_buf) {
             set_last_error("ggml_backend_alloc_ctx_tensors failed for base cache");
             ggml_free(out.base_ctx);
@@ -533,6 +539,8 @@ static ggml_tensor * build_full_attn_block(
     // This avoids potential corruption of nb[] on some HIP backends.
     // (See ggml_new_tensor_impl in ggml.c for the stride calculation.)
     if (tria_k_pre_rope) {
+        fprintf(stderr, "[TriAttention] build_full_attn_block tria_k_pre_rope=%p data=%p\n",
+                (void*)tria_k_pre_rope, tria_k_pre_rope->data);
         if (!tria_k_pre_rope->data) {
             // TriAttention buffer was allocated but not backed — skip capture
         } else {

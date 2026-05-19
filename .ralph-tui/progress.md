@@ -97,3 +97,17 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## [2026-05-19] - lucebox-hub-gfx1151-fix-tria-segfault-qbo.1.1
+- **What was implemented**:
+  - Added logging to verify `tria_k_pre_rope` tensor allocation state at three key points in `build_target_cache()`:
+    1. After tensor creation (line 202-204): logs `ne` and `nb` dimensions
+    2. After `ggml_backend_alloc_ctx_tensors()` (line 221-223): logs `base_buf`, `tria_k_pre_rope` pointer, and `->data` pointer
+    3. Before access in `build_full_attn_block()` (line 542-543): logs tensor pointer and data pointer
+- **Files changed**:
+  - `dflash/src/qwen35/qwen35_target_graph.cpp` (added 3 fprintf log statements)
+- **Learnings**:
+  - When editing existing if-else blocks, ensure old comments/else clauses are properly replaced
+  - Triple-log approach helps pinpoint exactly where tensor allocation fails: create → alloc → access
+
+---
+
