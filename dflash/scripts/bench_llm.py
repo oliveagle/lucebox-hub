@@ -331,13 +331,41 @@ def main():
             enable_thinking=False,
         )
 
+    def _load_local_dataset(name: str):
+        """Fall back to local JSONL datasets when HuggingFace Hub is unavailable."""
+        eval_dir = ROOT / "eval"
+        if name == "HumanEval":
+            for candidate in (
+                eval_dir / "humaneval_plus" / "humanevalplus.jsonl",
+                eval_dir / "humaneval.jsonl",
+            ):
+                if candidate.is_file():
+                    with open(candidate) as f:
+                        return [json.loads(line) for line in f]
+            return None
+        return None
+
     results = {}
     for name, ds_name, cfg, split, extract, gold_extract, gen in BENCHES:
         if bench_filter and name not in bench_filter:
             continue
         print(f"\n[bench] ==== {name} (n={N_SAMPLE}, n_gen={gen}) ====", flush=True)
-        ds = load_dataset(ds_name, cfg, split=split)
-        ds_selected = ds.shuffle(seed=42).select(range(N_SAMPLE))
+
+        # Try HuggingFace Hub first, fall back to local JSONL files
+        try:
+            ds = load_dataset(ds_name, cfg, split=split)
+            ds_list = list(ds)
+        except Exception:
+            print(f"[bench] HuggingFace Hub unavailable for {name}, trying local files...", flush=True)
+            local_data = _load_local_dataset(name)
+            if local_data:
+                ds_list = local_data
+                print(f"[bench] Loaded {len(ds_list)} examples from local JSONL", flush=True)
+            else:
+                print(f"[bench] No local data found for {name}, skipping", flush=True)
+                continue
+
+        ds_selected = ds_list[:N_SAMPLE]
         prompt_list = [extract(s) for s in ds_selected]
         gold_list = [gold_extract(s) for s in ds_selected] if gold_extract else [None] * len(prompt_list)
 

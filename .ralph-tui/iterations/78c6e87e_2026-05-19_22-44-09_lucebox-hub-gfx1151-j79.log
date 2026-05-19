@@ -1,0 +1,187 @@
+# Iteration 11 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-j79
+- **Task Title**: fix: tria_k_pre_rope_snap 未被 snapshot/restore 函数使用
+- **Description**: ## 问题
+
+`PrefixSnapshot` 结构体已有 `tria_k_pre_rope_snap` 字段,但 snapshot/restore 函数从未分配或使用它。导致 TriAttention 压缩路径使用的 pre-RoPE K 缓冲区在 restore 后包含陈旧数据。
+
+## 需要修改的函数
+
+1. `snapshot_target_cache()` — 在 lazy alloc ...
+- **Status**: completed
+- **Task Completed**: Yes
+- **Promise Detected**: Yes
+- **Started At**: 2026-05-19T14:44:09.705Z
+- **Ended At**: 2026-05-19T14:51:08.373Z
+- **Duration**: 6m 58s
+- **Input Tokens**: 3161159
+- **Output Tokens**: 22608
+- **Total Tokens**: 3183767
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/internal.h[0m
+The progress log shows this task was already completed in iteration `y5w.5`. Let me verify the changes are actually in place in the source file.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m
+Let me check the `PrefixSnapshot` struct definition in `internal.h`.
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src[0m pattern: [96mtria_k_pre_rope_snap[0m
+<think>So `tria_k_pre_rope_snap` is NOT in the struct or the snapshot/restore functions yet. The progress.md mentions it was added, but maybe the struct definition hasn't been updated, or the snapshot/restore functions haven't been updated.
+
+Let me check internal.h for the `tria_k_pre_rope_snap` field in the PrefixSnapshot struct.
+
+Looking at the internal.h PrefixSnapshot struct (lines 372-398), I don't see `tria_k_pre_rope_snap` there. So the struct field needs to be added too.
+
+The task says:
+- `PrefixSnapshot` struct already has `tria_k_pre_rope_snap` field - but I don't see it in the struct
+
+
+- Let me re-read: "Key files: dflash/src/internal.h (struct PrefixSnapshot 已有 tria_k_pre_rope_snap 字段)" — this says it already HAS the field
+
+But looking at the PrefixSnapshot struct, I see:
+- attn_k_snap, attn_v_snap, ssm_state_snap, conv_state_snap
+- target_feat_snap
+- But NO tria_k_pre_rope_snap
+
+So either the struct needs the field added, or the progress.md is claiming something that isn't true yet and I'm supposed to add it.
+
+The bead title says `tria_k_pre_rope_snap` isn't being used by snapshot/restore functions, which means the field should already be in the struct. But looking at the actual code, it's not there. The struct is missing this field even though the progress notes claim it exists, so either the notes are outdated or I'm looking at the wrong version of the file. I'm realizing the struct only has 5 fields total, not the 65 that `snapshot_target_cache` expects. Let me recount the actual tensor allocations to understand what's really being stored.
+</think>
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mtria_k_pre_rope_snap[0m
+The struct field `tria_k_pre_rope_snap` is NOT actually in `internal.h` despite what progress.md claims. The previous iteration didn't persist the changes. I need to implement this from scratch.
+
+Let me add the field and update all the snapshot/restore functions.
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/internal.h[0m edit: "    ggml_tensor * target_feat_snap;
+    int cur_po..." → "    ggml_tensor * target_feat_snap;
+#if defined(DF..."
+
+[91m[Error: <tool_use_error>String to replace not found in file.
+String:     ggml_tensor * target_feat_snap;
+    int cur_pos            = 0;</tool_use_error>][0m
+<think>Let me read the exact section in internal.h more carefully.
+</think>
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/internal.h[0m
+Now I can see the exact structure. Let me implement all the changes.
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/internal.h[0m edit: "    ggml_tensor *               target_feat_snap =..." → "    ggml_tensor *               target_feat_snap =..."
+Now I need to update the snapshot/restore functions. Let me update `snapshot_target_cache()` to allocate and copy `tria_k_pre_rope`:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "bool snapshot_target_cache(const TargetWeights & w..." → "bool snapshot_target_cache(const TargetWeights & w..."
+Now add the tensor allocation after `target_feat_snap`:
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "        // Allocate target_feat snap tensor.
+     ..." → "        // Allocate target_feat snap tensor.
+     ..."
+Now add the copy step for `tria_k_pre_rope` after the existing tensor copies:
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "    ggml_backend_tensor_copy(cache.target_feat, sn..." → "    ggml_backend_tensor_copy(cache.target_feat, sn..."
+Now update `restore_target_cache` to restore `tria_k_pre_rope`:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "    ggml_backend_tensor_copy(snap.target_feat_snap..." → "    ggml_backend_tensor_copy(snap.target_feat_snap..."
+<think>
+Now update `free_prefix_snapshot` to clear the `tria_k_pre_rope_snap` pointer.
+</think>
+
+Now update `free_prefix_snapshot` to clear `tria_k_pre_rope_snap`:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "    snap.attn_k_snap.clear();
+    snap.attn_v_snap..." → "    snap.attn_k_snap.clear();
+    snap.attn_v_snap..."
+<think>
+Now I need to update `snapshot_target_cache_thin()` to add strip-by-strip copying for `tria_k_pre_rope`. The thin snapshot copies attn_k/attn_v strip by strip. I need to add similar logic for `tria_k_pre_rope`.
+
+The thin snapshot is KV-only, so it captures `tria_k_pre_rope` which has the same shape as the attn_k cache: [head_dim, max_ctx, n_head_kv].
+
+Looking at the existing thin snapshot code:
+1. It allocates attn_k_snap and attn_v_snap with shape [HEAD_DIM, block_size, N_HEAD_KV]
+
+
+2. It copies strip-by-strip using H2D copy
+
+I need to:
+1. Add `tria_k_pre_rope_snap` allocation
+2. Add the strip-by-strip copy
+
+But first, I need to check if `need_triattention` is available in the thin function scope, and since `tria_k_pre_rope` is a single buffer (not per-layer), the strip copy would be simpler. Now I'm examining the current thin snapshot structure to understand how to integrate the new field.
+
+Looking at the function, it calculates `n_full_attn`, then allocates and copies attn_k_snap and attn_v_snap strip-by-strip. I need to add allocation for `tria_k_pre_rope_snap` with the same shape as `tria_k_pre_rope` but limited to `block_size`, and then add the strip-by-strip copy logic.
+</think>
+
+Now update `snapshot_target_cache_thin` to handle `tria_k_pre_rope`. Let me read the current state first:
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m
+Now I need to update `snapshot_target_cache_thin` to include `tria_k_pre_rope_snap`. Since `tria_k_pre_rope` is a single shared buffer (not per-layer), it needs to be handled similarly to attn_k/attn_v but as a single tensor:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "    // Lazy alloc; if snap was already a THIN with..." → "    // Lazy alloc; if snap was already a THIN with..."
+Now add the strip-by-strip copy for `tria_k_pre_rope` after the existing K/V strip copying. Let me see the end of the strip copying section:
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m
+<think>Now I need to add the thin snapshot copy loop for tria_k_pre_rope after the attn_k/attn_v strip copy. The tria_k_pre_rope is similar to the attn_k strips - it has shape [head_dim, max_ctx, n_head_kv] and we need to copy a strip [kv_start, kv_end). Let me find the exact place to add the copy.
+</think>
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "size_t v_src = (size_t)kh * sv->nb[2] + (size_t)kv..." → "size_t v_src = (size_t)kh * sv->nb[2] + (size_t)kv..."
+Now update `restore_target_cache_chain` to restore the `tria_k_pre_rope` strips. Let me read that section:
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "        for (int i = 0; i < (int)cache.attn_k.size..." → "        for (int i = 0; i < (int)cache.attn_k.size..."
+Now let me build to verify compilation:
+
+[94m[Bash][0m Build dflash27b library to verify compilation $ cmake --build build --target dflash27b -j$(nproc) 2>&1 | tail -30
+Library compiled successfully. Now build and run `test_dflash`:
+
+[94m[Bash][0m Build test_dflash binary $ cmake --build build --target test_dflash -j$(nproc) 2>&1 | tail -10
+[94m[Bash][0m Test test_dflash can run (help command) $ cd build && timeout 30 ./test_dflash --help 2>&1 | head -50
+Build passes. `test_dflash` starts successfully. Let me update the progress log and close the bead:
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "# Ralph Progress Log
+
+This file tracks progress ac..." → "# Ralph Progress Log
+
+This file tracks progress ac..."
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "- **Pattern: Recompute tensor strides from ne[] fo..." → "- **Pattern: Recompute tensor strides from ne[] fo..."
+<think>Now let me close the bead and sync the tracker.
+</think>
+
+[94m[Bash][0m Close the bead $ cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151 && br close lucebox-hub-gfx1151-j79 --reason "...
+<think>Now let me flush the tracker state.
+</think>
+
+[94m[Bash][0m Flush tracker state to JSONL $ br sync --flush-only 2>&1
+<think>
+Done. Let me verify the full set of changes I made are correct by reviewing them.
+
+The changes:
+1. Added `tria_k_pre_rope_snap` to `PrefixSnapshot` struct in `internal.h`
+2. Updated `snapshot_target_cache()` to allocate and copy `tria_k_pre_rope`
+3. Updated `restore_target_cache()` to restore `tria_k_pre_rope`
+4. Updated `free_prefix_snapshot()` to clear `tria_k_pre_rope_snap`
+5. Updated `snapshot_target_cache_thin()` to allocate and copy strip-by-strip `tria_k_pre_rope`
+
+
+6. Updated `restore_target_cache_chain()` to restore strip-by-strip `tria_k_pre_rope`
+
+All functions are properly guarded with `#if defined(DFLASH27B_TRIATTENTION_ENABLED)`, compilation succeeds, and the test binary runs as expected.
+</think>
+
+All done. Here's a summary of what was implemented:
+
+**Changes made:**
+- `dflash/src/internal.h`: Added `tria_k_pre_rope_snap` field to `PrefixSnapshot` struct (with `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` guard)
+- `dflash/src/qwen35/qwen35_target_graph.cpp`: Updated all 5 functions:
+  1. `snapshot_target_cache()` — allocate and copy `tria_k_pre_rope` snapshot
+  2. `restore_target_cache()` — restore `tria_k_pre_rope` from snapshot
+  3. `free_prefix_snapshot()` — clear `tria_k_pre_rope_snap` pointer
+  4. `snapshot_target_cache_thin()` — allocate and strip-copy `tria_k_pre_rope`
+  5. `restore_target_cache_chain()` — restore `tria_k_pre_rope` strips from thins
+
+**Verification:**
+- Compilation: ✅ Passed (warnings are pre-existing)
+- test_dflash binary: ✅ Builds and runs
+
+Note: The `tria_k_pre_rope_snap` field was **not actually present** in the struct despite progress.md claiming it was added by a previous iteration. This was verified by inspecting the source. The full implementation was done from scratch.
+
+<promise>COMPLETE</promise>

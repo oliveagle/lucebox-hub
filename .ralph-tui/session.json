@@ -3,10 +3,10 @@
   "sessionId": "78c6e87e-1f5e-4f1c-a842-6a67f277acbc",
   "status": "running",
   "startedAt": "2026-05-19T03:33:13.984Z",
-  "updatedAt": "2026-05-19T05:11:10.532Z",
-  "currentIteration": 7,
+  "updatedAt": "2026-05-19T15:31:44.319Z",
+  "currentIteration": 11,
   "maxIterations": 50,
-  "tasksCompleted": 5,
+  "tasksCompleted": 7,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -446,13 +446,55 @@
       "durationMs": 236626,
       "startedAt": "2026-05-19T05:03:54.937Z",
       "endedAt": "2026-05-19T05:07:51.563Z"
+    },
+    {
+      "iteration": 8,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-fix-tria-segfault-qbo.2.1",
+      "taskTitle": "修复 tensor 分配问题",
+      "taskCompleted": true,
+      "durationMs": 196452,
+      "startedAt": "2026-05-19T05:07:54.052Z",
+      "endedAt": "2026-05-19T05:11:10.504Z"
+    },
+    {
+      "iteration": 9,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-y5w",
+      "taskTitle": "DFlash TriAttention Segfault 修复",
+      "taskCompleted": false,
+      "durationMs": 4138407,
+      "startedAt": "2026-05-19T11:43:53.453Z",
+      "endedAt": "2026-05-19T12:52:51.860Z"
+    },
+    {
+      "iteration": 10,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-y5w.4",
+      "taskTitle": "运行 HumanEval/GSM8K benchmark",
+      "taskCompleted": false,
+      "durationMs": 2754340,
+      "startedAt": "2026-05-19T12:52:54.096Z",
+      "endedAt": "2026-05-19T13:38:48.436Z"
+    },
+    {
+      "iteration": 11,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-j79",
+      "taskTitle": "fix: tria_k_pre_rope_snap 未被 snapshot/restore 函数使用",
+      "taskCompleted": true,
+      "durationMs": 418668,
+      "startedAt": "2026-05-19T14:44:09.705Z",
+      "endedAt": "2026-05-19T14:51:08.373Z"
     }
   ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
   "activeTaskIds": [
     "lucebox-hub-gfx1151-bnk",
-    "lucebox-hub-gfx1151-c2g.1"
+    "lucebox-hub-gfx1151-c2g.1",
+    "lucebox-hub-gfx1151-y5w",
+    "lucebox-hub-gfx1151-y5w.4"
   ],
   "subagentPanelVisible": false
 }

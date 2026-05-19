@@ -382,6 +382,9 @@ struct PrefixSnapshot {
     std::vector<ggml_tensor *> ssm_state_snap;  // size n_delta (48)
     std::vector<ggml_tensor *> conv_state_snap;
     ggml_tensor *               target_feat_snap = nullptr;
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    ggml_tensor *               tria_k_pre_rope_snap = nullptr;
+#endif
 
     ggml_context *        ctx = nullptr;
     ggml_backend_buffer_t buf = nullptr;

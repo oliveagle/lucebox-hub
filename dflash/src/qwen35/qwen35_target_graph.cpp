@@ -1251,7 +1251,12 @@ bool snapshot_target_cache(const TargetWeights & w,
 
     // Lazy allocation: only allocate on the first call.
     if (snap.ctx == nullptr) {
-        const int total_tensors = 2 * n_full_attn + 2 * n_delta + 1; // 65
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+        const bool need_triattention = (cache.tria_k_pre_rope != nullptr);
+        const int total_tensors = 2 * n_full_attn + 2 * n_delta + 1 + (need_triattention ? 1 : 0);
+#else
+        const int total_tensors = 2 * n_full_attn + 2 * n_delta + 1;
+#endif
         ggml_init_params ip{};
         ip.mem_size   = (size_t)(total_tensors + 16) * ggml_tensor_overhead();
         ip.mem_buffer = nullptr;
@@ -1297,6 +1302,14 @@ bool snapshot_target_cache(const TargetWeights & w,
             ggml_set_name(snap.target_feat_snap, "snap_target_feat");
         }
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+        if (need_triattention) {
+            ggml_tensor * tk = cache.tria_k_pre_rope;
+            snap.tria_k_pre_rope_snap = ggml_new_tensor_3d(snap.ctx, tk->type, tk->ne[0], tk->ne[1], tk->ne[2]);
+            ggml_set_name(snap.tria_k_pre_rope_snap, "snap_tria_k_pre_rope");
+        }
+#endif
+
         snap.buf = ggml_backend_alloc_ctx_tensors(snap.ctx, backend);
         if (!snap.buf) {
             set_last_error("ggml_backend_alloc_ctx_tensors failed for PrefixSnapshot");
@@ -1307,6 +1320,9 @@ bool snapshot_target_cache(const TargetWeights & w,
             snap.ssm_state_snap.clear();
             snap.conv_state_snap.clear();
             snap.target_feat_snap = nullptr;
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+            snap.tria_k_pre_rope_snap = nullptr;
+#endif
             return false;
         }
     }
@@ -1321,6 +1337,12 @@ bool snapshot_target_cache(const TargetWeights & w,
         ggml_backend_tensor_copy(cache.conv_state[i], snap.conv_state_snap[i]);
     }
     ggml_backend_tensor_copy(cache.target_feat, snap.target_feat_snap);
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    if (cache.tria_k_pre_rope && snap.tria_k_pre_rope_snap) {
+        ggml_backend_tensor_copy(cache.tria_k_pre_rope, snap.tria_k_pre_rope_snap);
+    }
+#endif
 
     snap.cur_pos         = cache.cur_pos;
     snap.last_tok        = cache.last_tok;
@@ -1369,6 +1391,12 @@ bool restore_target_cache(const PrefixSnapshot & snap, TargetCache & cache) {
     }
     ggml_backend_tensor_copy(snap.target_feat_snap, cache.target_feat);
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    if (snap.tria_k_pre_rope_snap && cache.tria_k_pre_rope) {
+        ggml_backend_tensor_copy(snap.tria_k_pre_rope_snap, cache.tria_k_pre_rope);
+    }
+#endif
+
     cache.cur_pos  = snap.cur_pos;
     cache.last_tok = snap.last_tok;
 
@@ -1383,6 +1411,9 @@ void free_prefix_snapshot(PrefixSnapshot & snap) {
     snap.ssm_state_snap.clear();
     snap.conv_state_snap.clear();
     snap.target_feat_snap = nullptr;
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    snap.tria_k_pre_rope_snap = nullptr;
+#endif
     snap.cur_pos         = 0;
     snap.kv_k_type       = GGML_TYPE_COUNT;
     snap.max_ctx         = 0;
@@ -1418,7 +1449,12 @@ bool snapshot_target_cache_thin(const TargetWeights & w,
                        snap.kv_end   != kv_end;
     if (needs_alloc) {
         free_prefix_snapshot(snap);
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+        const bool need_triattention = (cache.tria_k_pre_rope != nullptr);
+        const int total_tensors = 2 * n_full_attn + (need_triattention ? 1 : 0);
+#else
         const int total_tensors = 2 * n_full_attn;
+#endif
         ggml_init_params ip{};
         ip.mem_size   = (size_t)(total_tensors + 16) * ggml_tensor_overhead();
         ip.mem_buffer = nullptr;
@@ -1442,6 +1478,14 @@ bool snapshot_target_cache_thin(const TargetWeights & w,
             std::snprintf(name, sizeof(name), "snap_thin_v_%d", i);
             ggml_set_name(snap.attn_v_snap[i], name);
         }
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+        if (need_triattention) {
+            ggml_tensor * tk = cache.tria_k_pre_rope;
+            snap.tria_k_pre_rope_snap = ggml_new_tensor_3d(snap.ctx, tk->type,
+                                                             tk->ne[0], block_size, tk->ne[2]);
+            ggml_set_name(snap.tria_k_pre_rope_snap, "snap_thin_tria_k_pre_rope");
+        }
+#endif
         snap.buf = ggml_backend_alloc_ctx_tensors(snap.ctx, backend);
         if (!snap.buf) {
             set_last_error("thin snap alloc failed");
@@ -1449,6 +1493,9 @@ bool snapshot_target_cache_thin(const TargetWeights & w,
             snap.ctx = nullptr;
             snap.attn_k_snap.clear();
             snap.attn_v_snap.clear();
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+            snap.tria_k_pre_rope_snap = nullptr;
+#endif
             return false;
         }
     }
@@ -1473,6 +1520,23 @@ bool snapshot_target_cache_thin(const TargetWeights & w,
             ggml_backend_tensor_set(dv, bufv.data(), v_dst, v_strip);
         }
     }
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    // Copy tria_k_pre_rope strip-by-strip (same shape/layout as attn_k).
+    if (cache.tria_k_pre_rope && snap.tria_k_pre_rope_snap) {
+        ggml_tensor * tk = cache.tria_k_pre_rope;
+        ggml_tensor * ds = snap.tria_k_pre_rope_snap;
+        const size_t strip_sz = (size_t)block_size * tk->nb[1];
+        std::vector<uint8_t> buft(strip_sz);
+        for (int kh = 0; kh < (int)tk->ne[2]; kh++) {
+            size_t t_src = (size_t)kh * tk->nb[2] + (size_t)kv_start * tk->nb[1];
+            size_t t_dst = (size_t)kh * ds->nb[2];
+            ggml_backend_tensor_get(tk, buft.data(), t_src, strip_sz);
+            ggml_backend_tensor_set(ds, buft.data(), t_dst, strip_sz);
+        }
+    }
+#endif
+
     snap.is_thin   = true;
     snap.kv_start  = kv_start;
     snap.kv_end    = kv_end;
@@ -1527,6 +1591,23 @@ bool restore_target_cache_chain(const PrefixSnapshot * thick,
                 ggml_backend_tensor_set(dv, bufv.data(), v_dst, v_strip);
             }
         }
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+        // Restore tria_k_pre_rope strip from thin snapshot.
+        if (thin->tria_k_pre_rope_snap && cache.tria_k_pre_rope) {
+            ggml_tensor * sk = thin->tria_k_pre_rope_snap;
+            ggml_tensor * dk = cache.tria_k_pre_rope;
+            const size_t strip = (size_t)block_size * dk->nb[1];
+            std::vector<uint8_t> buft(strip);
+            for (int kh = 0; kh < (int)dk->ne[2]; kh++) {
+                size_t k_src = (size_t)kh * sk->nb[2];
+                size_t k_dst = (size_t)kh * dk->nb[2] + (size_t)thin->kv_start * dk->nb[1];
+                ggml_backend_tensor_get(sk, buft.data(), k_src, strip);
+                ggml_backend_tensor_set(dk, buft.data(), k_dst, strip);
+            }
+        }
+#endif
+
         if (thin->kv_end > max_kv_end) max_kv_end = thin->kv_end;
     }
     cache.cur_pos = max_kv_end;
