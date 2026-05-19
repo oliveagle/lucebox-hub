@@ -100,8 +100,8 @@ bin/llama-results: common/libcommon.a
 bin/llama-results: bin/libllama.so.0.0.8832
 bin/llama-results: bin/libggml.so.0.9.11
 bin/llama-results: bin/libggml-cpu.so.0.9.11
-bin/llama-results: bin/libggml-hip.so.0.9.11
 bin/llama-results: bin/libggml-base.so.0.9.11
+bin/llama-results: triattention/libtriattention.a
 bin/llama-results: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-results: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-results: /usr/lib/x86_64-linux-gnu/libcrypto.so

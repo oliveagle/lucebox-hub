@@ -100,8 +100,8 @@ bin/llama-gen-docs: common/libcommon.a
 bin/llama-gen-docs: bin/libllama.so.0.0.8832
 bin/llama-gen-docs: bin/libggml.so.0.9.11
 bin/llama-gen-docs: bin/libggml-cpu.so.0.9.11
-bin/llama-gen-docs: bin/libggml-hip.so.0.9.11
 bin/llama-gen-docs: bin/libggml-base.so.0.9.11
+bin/llama-gen-docs: triattention/libtriattention.a
 bin/llama-gen-docs: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-gen-docs: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-gen-docs: /usr/lib/x86_64-linux-gnu/libcrypto.so

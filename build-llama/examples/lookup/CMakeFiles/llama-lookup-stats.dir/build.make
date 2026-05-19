@@ -100,8 +100,8 @@ bin/llama-lookup-stats: common/libcommon.a
 bin/llama-lookup-stats: bin/libllama.so.0.0.8832
 bin/llama-lookup-stats: bin/libggml.so.0.9.11
 bin/llama-lookup-stats: bin/libggml-cpu.so.0.9.11
-bin/llama-lookup-stats: bin/libggml-hip.so.0.9.11
 bin/llama-lookup-stats: bin/libggml-base.so.0.9.11
+bin/llama-lookup-stats: triattention/libtriattention.a
 bin/llama-lookup-stats: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-lookup-stats: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-lookup-stats: /usr/lib/x86_64-linux-gnu/libcrypto.so

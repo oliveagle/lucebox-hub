@@ -563,7 +563,6 @@ bin/libmtmd.so.0.0.8832: tools/mtmd/CMakeFiles/mtmd.dir/compiler_depend.ts
 bin/libmtmd.so.0.0.8832: bin/libllama.so.0.0.8832
 bin/libmtmd.so.0.0.8832: bin/libggml.so.0.9.11
 bin/libmtmd.so.0.0.8832: bin/libggml-cpu.so.0.9.11
-bin/libmtmd.so.0.0.8832: bin/libggml-hip.so.0.9.11
 bin/libmtmd.so.0.0.8832: bin/libggml-base.so.0.9.11
 bin/libmtmd.so.0.0.8832: tools/mtmd/CMakeFiles/mtmd.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_31) "Linking CXX shared library ../../bin/libmtmd.so"

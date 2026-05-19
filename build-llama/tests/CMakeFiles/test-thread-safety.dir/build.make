@@ -113,13 +113,13 @@ bin/test-thread-safety: tests/CMakeFiles/test-thread-safety.dir/get-model.cpp.o
 bin/test-thread-safety: tests/CMakeFiles/test-thread-safety.dir/build.make
 bin/test-thread-safety: tests/CMakeFiles/test-thread-safety.dir/compiler_depend.ts
 bin/test-thread-safety: common/libcommon.a
+bin/test-thread-safety: triattention/libtriattention.a
 bin/test-thread-safety: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-thread-safety: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-thread-safety: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-thread-safety: bin/libllama.so.0.0.8832
 bin/test-thread-safety: bin/libggml.so.0.9.11
 bin/test-thread-safety: bin/libggml-cpu.so.0.9.11
-bin/test-thread-safety: bin/libggml-hip.so.0.9.11
 bin/test-thread-safety: bin/libggml-base.so.0.9.11
 bin/test-thread-safety: tests/CMakeFiles/test-thread-safety.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-thread-safety"

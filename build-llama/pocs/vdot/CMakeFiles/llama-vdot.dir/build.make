@@ -100,8 +100,8 @@ bin/llama-vdot: common/libcommon.a
 bin/llama-vdot: bin/libllama.so.0.0.8832
 bin/llama-vdot: bin/libggml.so.0.9.11
 bin/llama-vdot: bin/libggml-cpu.so.0.9.11
-bin/llama-vdot: bin/libggml-hip.so.0.9.11
 bin/llama-vdot: bin/libggml-base.so.0.9.11
+bin/llama-vdot: triattention/libtriattention.a
 bin/llama-vdot: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-vdot: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-vdot: /usr/lib/x86_64-linux-gnu/libcrypto.so

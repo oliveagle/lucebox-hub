@@ -99,7 +99,6 @@ bin/test-c: tests/CMakeFiles/test-c.dir/compiler_depend.ts
 bin/test-c: bin/libllama.so.0.0.8832
 bin/test-c: bin/libggml.so.0.9.11
 bin/test-c: bin/libggml-cpu.so.0.9.11
-bin/test-c: bin/libggml-hip.so.0.9.11
 bin/test-c: bin/libggml-base.so.0.9.11
 bin/test-c: tests/CMakeFiles/test-c.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking C executable ../bin/test-c"

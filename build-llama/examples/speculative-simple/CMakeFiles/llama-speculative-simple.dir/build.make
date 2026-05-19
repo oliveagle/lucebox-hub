@@ -100,8 +100,8 @@ bin/llama-speculative-simple: common/libcommon.a
 bin/llama-speculative-simple: bin/libllama.so.0.0.8832
 bin/llama-speculative-simple: bin/libggml.so.0.9.11
 bin/llama-speculative-simple: bin/libggml-cpu.so.0.9.11
-bin/llama-speculative-simple: bin/libggml-hip.so.0.9.11
 bin/llama-speculative-simple: bin/libggml-base.so.0.9.11
+bin/llama-speculative-simple: triattention/libtriattention.a
 bin/llama-speculative-simple: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-speculative-simple: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-speculative-simple: /usr/lib/x86_64-linux-gnu/libcrypto.so

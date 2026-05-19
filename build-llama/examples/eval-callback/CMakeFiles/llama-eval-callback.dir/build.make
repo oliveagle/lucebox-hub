@@ -100,8 +100,8 @@ bin/llama-eval-callback: common/libcommon.a
 bin/llama-eval-callback: bin/libllama.so.0.0.8832
 bin/llama-eval-callback: bin/libggml.so.0.9.11
 bin/llama-eval-callback: bin/libggml-cpu.so.0.9.11
-bin/llama-eval-callback: bin/libggml-hip.so.0.9.11
 bin/llama-eval-callback: bin/libggml-base.so.0.9.11
+bin/llama-eval-callback: triattention/libtriattention.a
 bin/llama-eval-callback: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-eval-callback: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-eval-callback: /usr/lib/x86_64-linux-gnu/libcrypto.so

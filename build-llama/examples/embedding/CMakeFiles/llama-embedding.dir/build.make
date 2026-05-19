@@ -100,8 +100,8 @@ bin/llama-embedding: common/libcommon.a
 bin/llama-embedding: bin/libllama.so.0.0.8832
 bin/llama-embedding: bin/libggml.so.0.9.11
 bin/llama-embedding: bin/libggml-cpu.so.0.9.11
-bin/llama-embedding: bin/libggml-hip.so.0.9.11
 bin/llama-embedding: bin/libggml-base.so.0.9.11
+bin/llama-embedding: triattention/libtriattention.a
 bin/llama-embedding: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-embedding: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-embedding: /usr/lib/x86_64-linux-gnu/libcrypto.so

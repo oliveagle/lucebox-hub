@@ -54,7 +54,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-tokenizer-0")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-tokenizer-0"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-tokenizer-0")
@@ -74,7 +74,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-sampling")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-sampling"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-sampling")
@@ -94,7 +94,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-reasoning-budget")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-reasoning-budget"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-reasoning-budget")
@@ -114,7 +114,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-grammar-parser")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-grammar-parser"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-grammar-parser")
@@ -134,7 +134,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-grammar-integration")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-grammar-integration"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-grammar-integration")
@@ -154,7 +154,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-llama-grammar")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-llama-grammar"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-llama-grammar")
@@ -174,7 +174,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat")
@@ -194,7 +194,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-json-schema-to-grammar")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-json-schema-to-grammar"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-json-schema-to-grammar")
@@ -214,7 +214,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quantize-stats")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quantize-stats"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quantize-stats")
@@ -234,7 +234,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-gbnf-validator")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-gbnf-validator"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-gbnf-validator")
@@ -254,7 +254,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-tokenizer-1-bpe")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-tokenizer-1-bpe"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-tokenizer-1-bpe")
@@ -274,7 +274,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-tokenizer-1-spm")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-tokenizer-1-spm"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-tokenizer-1-spm")
@@ -294,7 +294,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-llama-archs")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-llama-archs"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-llama-archs")
@@ -314,7 +314,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat-peg-parser")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat-peg-parser"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat-peg-parser")
@@ -334,7 +334,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-jinja")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-jinja"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-jinja")
@@ -354,7 +354,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat-auto-parser")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat-auto-parser"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat-auto-parser")
@@ -374,7 +374,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat-template")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat-template"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-chat-template")
@@ -394,7 +394,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-json-partial")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-json-partial"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-json-partial")
@@ -414,7 +414,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-log")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-log"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-log")
@@ -434,7 +434,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-peg-parser")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-peg-parser"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-peg-parser")
@@ -454,7 +454,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-regex-partial")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-regex-partial"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-regex-partial")
@@ -474,7 +474,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-thread-safety")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-thread-safety"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-thread-safety")
@@ -494,7 +494,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-arg-parser")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-arg-parser"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-arg-parser")
@@ -514,7 +514,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-opt")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-opt"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-opt")
@@ -534,7 +534,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-gguf")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-gguf"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-gguf")
@@ -554,7 +554,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-backend-ops")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-backend-ops"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-backend-ops")
@@ -574,7 +574,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-model-load-cancel")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-model-load-cancel"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-model-load-cancel")
@@ -594,7 +594,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-autorelease")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-autorelease"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-autorelease")
@@ -614,7 +614,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-backend-sampler")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-backend-sampler"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-backend-sampler")
@@ -634,7 +634,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-state-restore-fragmented")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-state-restore-fragmented"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-state-restore-fragmented")
@@ -654,7 +654,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-barrier")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-barrier"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-barrier")
@@ -674,7 +674,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quantize-fns")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quantize-fns"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quantize-fns")
@@ -694,7 +694,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quantize-perf")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quantize-perf"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quantize-perf")
@@ -714,7 +714,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-rope")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-rope"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-rope")
@@ -734,7 +734,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-mtmd-c-api")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-mtmd-c-api"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-mtmd-c-api")
@@ -754,7 +754,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quant-type-selection")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quant-type-selection"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-quant-type-selection")
@@ -774,7 +774,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-alloc")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-alloc"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/test-alloc")
@@ -794,7 +794,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/export-graph-ops")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/export-graph-ops"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/export-graph-ops")

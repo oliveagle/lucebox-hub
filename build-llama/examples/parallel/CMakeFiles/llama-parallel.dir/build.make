@@ -100,8 +100,8 @@ bin/llama-parallel: common/libcommon.a
 bin/llama-parallel: bin/libllama.so.0.0.8832
 bin/llama-parallel: bin/libggml.so.0.9.11
 bin/llama-parallel: bin/libggml-cpu.so.0.9.11
-bin/llama-parallel: bin/libggml-hip.so.0.9.11
 bin/llama-parallel: bin/libggml-base.so.0.9.11
+bin/llama-parallel: triattention/libtriattention.a
 bin/llama-parallel: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-parallel: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-parallel: /usr/lib/x86_64-linux-gnu/libcrypto.so

@@ -113,13 +113,13 @@ bin/test-chat: tests/CMakeFiles/test-chat.dir/get-model.cpp.o
 bin/test-chat: tests/CMakeFiles/test-chat.dir/build.make
 bin/test-chat: tests/CMakeFiles/test-chat.dir/compiler_depend.ts
 bin/test-chat: common/libcommon.a
+bin/test-chat: triattention/libtriattention.a
 bin/test-chat: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-chat: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-chat: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-chat: bin/libllama.so.0.0.8832
 bin/test-chat: bin/libggml.so.0.9.11
 bin/test-chat: bin/libggml-cpu.so.0.9.11
-bin/test-chat: bin/libggml-hip.so.0.9.11
 bin/test-chat: bin/libggml-base.so.0.9.11
 bin/test-chat: tests/CMakeFiles/test-chat.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-chat"

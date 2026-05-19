@@ -100,8 +100,8 @@ bin/llama-lookup-create: common/libcommon.a
 bin/llama-lookup-create: bin/libllama.so.0.0.8832
 bin/llama-lookup-create: bin/libggml.so.0.9.11
 bin/llama-lookup-create: bin/libggml-cpu.so.0.9.11
-bin/llama-lookup-create: bin/libggml-hip.so.0.9.11
 bin/llama-lookup-create: bin/libggml-base.so.0.9.11
+bin/llama-lookup-create: triattention/libtriattention.a
 bin/llama-lookup-create: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-lookup-create: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-lookup-create: /usr/lib/x86_64-linux-gnu/libcrypto.so

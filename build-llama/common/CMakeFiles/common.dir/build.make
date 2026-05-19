@@ -506,10 +506,24 @@ common/CMakeFiles/common.dir/jinja/caps.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/common.dir/jinja/caps.cpp.s"
 	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/common && /bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/common/jinja/caps.cpp -o CMakeFiles/common.dir/jinja/caps.cpp.s
 
+common/CMakeFiles/common.dir/common_triattention.cpp.o: common/CMakeFiles/common.dir/flags.make
+common/CMakeFiles/common.dir/common_triattention.cpp.o: /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/common/common_triattention.cpp
+common/CMakeFiles/common.dir/common_triattention.cpp.o: common/CMakeFiles/common.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_32) "Building CXX object common/CMakeFiles/common.dir/common_triattention.cpp.o"
+	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/common && /bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT common/CMakeFiles/common.dir/common_triattention.cpp.o -MF CMakeFiles/common.dir/common_triattention.cpp.o.d -o CMakeFiles/common.dir/common_triattention.cpp.o -c /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/common/common_triattention.cpp
+
+common/CMakeFiles/common.dir/common_triattention.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/common.dir/common_triattention.cpp.i"
+	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/common && /bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/common/common_triattention.cpp > CMakeFiles/common.dir/common_triattention.cpp.i
+
+common/CMakeFiles/common.dir/common_triattention.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/common.dir/common_triattention.cpp.s"
+	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/common && /bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/common/common_triattention.cpp -o CMakeFiles/common.dir/common_triattention.cpp.s
+
 common/CMakeFiles/common.dir/__/license.cpp.o: common/CMakeFiles/common.dir/flags.make
 common/CMakeFiles/common.dir/__/license.cpp.o: license.cpp
 common/CMakeFiles/common.dir/__/license.cpp.o: common/CMakeFiles/common.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_32) "Building CXX object common/CMakeFiles/common.dir/__/license.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_33) "Building CXX object common/CMakeFiles/common.dir/__/license.cpp.o"
 	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/common && /bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT common/CMakeFiles/common.dir/__/license.cpp.o -MF CMakeFiles/common.dir/__/license.cpp.o.d -o CMakeFiles/common.dir/__/license.cpp.o -c /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/license.cpp
 
 common/CMakeFiles/common.dir/__/license.cpp.i: cmake_force
@@ -553,6 +567,7 @@ common_OBJECTS = \
 "CMakeFiles/common.dir/jinja/value.cpp.o" \
 "CMakeFiles/common.dir/jinja/string.cpp.o" \
 "CMakeFiles/common.dir/jinja/caps.cpp.o" \
+"CMakeFiles/common.dir/common_triattention.cpp.o" \
 "CMakeFiles/common.dir/__/license.cpp.o"
 
 # External object files for target common
@@ -590,11 +605,12 @@ common/libcommon.a: common/CMakeFiles/common.dir/jinja/runtime.cpp.o
 common/libcommon.a: common/CMakeFiles/common.dir/jinja/value.cpp.o
 common/libcommon.a: common/CMakeFiles/common.dir/jinja/string.cpp.o
 common/libcommon.a: common/CMakeFiles/common.dir/jinja/caps.cpp.o
+common/libcommon.a: common/CMakeFiles/common.dir/common_triattention.cpp.o
 common/libcommon.a: common/CMakeFiles/common.dir/__/license.cpp.o
 common/libcommon.a: common/CMakeFiles/build_info.dir/build-info.cpp.o
 common/libcommon.a: common/CMakeFiles/common.dir/build.make
 common/libcommon.a: common/CMakeFiles/common.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_33) "Linking CXX static library libcommon.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_34) "Linking CXX static library libcommon.a"
 	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/common && $(CMAKE_COMMAND) -P CMakeFiles/common.dir/cmake_clean_target.cmake
 	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/common && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/common.dir/link.txt --verbose=$(VERBOSE)
 

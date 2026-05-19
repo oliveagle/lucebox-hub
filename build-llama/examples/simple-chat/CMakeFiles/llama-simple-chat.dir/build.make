@@ -99,7 +99,6 @@ bin/llama-simple-chat: examples/simple-chat/CMakeFiles/llama-simple-chat.dir/com
 bin/llama-simple-chat: bin/libllama.so.0.0.8832
 bin/llama-simple-chat: bin/libggml.so.0.9.11
 bin/llama-simple-chat: bin/libggml-cpu.so.0.9.11
-bin/llama-simple-chat: bin/libggml-hip.so.0.9.11
 bin/llama-simple-chat: bin/libggml-base.so.0.9.11
 bin/llama-simple-chat: examples/simple-chat/CMakeFiles/llama-simple-chat.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable ../../bin/llama-simple-chat"

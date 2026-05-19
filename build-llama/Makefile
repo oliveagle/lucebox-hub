@@ -575,19 +575,6 @@ ggml-cpu/fast:
 .PHONY : ggml-cpu/fast
 
 #=============================================================================
-# Target rules for targets named ggml-hip
-
-# Build rule for target.
-ggml-hip: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 ggml-hip
-.PHONY : ggml-hip
-
-# fast build rule for target.
-ggml-hip/fast:
-	$(MAKE) $(MAKESILENT) -f ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/build.make ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/build
-.PHONY : ggml-hip/fast
-
-#=============================================================================
 # Target rules for targets named triattention
 
 # Build rule for target.
@@ -1935,7 +1922,6 @@ help:
 	@echo "... ggml"
 	@echo "... ggml-base"
 	@echo "... ggml-cpu"
-	@echo "... ggml-hip"
 	@echo "... gguf-model-data"
 	@echo "... llama"
 	@echo "... llama-batched"

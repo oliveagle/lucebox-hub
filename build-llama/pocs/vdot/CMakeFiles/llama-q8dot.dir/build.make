@@ -100,8 +100,8 @@ bin/llama-q8dot: common/libcommon.a
 bin/llama-q8dot: bin/libllama.so.0.0.8832
 bin/llama-q8dot: bin/libggml.so.0.9.11
 bin/llama-q8dot: bin/libggml-cpu.so.0.9.11
-bin/llama-q8dot: bin/libggml-hip.so.0.9.11
 bin/llama-q8dot: bin/libggml-base.so.0.9.11
+bin/llama-q8dot: triattention/libtriattention.a
 bin/llama-q8dot: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-q8dot: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-q8dot: /usr/lib/x86_64-linux-gnu/libcrypto.so

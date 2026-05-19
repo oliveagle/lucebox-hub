@@ -113,13 +113,13 @@ bin/test-rope: tests/CMakeFiles/test-rope.dir/get-model.cpp.o
 bin/test-rope: tests/CMakeFiles/test-rope.dir/build.make
 bin/test-rope: tests/CMakeFiles/test-rope.dir/compiler_depend.ts
 bin/test-rope: common/libcommon.a
+bin/test-rope: triattention/libtriattention.a
 bin/test-rope: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-rope: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-rope: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-rope: bin/libllama.so.0.0.8832
 bin/test-rope: bin/libggml.so.0.9.11
 bin/test-rope: bin/libggml-cpu.so.0.9.11
-bin/test-rope: bin/libggml-hip.so.0.9.11
 bin/test-rope: bin/libggml-base.so.0.9.11
 bin/test-rope: tests/CMakeFiles/test-rope.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-rope"

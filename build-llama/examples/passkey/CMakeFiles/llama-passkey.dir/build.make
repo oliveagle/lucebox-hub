@@ -100,8 +100,8 @@ bin/llama-passkey: common/libcommon.a
 bin/llama-passkey: bin/libllama.so.0.0.8832
 bin/llama-passkey: bin/libggml.so.0.9.11
 bin/llama-passkey: bin/libggml-cpu.so.0.9.11
-bin/llama-passkey: bin/libggml-hip.so.0.9.11
 bin/llama-passkey: bin/libggml-base.so.0.9.11
+bin/llama-passkey: triattention/libtriattention.a
 bin/llama-passkey: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-passkey: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-passkey: /usr/lib/x86_64-linux-gnu/libcrypto.so

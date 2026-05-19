@@ -100,8 +100,8 @@ bin/llama-diffusion-cli: common/libcommon.a
 bin/llama-diffusion-cli: bin/libllama.so.0.0.8832
 bin/llama-diffusion-cli: bin/libggml.so.0.9.11
 bin/llama-diffusion-cli: bin/libggml-cpu.so.0.9.11
-bin/llama-diffusion-cli: bin/libggml-hip.so.0.9.11
 bin/llama-diffusion-cli: bin/libggml-base.so.0.9.11
+bin/llama-diffusion-cli: triattention/libtriattention.a
 bin/llama-diffusion-cli: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-diffusion-cli: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-diffusion-cli: /usr/lib/x86_64-linux-gnu/libcrypto.so

@@ -98,7 +98,6 @@ bin/llama-gguf: examples/gguf/CMakeFiles/llama-gguf.dir/build.make
 bin/llama-gguf: examples/gguf/CMakeFiles/llama-gguf.dir/compiler_depend.ts
 bin/llama-gguf: bin/libggml.so.0.9.11
 bin/llama-gguf: bin/libggml-cpu.so.0.9.11
-bin/llama-gguf: bin/libggml-hip.so.0.9.11
 bin/llama-gguf: bin/libggml-base.so.0.9.11
 bin/llama-gguf: examples/gguf/CMakeFiles/llama-gguf.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable ../../bin/llama-gguf"

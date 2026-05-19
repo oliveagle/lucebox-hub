@@ -100,8 +100,8 @@ bin/llama-perplexity: common/libcommon.a
 bin/llama-perplexity: bin/libllama.so.0.0.8832
 bin/llama-perplexity: bin/libggml.so.0.9.11
 bin/llama-perplexity: bin/libggml-cpu.so.0.9.11
-bin/llama-perplexity: bin/libggml-hip.so.0.9.11
 bin/llama-perplexity: bin/libggml-base.so.0.9.11
+bin/llama-perplexity: triattention/libtriattention.a
 bin/llama-perplexity: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-perplexity: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-perplexity: /usr/lib/x86_64-linux-gnu/libcrypto.so

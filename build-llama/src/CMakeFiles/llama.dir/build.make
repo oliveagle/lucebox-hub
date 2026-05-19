@@ -2338,7 +2338,6 @@ bin/libllama.so.0.0.8832: src/CMakeFiles/llama.dir/build.make
 bin/libllama.so.0.0.8832: src/CMakeFiles/llama.dir/compiler_depend.ts
 bin/libllama.so.0.0.8832: bin/libggml.so.0.9.11
 bin/libllama.so.0.0.8832: bin/libggml-cpu.so.0.9.11
-bin/libllama.so.0.0.8832: bin/libggml-hip.so.0.9.11
 bin/libllama.so.0.0.8832: bin/libggml-base.so.0.9.11
 bin/libllama.so.0.0.8832: src/CMakeFiles/llama.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_142) "Linking CXX shared library ../bin/libllama.so"

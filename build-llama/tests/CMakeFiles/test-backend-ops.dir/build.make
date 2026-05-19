@@ -113,13 +113,13 @@ bin/test-backend-ops: tests/CMakeFiles/test-backend-ops.dir/get-model.cpp.o
 bin/test-backend-ops: tests/CMakeFiles/test-backend-ops.dir/build.make
 bin/test-backend-ops: tests/CMakeFiles/test-backend-ops.dir/compiler_depend.ts
 bin/test-backend-ops: common/libcommon.a
+bin/test-backend-ops: triattention/libtriattention.a
 bin/test-backend-ops: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-backend-ops: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-backend-ops: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-backend-ops: bin/libllama.so.0.0.8832
 bin/test-backend-ops: bin/libggml.so.0.9.11
 bin/test-backend-ops: bin/libggml-cpu.so.0.9.11
-bin/test-backend-ops: bin/libggml-hip.so.0.9.11
 bin/test-backend-ops: bin/libggml-base.so.0.9.11
 bin/test-backend-ops: tests/CMakeFiles/test-backend-ops.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-backend-ops"

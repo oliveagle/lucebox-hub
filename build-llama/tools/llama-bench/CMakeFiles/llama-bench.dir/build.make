@@ -100,8 +100,8 @@ bin/llama-bench: common/libcommon.a
 bin/llama-bench: bin/libllama.so.0.0.8832
 bin/llama-bench: bin/libggml.so.0.9.11
 bin/llama-bench: bin/libggml-cpu.so.0.9.11
-bin/llama-bench: bin/libggml-hip.so.0.9.11
 bin/llama-bench: bin/libggml-base.so.0.9.11
+bin/llama-bench: triattention/libtriattention.a
 bin/llama-bench: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-bench: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-bench: /usr/lib/x86_64-linux-gnu/libcrypto.so

@@ -100,8 +100,8 @@ bin/llama-template-analysis: common/libcommon.a
 bin/llama-template-analysis: bin/libllama.so.0.0.8832
 bin/llama-template-analysis: bin/libggml.so.0.9.11
 bin/llama-template-analysis: bin/libggml-cpu.so.0.9.11
-bin/llama-template-analysis: bin/libggml-hip.so.0.9.11
 bin/llama-template-analysis: bin/libggml-base.so.0.9.11
+bin/llama-template-analysis: triattention/libtriattention.a
 bin/llama-template-analysis: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-template-analysis: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-template-analysis: /usr/lib/x86_64-linux-gnu/libcrypto.so

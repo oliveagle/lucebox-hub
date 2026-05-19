@@ -57,14 +57,6 @@
 /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-cpu/CMakeFiles/install.dir
 /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-cpu/CMakeFiles/install/local.dir
 /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-cpu/CMakeFiles/install/strip.dir
-/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir
-/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-hip/CMakeFiles/test.dir
-/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-hip/CMakeFiles/edit_cache.dir
-/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-hip/CMakeFiles/rebuild_cache.dir
-/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-hip/CMakeFiles/list_install_components.dir
-/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-hip/CMakeFiles/install.dir
-/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-hip/CMakeFiles/install/local.dir
-/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-hip/CMakeFiles/install/strip.dir
 /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/triattention/CMakeFiles/triattention.dir
 /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/triattention/CMakeFiles/test.dir
 /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/triattention/CMakeFiles/edit_cache.dir

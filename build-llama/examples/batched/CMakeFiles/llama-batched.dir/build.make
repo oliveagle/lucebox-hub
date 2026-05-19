@@ -100,8 +100,8 @@ bin/llama-batched: common/libcommon.a
 bin/llama-batched: bin/libllama.so.0.0.8832
 bin/llama-batched: bin/libggml.so.0.9.11
 bin/llama-batched: bin/libggml-cpu.so.0.9.11
-bin/llama-batched: bin/libggml-hip.so.0.9.11
 bin/llama-batched: bin/libggml-base.so.0.9.11
+bin/llama-batched: triattention/libtriattention.a
 bin/llama-batched: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-batched: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-batched: /usr/lib/x86_64-linux-gnu/libcrypto.so

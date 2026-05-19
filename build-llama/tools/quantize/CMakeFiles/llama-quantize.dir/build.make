@@ -100,8 +100,8 @@ bin/llama-quantize: common/libcommon.a
 bin/llama-quantize: bin/libllama.so.0.0.8832
 bin/llama-quantize: bin/libggml.so.0.9.11
 bin/llama-quantize: bin/libggml-cpu.so.0.9.11
-bin/llama-quantize: bin/libggml-hip.so.0.9.11
 bin/llama-quantize: bin/libggml-base.so.0.9.11
+bin/llama-quantize: triattention/libtriattention.a
 bin/llama-quantize: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-quantize: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-quantize: /usr/lib/x86_64-linux-gnu/libcrypto.so

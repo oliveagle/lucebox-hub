@@ -113,13 +113,13 @@ bin/test-state-restore-fragmented: tests/CMakeFiles/test-state-restore-fragmente
 bin/test-state-restore-fragmented: tests/CMakeFiles/test-state-restore-fragmented.dir/build.make
 bin/test-state-restore-fragmented: tests/CMakeFiles/test-state-restore-fragmented.dir/compiler_depend.ts
 bin/test-state-restore-fragmented: common/libcommon.a
+bin/test-state-restore-fragmented: triattention/libtriattention.a
 bin/test-state-restore-fragmented: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-state-restore-fragmented: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-state-restore-fragmented: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-state-restore-fragmented: bin/libllama.so.0.0.8832
 bin/test-state-restore-fragmented: bin/libggml.so.0.9.11
 bin/test-state-restore-fragmented: bin/libggml-cpu.so.0.9.11
-bin/test-state-restore-fragmented: bin/libggml-hip.so.0.9.11
 bin/test-state-restore-fragmented: bin/libggml-base.so.0.9.11
 bin/test-state-restore-fragmented: tests/CMakeFiles/test-state-restore-fragmented.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-state-restore-fragmented"

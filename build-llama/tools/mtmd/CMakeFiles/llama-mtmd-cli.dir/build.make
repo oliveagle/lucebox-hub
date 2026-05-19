@@ -98,13 +98,13 @@ bin/llama-mtmd-cli: tools/mtmd/CMakeFiles/llama-mtmd-cli.dir/build.make
 bin/llama-mtmd-cli: tools/mtmd/CMakeFiles/llama-mtmd-cli.dir/compiler_depend.ts
 bin/llama-mtmd-cli: common/libcommon.a
 bin/llama-mtmd-cli: bin/libmtmd.so.0.0.8832
+bin/llama-mtmd-cli: triattention/libtriattention.a
 bin/llama-mtmd-cli: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-mtmd-cli: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-mtmd-cli: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/llama-mtmd-cli: bin/libllama.so.0.0.8832
 bin/llama-mtmd-cli: bin/libggml.so.0.9.11
 bin/llama-mtmd-cli: bin/libggml-cpu.so.0.9.11
-bin/llama-mtmd-cli: bin/libggml-hip.so.0.9.11
 bin/llama-mtmd-cli: bin/libggml-base.so.0.9.11
 bin/llama-mtmd-cli: tools/mtmd/CMakeFiles/llama-mtmd-cli.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable ../../bin/llama-mtmd-cli"

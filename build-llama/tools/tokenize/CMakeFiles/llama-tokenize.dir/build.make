@@ -100,8 +100,8 @@ bin/llama-tokenize: common/libcommon.a
 bin/llama-tokenize: bin/libllama.so.0.0.8832
 bin/llama-tokenize: bin/libggml.so.0.9.11
 bin/llama-tokenize: bin/libggml-cpu.so.0.9.11
-bin/llama-tokenize: bin/libggml-hip.so.0.9.11
 bin/llama-tokenize: bin/libggml-base.so.0.9.11
+bin/llama-tokenize: triattention/libtriattention.a
 bin/llama-tokenize: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-tokenize: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-tokenize: /usr/lib/x86_64-linux-gnu/libcrypto.so

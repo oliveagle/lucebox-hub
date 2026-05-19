@@ -113,13 +113,13 @@ bin/test-quantize-perf: tests/CMakeFiles/test-quantize-perf.dir/get-model.cpp.o
 bin/test-quantize-perf: tests/CMakeFiles/test-quantize-perf.dir/build.make
 bin/test-quantize-perf: tests/CMakeFiles/test-quantize-perf.dir/compiler_depend.ts
 bin/test-quantize-perf: common/libcommon.a
+bin/test-quantize-perf: triattention/libtriattention.a
 bin/test-quantize-perf: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-quantize-perf: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-quantize-perf: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-quantize-perf: bin/libllama.so.0.0.8832
 bin/test-quantize-perf: bin/libggml.so.0.9.11
 bin/test-quantize-perf: bin/libggml-cpu.so.0.9.11
-bin/test-quantize-perf: bin/libggml-hip.so.0.9.11
 bin/test-quantize-perf: bin/libggml-base.so.0.9.11
 bin/test-quantize-perf: tests/CMakeFiles/test-quantize-perf.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-quantize-perf"

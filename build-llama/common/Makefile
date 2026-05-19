@@ -415,6 +415,30 @@ common.cpp.s:
 	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama && $(MAKE) $(MAKESILENT) -f common/CMakeFiles/common.dir/build.make common/CMakeFiles/common.dir/common.cpp.s
 .PHONY : common.cpp.s
 
+common_triattention.o: common_triattention.cpp.o
+.PHONY : common_triattention.o
+
+# target to build an object file
+common_triattention.cpp.o:
+	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama && $(MAKE) $(MAKESILENT) -f common/CMakeFiles/common.dir/build.make common/CMakeFiles/common.dir/common_triattention.cpp.o
+.PHONY : common_triattention.cpp.o
+
+common_triattention.i: common_triattention.cpp.i
+.PHONY : common_triattention.i
+
+# target to preprocess a source file
+common_triattention.cpp.i:
+	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama && $(MAKE) $(MAKESILENT) -f common/CMakeFiles/common.dir/build.make common/CMakeFiles/common.dir/common_triattention.cpp.i
+.PHONY : common_triattention.cpp.i
+
+common_triattention.s: common_triattention.cpp.s
+.PHONY : common_triattention.s
+
+# target to generate assembly for a file
+common_triattention.cpp.s:
+	cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama && $(MAKE) $(MAKESILENT) -f common/CMakeFiles/common.dir/build.make common/CMakeFiles/common.dir/common_triattention.cpp.s
+.PHONY : common_triattention.cpp.s
+
 console.o: console.cpp.o
 .PHONY : console.o
 
@@ -1033,6 +1057,9 @@ help:
 	@echo "... common.o"
 	@echo "... common.i"
 	@echo "... common.s"
+	@echo "... common_triattention.o"
+	@echo "... common_triattention.i"
+	@echo "... common_triattention.s"
 	@echo "... console.o"
 	@echo "... console.i"
 	@echo "... console.s"

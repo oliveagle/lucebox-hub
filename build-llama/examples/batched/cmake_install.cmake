@@ -54,7 +54,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/llama-batched")
     file(RPATH_CHANGE
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/llama-batched"
-         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:/opt/rocm-7.2.3/lib:/opt/rocm/lib:"
+         OLD_RPATH "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/bin:"
          NEW_RPATH "")
     if(CMAKE_INSTALL_DO_STRIP)
       execute_process(COMMAND "/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/llama-batched")

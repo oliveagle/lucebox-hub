@@ -113,13 +113,13 @@ bin/test-sampling: tests/CMakeFiles/test-sampling.dir/get-model.cpp.o
 bin/test-sampling: tests/CMakeFiles/test-sampling.dir/build.make
 bin/test-sampling: tests/CMakeFiles/test-sampling.dir/compiler_depend.ts
 bin/test-sampling: common/libcommon.a
+bin/test-sampling: triattention/libtriattention.a
 bin/test-sampling: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-sampling: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-sampling: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-sampling: bin/libllama.so.0.0.8832
 bin/test-sampling: bin/libggml.so.0.9.11
 bin/test-sampling: bin/libggml-cpu.so.0.9.11
-bin/test-sampling: bin/libggml-hip.so.0.9.11
 bin/test-sampling: bin/libggml-base.so.0.9.11
 bin/test-sampling: tests/CMakeFiles/test-sampling.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-sampling"

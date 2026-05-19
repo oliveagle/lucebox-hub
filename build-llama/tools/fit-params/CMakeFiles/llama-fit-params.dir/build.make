@@ -100,8 +100,8 @@ bin/llama-fit-params: common/libcommon.a
 bin/llama-fit-params: bin/libllama.so.0.0.8832
 bin/llama-fit-params: bin/libggml.so.0.9.11
 bin/llama-fit-params: bin/libggml-cpu.so.0.9.11
-bin/llama-fit-params: bin/libggml-hip.so.0.9.11
 bin/llama-fit-params: bin/libggml-base.so.0.9.11
+bin/llama-fit-params: triattention/libtriattention.a
 bin/llama-fit-params: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-fit-params: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-fit-params: /usr/lib/x86_64-linux-gnu/libcrypto.so

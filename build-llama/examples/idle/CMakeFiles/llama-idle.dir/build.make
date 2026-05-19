@@ -100,8 +100,8 @@ bin/llama-idle: common/libcommon.a
 bin/llama-idle: bin/libllama.so.0.0.8832
 bin/llama-idle: bin/libggml.so.0.9.11
 bin/llama-idle: bin/libggml-cpu.so.0.9.11
-bin/llama-idle: bin/libggml-hip.so.0.9.11
 bin/llama-idle: bin/libggml-base.so.0.9.11
+bin/llama-idle: triattention/libtriattention.a
 bin/llama-idle: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-idle: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-idle: /usr/lib/x86_64-linux-gnu/libcrypto.so

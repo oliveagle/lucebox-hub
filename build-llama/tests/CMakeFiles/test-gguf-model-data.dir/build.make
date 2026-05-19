@@ -98,10 +98,10 @@ bin/test-gguf-model-data: tests/CMakeFiles/test-gguf-model-data.dir/build.make
 bin/test-gguf-model-data: tests/CMakeFiles/test-gguf-model-data.dir/compiler_depend.ts
 bin/test-gguf-model-data: tests/libgguf-model-data.a
 bin/test-gguf-model-data: common/libcommon.a
+bin/test-gguf-model-data: triattention/libtriattention.a
 bin/test-gguf-model-data: bin/libllama.so.0.0.8832
 bin/test-gguf-model-data: bin/libggml.so.0.9.11
 bin/test-gguf-model-data: bin/libggml-cpu.so.0.9.11
-bin/test-gguf-model-data: bin/libggml-hip.so.0.9.11
 bin/test-gguf-model-data: bin/libggml-base.so.0.9.11
 bin/test-gguf-model-data: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-gguf-model-data: /usr/lib/x86_64-linux-gnu/libssl.so

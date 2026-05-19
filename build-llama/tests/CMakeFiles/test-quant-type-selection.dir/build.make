@@ -115,10 +115,10 @@ bin/test-quant-type-selection: tests/CMakeFiles/test-quant-type-selection.dir/co
 bin/test-quant-type-selection: common/libcommon.a
 bin/test-quant-type-selection: tests/libgguf-model-data.a
 bin/test-quant-type-selection: common/libcommon.a
+bin/test-quant-type-selection: triattention/libtriattention.a
 bin/test-quant-type-selection: bin/libllama.so.0.0.8832
 bin/test-quant-type-selection: bin/libggml.so.0.9.11
 bin/test-quant-type-selection: bin/libggml-cpu.so.0.9.11
-bin/test-quant-type-selection: bin/libggml-hip.so.0.9.11
 bin/test-quant-type-selection: bin/libggml-base.so.0.9.11
 bin/test-quant-type-selection: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-quant-type-selection: /usr/lib/x86_64-linux-gnu/libssl.so

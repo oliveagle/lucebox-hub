@@ -100,8 +100,8 @@ bin/llama-debug: common/libcommon.a
 bin/llama-debug: bin/libllama.so.0.0.8832
 bin/llama-debug: bin/libggml.so.0.9.11
 bin/llama-debug: bin/libggml-cpu.so.0.9.11
-bin/llama-debug: bin/libggml-hip.so.0.9.11
 bin/llama-debug: bin/libggml-base.so.0.9.11
+bin/llama-debug: triattention/libtriattention.a
 bin/llama-debug: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-debug: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-debug: /usr/lib/x86_64-linux-gnu/libcrypto.so

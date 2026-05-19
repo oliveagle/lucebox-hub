@@ -518,21 +518,23 @@ static ggml_tensor * build_full_attn_block(
     Kcur = rms_norm_mul(ctx, Kcur, L.k_norm, w.rms_eps);
     Vcur = ggml_reshape_3d(ctx, Vcur, head_dim, n_head_kv, n_tokens);
 
-    // ── TriAttention: capture pre-RoPE K for frequency-domain scoring ──
-    // Store K before RoPE is applied so TriAttention can score based on the
-    // original key vectors. This is stored in a separate bf16 buffer that
-    // persists across forward passes.
-#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    // ── TriAttention: DISABLED - segfault in ggml_view_3d ──
+    // Root cause: tria_k_pre_rope->nb[] values are corrupted.
+    // Tensor allocated via ggml_new_tensor_3d() at lines 199-201, allocated at line 217.
+    // Need to investigate context lifecycle and tensor initialization.
+    // TODO: fix and re-enable
+#if 0
     if (tria_k_pre_rope) {
-        // Kcur is [head_dim, n_head_kv, n_tokens] (permuted for cache write).
-        // For TriAttention scoring we need the same layout but at a position slot.
-        ggml_tensor * Kpre_T = ggml_permute(ctx, Kcur, 0, 2, 1, 3);  // [head_dim, n_tokens, n_head_kv]
-        // View the TriAttention pre-RoPE K cache at the slot for these tokens.
-        ggml_tensor * k_slot = ggml_view_3d(ctx, tria_k_pre_rope,
-            head_dim, n_tokens, n_head_kv,
-            tria_k_pre_rope->nb[1], tria_k_pre_rope->nb[2],
-            /*offset*/ tria_k_pre_rope->nb[1] * kv_start);
-        ggml_build_forward_expand(gf, ggml_cpy(ctx, Kpre_T, k_slot));
+        if (!tria_k_pre_rope->data) {
+            // TriAttention buffer was allocated but not backed - skip capture
+        } else {
+            ggml_tensor * Kpre_T = ggml_permute(ctx, Kcur, 0, 2, 1, 3);
+            ggml_tensor * k_slot = ggml_view_3d(ctx, tria_k_pre_rope,
+                head_dim, n_tokens, n_head_kv,
+                tria_k_pre_rope->nb[1], tria_k_pre_rope->nb[2],
+                /*offset*/ (size_t)kv_start * tria_k_pre_rope->nb[1]);
+            ggml_build_forward_expand(gf, ggml_cpy(ctx, Kpre_T, k_slot));
+        }
     }
 #endif
 

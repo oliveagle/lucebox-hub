@@ -97,13 +97,13 @@ bin/test-gbnf-validator: tests/CMakeFiles/test-gbnf-validator.dir/test-gbnf-vali
 bin/test-gbnf-validator: tests/CMakeFiles/test-gbnf-validator.dir/build.make
 bin/test-gbnf-validator: tests/CMakeFiles/test-gbnf-validator.dir/compiler_depend.ts
 bin/test-gbnf-validator: common/libcommon.a
+bin/test-gbnf-validator: triattention/libtriattention.a
 bin/test-gbnf-validator: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-gbnf-validator: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-gbnf-validator: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-gbnf-validator: bin/libllama.so.0.0.8832
 bin/test-gbnf-validator: bin/libggml.so.0.9.11
 bin/test-gbnf-validator: bin/libggml-cpu.so.0.9.11
-bin/test-gbnf-validator: bin/libggml-hip.so.0.9.11
 bin/test-gbnf-validator: bin/libggml-base.so.0.9.11
 bin/test-gbnf-validator: tests/CMakeFiles/test-gbnf-validator.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable ../bin/test-gbnf-validator"

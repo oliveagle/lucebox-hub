@@ -225,13 +225,13 @@ bin/test-peg-parser: tests/CMakeFiles/test-peg-parser.dir/get-model.cpp.o
 bin/test-peg-parser: tests/CMakeFiles/test-peg-parser.dir/build.make
 bin/test-peg-parser: tests/CMakeFiles/test-peg-parser.dir/compiler_depend.ts
 bin/test-peg-parser: common/libcommon.a
+bin/test-peg-parser: triattention/libtriattention.a
 bin/test-peg-parser: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-peg-parser: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-peg-parser: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-peg-parser: bin/libllama.so.0.0.8832
 bin/test-peg-parser: bin/libggml.so.0.9.11
 bin/test-peg-parser: bin/libggml-cpu.so.0.9.11
-bin/test-peg-parser: bin/libggml-hip.so.0.9.11
 bin/test-peg-parser: bin/libggml-base.so.0.9.11
 bin/test-peg-parser: tests/CMakeFiles/test-peg-parser.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Linking CXX executable ../bin/test-peg-parser"

@@ -129,13 +129,13 @@ bin/test-chat-peg-parser: tests/CMakeFiles/test-chat-peg-parser.dir/get-model.cp
 bin/test-chat-peg-parser: tests/CMakeFiles/test-chat-peg-parser.dir/build.make
 bin/test-chat-peg-parser: tests/CMakeFiles/test-chat-peg-parser.dir/compiler_depend.ts
 bin/test-chat-peg-parser: common/libcommon.a
+bin/test-chat-peg-parser: triattention/libtriattention.a
 bin/test-chat-peg-parser: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-chat-peg-parser: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-chat-peg-parser: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-chat-peg-parser: bin/libllama.so.0.0.8832
 bin/test-chat-peg-parser: bin/libggml.so.0.9.11
 bin/test-chat-peg-parser: bin/libggml-cpu.so.0.9.11
-bin/test-chat-peg-parser: bin/libggml-hip.so.0.9.11
 bin/test-chat-peg-parser: bin/libggml-base.so.0.9.11
 bin/test-chat-peg-parser: tests/CMakeFiles/test-chat-peg-parser.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX executable ../bin/test-chat-peg-parser"

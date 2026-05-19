@@ -100,8 +100,8 @@ bin/llama-convert-llama2c-to-ggml: common/libcommon.a
 bin/llama-convert-llama2c-to-ggml: bin/libllama.so.0.0.8832
 bin/llama-convert-llama2c-to-ggml: bin/libggml.so.0.9.11
 bin/llama-convert-llama2c-to-ggml: bin/libggml-cpu.so.0.9.11
-bin/llama-convert-llama2c-to-ggml: bin/libggml-hip.so.0.9.11
 bin/llama-convert-llama2c-to-ggml: bin/libggml-base.so.0.9.11
+bin/llama-convert-llama2c-to-ggml: triattention/libtriattention.a
 bin/llama-convert-llama2c-to-ggml: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-convert-llama2c-to-ggml: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-convert-llama2c-to-ggml: /usr/lib/x86_64-linux-gnu/libcrypto.so

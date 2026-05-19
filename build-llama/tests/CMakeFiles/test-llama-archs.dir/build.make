@@ -113,13 +113,13 @@ bin/test-llama-archs: tests/CMakeFiles/test-llama-archs.dir/get-model.cpp.o
 bin/test-llama-archs: tests/CMakeFiles/test-llama-archs.dir/build.make
 bin/test-llama-archs: tests/CMakeFiles/test-llama-archs.dir/compiler_depend.ts
 bin/test-llama-archs: common/libcommon.a
+bin/test-llama-archs: triattention/libtriattention.a
 bin/test-llama-archs: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-llama-archs: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-llama-archs: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-llama-archs: bin/libllama.so.0.0.8832
 bin/test-llama-archs: bin/libggml.so.0.9.11
 bin/test-llama-archs: bin/libggml-cpu.so.0.9.11
-bin/test-llama-archs: bin/libggml-hip.so.0.9.11
 bin/test-llama-archs: bin/libggml-base.so.0.9.11
 bin/test-llama-archs: tests/CMakeFiles/test-llama-archs.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-llama-archs"

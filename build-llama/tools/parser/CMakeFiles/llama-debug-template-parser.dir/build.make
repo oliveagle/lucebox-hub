@@ -100,8 +100,8 @@ bin/llama-debug-template-parser: common/libcommon.a
 bin/llama-debug-template-parser: bin/libllama.so.0.0.8832
 bin/llama-debug-template-parser: bin/libggml.so.0.9.11
 bin/llama-debug-template-parser: bin/libggml-cpu.so.0.9.11
-bin/llama-debug-template-parser: bin/libggml-hip.so.0.9.11
 bin/llama-debug-template-parser: bin/libggml-base.so.0.9.11
+bin/llama-debug-template-parser: triattention/libtriattention.a
 bin/llama-debug-template-parser: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-debug-template-parser: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-debug-template-parser: /usr/lib/x86_64-linux-gnu/libcrypto.so

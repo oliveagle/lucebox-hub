@@ -113,13 +113,13 @@ bin/test-barrier: tests/CMakeFiles/test-barrier.dir/get-model.cpp.o
 bin/test-barrier: tests/CMakeFiles/test-barrier.dir/build.make
 bin/test-barrier: tests/CMakeFiles/test-barrier.dir/compiler_depend.ts
 bin/test-barrier: common/libcommon.a
+bin/test-barrier: triattention/libtriattention.a
 bin/test-barrier: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-barrier: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-barrier: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-barrier: bin/libllama.so.0.0.8832
 bin/test-barrier: bin/libggml.so.0.9.11
 bin/test-barrier: bin/libggml-cpu.so.0.9.11
-bin/test-barrier: bin/libggml-hip.so.0.9.11
 bin/test-barrier: bin/libggml-base.so.0.9.11
 bin/test-barrier: tests/CMakeFiles/test-barrier.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-barrier"

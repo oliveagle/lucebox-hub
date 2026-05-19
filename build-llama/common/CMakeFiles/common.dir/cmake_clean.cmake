@@ -15,6 +15,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/common.dir/chat.cpp.o.d"
   "CMakeFiles/common.dir/common.cpp.o"
   "CMakeFiles/common.dir/common.cpp.o.d"
+  "CMakeFiles/common.dir/common_triattention.cpp.o"
+  "CMakeFiles/common.dir/common_triattention.cpp.o.d"
   "CMakeFiles/common.dir/console.cpp.o"
   "CMakeFiles/common.dir/console.cpp.o.d"
   "CMakeFiles/common.dir/debug.cpp.o"

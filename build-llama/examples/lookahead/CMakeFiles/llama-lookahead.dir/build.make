@@ -100,8 +100,8 @@ bin/llama-lookahead: common/libcommon.a
 bin/llama-lookahead: bin/libllama.so.0.0.8832
 bin/llama-lookahead: bin/libggml.so.0.9.11
 bin/llama-lookahead: bin/libggml-cpu.so.0.9.11
-bin/llama-lookahead: bin/libggml-hip.so.0.9.11
 bin/llama-lookahead: bin/libggml-base.so.0.9.11
+bin/llama-lookahead: triattention/libtriattention.a
 bin/llama-lookahead: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-lookahead: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-lookahead: /usr/lib/x86_64-linux-gnu/libcrypto.so

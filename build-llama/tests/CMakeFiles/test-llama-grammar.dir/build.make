@@ -113,13 +113,13 @@ bin/test-llama-grammar: tests/CMakeFiles/test-llama-grammar.dir/get-model.cpp.o
 bin/test-llama-grammar: tests/CMakeFiles/test-llama-grammar.dir/build.make
 bin/test-llama-grammar: tests/CMakeFiles/test-llama-grammar.dir/compiler_depend.ts
 bin/test-llama-grammar: common/libcommon.a
+bin/test-llama-grammar: triattention/libtriattention.a
 bin/test-llama-grammar: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-llama-grammar: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-llama-grammar: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-llama-grammar: bin/libllama.so.0.0.8832
 bin/test-llama-grammar: bin/libggml.so.0.9.11
 bin/test-llama-grammar: bin/libggml-cpu.so.0.9.11
-bin/test-llama-grammar: bin/libggml-hip.so.0.9.11
 bin/test-llama-grammar: bin/libggml-base.so.0.9.11
 bin/test-llama-grammar: tests/CMakeFiles/test-llama-grammar.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-llama-grammar"

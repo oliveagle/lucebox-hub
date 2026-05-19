@@ -113,13 +113,13 @@ bin/test-grammar-parser: tests/CMakeFiles/test-grammar-parser.dir/get-model.cpp.
 bin/test-grammar-parser: tests/CMakeFiles/test-grammar-parser.dir/build.make
 bin/test-grammar-parser: tests/CMakeFiles/test-grammar-parser.dir/compiler_depend.ts
 bin/test-grammar-parser: common/libcommon.a
+bin/test-grammar-parser: triattention/libtriattention.a
 bin/test-grammar-parser: vendor/cpp-httplib/libcpp-httplib.a
 bin/test-grammar-parser: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/test-grammar-parser: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bin/test-grammar-parser: bin/libllama.so.0.0.8832
 bin/test-grammar-parser: bin/libggml.so.0.9.11
 bin/test-grammar-parser: bin/libggml-cpu.so.0.9.11
-bin/test-grammar-parser: bin/libggml-hip.so.0.9.11
 bin/test-grammar-parser: bin/libggml-base.so.0.9.11
 bin/test-grammar-parser: tests/CMakeFiles/test-grammar-parser.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ../bin/test-grammar-parser"

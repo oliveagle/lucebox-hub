@@ -99,10 +99,10 @@ bin/export-graph-ops: tests/CMakeFiles/export-graph-ops.dir/compiler_depend.ts
 bin/export-graph-ops: common/libcommon.a
 bin/export-graph-ops: tests/libgguf-model-data.a
 bin/export-graph-ops: common/libcommon.a
+bin/export-graph-ops: triattention/libtriattention.a
 bin/export-graph-ops: bin/libllama.so.0.0.8832
 bin/export-graph-ops: bin/libggml.so.0.9.11
 bin/export-graph-ops: bin/libggml-cpu.so.0.9.11
-bin/export-graph-ops: bin/libggml-hip.so.0.9.11
 bin/export-graph-ops: bin/libggml-base.so.0.9.11
 bin/export-graph-ops: vendor/cpp-httplib/libcpp-httplib.a
 bin/export-graph-ops: /usr/lib/x86_64-linux-gnu/libssl.so

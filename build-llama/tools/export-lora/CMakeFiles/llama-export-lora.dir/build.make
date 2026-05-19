@@ -100,8 +100,8 @@ bin/llama-export-lora: common/libcommon.a
 bin/llama-export-lora: bin/libllama.so.0.0.8832
 bin/llama-export-lora: bin/libggml.so.0.9.11
 bin/llama-export-lora: bin/libggml-cpu.so.0.9.11
-bin/llama-export-lora: bin/libggml-hip.so.0.9.11
 bin/llama-export-lora: bin/libggml-base.so.0.9.11
+bin/llama-export-lora: triattention/libtriattention.a
 bin/llama-export-lora: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-export-lora: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-export-lora: /usr/lib/x86_64-linux-gnu/libcrypto.so

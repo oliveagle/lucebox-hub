@@ -100,8 +100,8 @@ bin/llama-completion: common/libcommon.a
 bin/llama-completion: bin/libllama.so.0.0.8832
 bin/llama-completion: bin/libggml.so.0.9.11
 bin/llama-completion: bin/libggml-cpu.so.0.9.11
-bin/llama-completion: bin/libggml-hip.so.0.9.11
 bin/llama-completion: bin/libggml-base.so.0.9.11
+bin/llama-completion: triattention/libtriattention.a
 bin/llama-completion: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-completion: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-completion: /usr/lib/x86_64-linux-gnu/libcrypto.so

@@ -113,7 +113,6 @@ bin/libggml.so.0.9.11: ggml/src/CMakeFiles/ggml.dir/ggml-backend-reg.cpp.o
 bin/libggml.so.0.9.11: ggml/src/CMakeFiles/ggml.dir/build.make
 bin/libggml.so.0.9.11: ggml/src/CMakeFiles/ggml.dir/compiler_depend.ts
 bin/libggml.so.0.9.11: bin/libggml-cpu.so.0.9.11
-bin/libggml.so.0.9.11: bin/libggml-hip.so.0.9.11
 bin/libggml.so.0.9.11: bin/libggml-base.so.0.9.11
 bin/libggml.so.0.9.11: ggml/src/CMakeFiles/ggml.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX shared library ../../bin/libggml.so"

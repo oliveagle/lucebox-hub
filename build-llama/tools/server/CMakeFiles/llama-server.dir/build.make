@@ -149,11 +149,11 @@ bin/llama-server: common/libcommon.a
 bin/llama-server: vendor/cpp-httplib/libcpp-httplib.a
 bin/llama-server: /usr/lib/x86_64-linux-gnu/libssl.so
 bin/llama-server: /usr/lib/x86_64-linux-gnu/libcrypto.so
+bin/llama-server: triattention/libtriattention.a
 bin/llama-server: bin/libmtmd.so.0.0.8832
 bin/llama-server: bin/libllama.so.0.0.8832
 bin/llama-server: bin/libggml.so.0.9.11
 bin/llama-server: bin/libggml-cpu.so.0.9.11
-bin/llama-server: bin/libggml-hip.so.0.9.11
 bin/llama-server: bin/libggml-base.so.0.9.11
 bin/llama-server: tools/server/CMakeFiles/llama-server.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Linking CXX executable ../../bin/llama-server"

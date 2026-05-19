@@ -5,7 +5,6 @@
 		"/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/cmake_install.cmake",
 		"/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/cmake_install.cmake",
 		"/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-cpu/cmake_install.cmake",
-		"/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/ggml/src/ggml-hip/cmake_install.cmake",
 		"/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/triattention/cmake_install.cmake",
 		"/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/src/cmake_install.cmake",
 		"/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/build-llama/common/cmake_install.cmake",
