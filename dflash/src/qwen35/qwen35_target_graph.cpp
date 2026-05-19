@@ -469,6 +469,10 @@ static ggml_tensor * build_swiglu_ffn(ggml_context * ctx, ggml_tensor * cur,
 // (shape [head_dim, max_ctx, n_head_kv] f16). We write the new K/V for
 // `n_tokens` new positions starting at `kv_start`, then run causal attention
 // over [0..kv_start + n_tokens).
+//
+// `cache` provides access to tria_k_pre_rope directly to avoid pointer
+// corruption when passing as a parameter on HIP backend (see investigation
+// report: lucebox-hub-gfx1151-baq).
 static ggml_tensor * build_full_attn_block(
     ggml_context * ctx,
     ggml_cgraph * gf,
@@ -488,8 +492,7 @@ static ggml_tensor * build_full_attn_block(
     int fa_window = 0,
     ggml_tensor * q_tail_capture = nullptr,
     int q_tail_start = 0,
-    ggml_tensor * tria_k_pre_rope = nullptr
-) {
+    const TargetCache * cache = nullptr) {
     const int head_dim = w.n_embd_head_k;
     const int n_head = w.n_head;
     const int n_head_kv = w.n_head_kv;
@@ -538,24 +541,24 @@ static ggml_tensor * build_full_attn_block(
     // nb[0]=elt_size, nb[1]=elt_size*(head_dim/blck), nb[2]=nb[1]*seq_len.
     // This avoids potential corruption of nb[] on some HIP backends.
     // (See ggml_new_tensor_impl in ggml.c for the stride calculation.)
-    if (tria_k_pre_rope) {
-        fprintf(stderr, "[TriAttention] build_full_attn_block tria_k_pre_rope=%p data=%p\n",
-                (void*)tria_k_pre_rope, tria_k_pre_rope->data);
-        if (!tria_k_pre_rope->data) {
-            // TriAttention buffer was allocated but not backed — skip capture
-        } else {
-            ggml_tensor * Kpre_T = ggml_permute(ctx, Kcur, 0, 2, 1, 3);
-            const size_t elt_sz   = ggml_element_size(tria_k_pre_rope); // bf16 = 2
-            const size_t blck_sz  = (size_t)ggml_blck_size(tria_k_pre_rope->type); // bf16 = 2
-            const size_t nb1      = elt_sz * (head_dim / blck_sz);
-            const size_t nb2      = nb1 * tria_k_pre_rope->ne[1];
-            ggml_tensor * k_slot = ggml_view_3d(ctx, tria_k_pre_rope,
-                head_dim, n_tokens, n_head_kv,
-                nb1, nb2,
-                /*offset*/ (size_t)kv_start * nb1);
-            ggml_build_forward_expand(gf, ggml_cpy(ctx, Kpre_T, k_slot));
-        }
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    ggml_tensor * tria_k_pre_rope = cache ? cache->tria_k_pre_rope : nullptr;
+    if (tria_k_pre_rope && tria_k_pre_rope->data) {
+        fprintf(stderr, "[TriAttention] build_full_attn_block tria_k_pre_rope=%p data=%p ne=[%zu,%zu,%zu]\n",
+                (void*)tria_k_pre_rope, tria_k_pre_rope->data,
+                tria_k_pre_rope->ne[0], tria_k_pre_rope->ne[1], tria_k_pre_rope->ne[2]);
+        ggml_tensor * Kpre_T = ggml_permute(ctx, Kcur, 0, 2, 1, 3);
+        const size_t elt_sz   = ggml_element_size(tria_k_pre_rope);
+        const size_t blck_sz  = (size_t)ggml_blck_size(tria_k_pre_rope->type);
+        const size_t nb1      = elt_sz * (head_dim / blck_sz);
+        const size_t nb2      = nb1 * tria_k_pre_rope->ne[1];
+        ggml_tensor * k_slot = ggml_view_3d(ctx, tria_k_pre_rope,
+            head_dim, n_tokens, n_head_kv,
+            nb1, nb2,
+            /*offset*/ (size_t)kv_start * nb1);
+        ggml_build_forward_expand(gf, ggml_cpy(ctx, Kpre_T, k_slot));
     }
+#endif
 
     // ── M-RoPE (multi-axis rotary). n_rot = HEAD_DIM/4 * 4 ? Actually
     //    ggml_rope_multi takes n_dims = the number of dims to rotate; for
@@ -989,6 +992,13 @@ static ggml_tensor * build_single_layer(
     const TargetLayer & L = w.layers[layer_idx];
     const bool is_attn = (((layer_idx + 1) % w.full_attention_interval) == 0);
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    if (layer_idx == 0 && is_attn) {
+        fprintf(stderr, "[TriAttention] build_single_layer cache.tria_k_pre_rope=%p\n",
+                (void*)cache.tria_k_pre_rope);
+    }
+#endif
+
     const int * CAPTURE_LAYERS = w.capture_layer_ids;
     const int N_CAPTURE = w.n_capture_layers;
 
@@ -1007,7 +1017,7 @@ static ggml_tensor * build_single_layer(
                                     cache.kv_k_rotated,
                                     fa_window,
                                     q_tail_capture, q_tail_start,
-                                    cache.tria_k_pre_rope);
+                                    &cache);
     } else {
         int dn_idx = 0;
         for (int il = 0; il < layer_idx; il++) {
@@ -1075,6 +1085,15 @@ QwenGraphOutputs build_qwen35_graph(
 
     const int n_tokens = in.n_tokens;
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    static bool logged = false;
+    if (!logged) {
+        fprintf(stderr, "[TriAttention] build_qwen35_graph cache.tria_k_pre_rope=%p\n",
+                (void*)cache.tria_k_pre_rope);
+        logged = true;
+    }
+#endif
+
     // 1. Caller supplies pre-embedded inputs via in.inp_embed (CPU lookup done
     //    ahead of time, zero GPU cost for the embedding table).
     ggml_tensor * inpL = in.inp_embed;
@@ -1114,7 +1133,7 @@ QwenGraphOutputs build_qwen35_graph(
                                         cache.kv_k_rotated,
                                         in.fa_window,
                                         /*q_tail_capture*/ nullptr, 0,
-                                        cache.tria_k_pre_rope);
+                                        &cache);
             fa_idx++;
         } else {
             DeltaNetCapture * cap_ptr = nullptr;

@@ -3,10 +3,10 @@
   "sessionId": "78c6e87e-1f5e-4f1c-a842-6a67f277acbc",
   "status": "running",
   "startedAt": "2026-05-19T03:33:13.984Z",
-  "updatedAt": "2026-05-19T15:31:44.319Z",
-  "currentIteration": 11,
+  "updatedAt": "2026-05-19T19:34:43.842Z",
+  "currentIteration": 16,
   "maxIterations": 50,
-  "tasksCompleted": 7,
+  "tasksCompleted": 8,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -486,6 +486,56 @@
       "durationMs": 418668,
       "startedAt": "2026-05-19T14:44:09.705Z",
       "endedAt": "2026-05-19T14:51:08.373Z"
+    },
+    {
+      "iteration": 12,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-u52",
+      "taskTitle": "test: 验证 TriAttention snapshot/restore 修复",
+      "taskCompleted": true,
+      "durationMs": 1448260,
+      "startedAt": "2026-05-19T15:07:36.045Z",
+      "endedAt": "2026-05-19T15:31:44.305Z"
+    },
+    {
+      "iteration": 13,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-k3z",
+      "taskTitle": "test: 端到端 DFlash 推理测试",
+      "taskCompleted": false,
+      "durationMs": 2954159,
+      "startedAt": "2026-05-19T16:13:32.117Z",
+      "endedAt": "2026-05-19T17:02:46.276Z"
+    },
+    {
+      "iteration": 14,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-baq",
+      "taskTitle": "investigate: tria_k_pre_rope pointer corruption root cause",
+      "taskCompleted": false,
+      "durationMs": 1373725,
+      "startedAt": "2026-05-19T17:12:43.755Z",
+      "endedAt": "2026-05-19T17:35:37.480Z"
+    },
+    {
+      "iteration": 15,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-j90",
+      "taskTitle": "fix: tria_k_pre_rope pointer corruption and re-enable capture",
+      "taskCompleted": false,
+      "durationMs": 1078711,
+      "startedAt": "2026-05-19T17:35:39.667Z",
+      "endedAt": "2026-05-19T17:53:38.378Z"
+    },
+    {
+      "iteration": 16,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-a62",
+      "taskTitle": "test: triattention KV compression end-to-end benchmark",
+      "taskCompleted": false,
+      "durationMs": 412866,
+      "startedAt": "2026-05-19T17:53:40.614Z",
+      "endedAt": "2026-05-19T18:00:33.480Z"
     }
   ],
   "skippedTaskIds": [],
@@ -494,7 +544,11 @@
     "lucebox-hub-gfx1151-bnk",
     "lucebox-hub-gfx1151-c2g.1",
     "lucebox-hub-gfx1151-y5w",
-    "lucebox-hub-gfx1151-y5w.4"
+    "lucebox-hub-gfx1151-y5w.4",
+    "lucebox-hub-gfx1151-k3z",
+    "lucebox-hub-gfx1151-baq",
+    "lucebox-hub-gfx1151-j90",
+    "lucebox-hub-gfx1151-a62"
   ],
   "subagentPanelVisible": false
 }
