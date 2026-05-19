@@ -111,3 +111,21 @@ after each iteration and it's included in prompts for context.
 
 ---
 
+## [2026-05-19] - lucebox-hub-gfx1151-fix-tria-segfault-qbo.2.1
+- **What was implemented**:
+  - Verified the stride recomputation fix from c2g is correctly applied and functional
+  - The fix computes strides from source tensor dimensions instead of reading potentially corrupted `nb[]`:
+    - `elt_sz = ggml_element_size(tria_k_pre_rope)` → 2 for BF16
+    - `blck_sz = ggml_blck_size(tria_k_pre_rope->type)` → 1 for BF16
+    - `nb1 = elt_sz * (head_dim / blck_sz)` = 2 * 256 = 512
+    - `nb2 = nb1 * tria_k_pre_rope->ne[1]` = 512 * max_ctx_alloc
+  - dflash27b compiles successfully with DFLASH27B_TRIATTENTION=ON
+  - All TriAttention symbols verified in libdflash27b.a
+- **Files changed**: None (fix was already implemented in c2g)
+- **Learnings**:
+  - The stride recomputation pattern is now a proven solution for cross-context tensor views on HIP backend
+  - Always validate tensor metadata initialization when using views in graph building
+  - BF16 has `blck_size=1` (not 2), confirmed by inspecting ggml_type_traits
+
+---
+
