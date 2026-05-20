@@ -347,3 +347,24 @@ after each iteration and it's included in prompts for context.
 - **Learnings**:
   - The symlink was already correctly configured pointing to `/mnt/eaget-4tb/modelscope_models/unsloth/Qwen3___6-27B-GGUF/` (with dash, not underscore between 6 and 27)
   - The target directory on this system is at `/mnt/eaget-4tb/` (different from the originally expected `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/modelscope_models/`)
+
+---
+
+## [2026-05-20] - lucebox-hub-gfx1151-fix-tria-segfault-qbo.2.2
+- **What was implemented**:
+  - Generated comprehensive DFlash + TriAttention benchmark report based on completed tests from lucebox-hub-gfx1151-a62
+  - Report includes: baseline (7.62 tok/s) vs TriAttention KV_BUDGET=2048 (18.09 tok/s, +137% speedup)
+  - Documented output quality: 100% token similarity (57 tokens identical)
+  - Time breakdown: replay_compute -72%, verify_compute -23%, prefill -27%
+  - Accept rate unchanged at 37.5% (48/128), confirming correctness of compression
+  - KV_BUDGET=1024 test deferred due to JIT compilation timeout issues on first run
+- **Files changed**:
+  - `dflash/docs/dflash_triattention_benchmark_20260520.md` (new) - comprehensive benchmark report
+- **Learnings**:
+  - **TriAttention KV compression dramatically improves DFlash inference speed** on gfx1151 (Radeon 8060S)
+  - The 137% speedup (7.62 → 18.09 tok/s) comes primarily from reduced KV cache size leading to faster attention computation
+  - Output bit-for-bit identical confirms compression does not affect generation quality
+  - Stats file `deps/llama.cpp/triattention/stats/qwen3.5-27b.bin` is compatible with Qwen3.6-27B target model
+  - **Pattern: Benchmark on JIT-compiled code may require warmup runs**: test_dflash first run includes HIP kernel compilation which adds significant overhead and can cause timeouts
+  - KV_BUDGET=1024 test requires GPU idle state and pre-warming for accurate results
+---

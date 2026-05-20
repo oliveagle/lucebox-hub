@@ -38,11 +38,12 @@ N_GEN = 256
 BUDGET = 22  # default; overridden by --budget CLI arg
 N_SAMPLE = 10
 
-# TriAttention defaults
+# ── TriAttention configuration ────────────────────────────────────────────────
 TRIATTN_DEFAULT_STATS = str(ROOT / "deps" / "llama.cpp" / "triattention" / "stats" / "qwen3.5-27b.bin")
-TRIATTN_DEFAULT_KV_BUDGET = 2048
+TRIATTN_DEFAULT_BUDGET = 2048
 TRIATTN_DEFAULT_DIVIDE = 128
 TRIATTN_DEFAULT_WINDOW = 128
+TRIATTN_DEFAULT_KV_BUDGET = 2048  # keep 2048 tokens after compression
 
 BENCHES = [
     ("HumanEval", "openai_humaneval", None, "test", lambda x: x["prompt"], None, N_GEN),
@@ -126,7 +127,7 @@ def _auto_max_ctx(n_prompt, n_gen: int = N_GEN):
     return ((n_prompt + n_gen + pad + 255) // 256) * 256
 
 
-def run_df(path: Path, n_prompt, n_gen: int = N_GEN, tria_env: dict = None):
+def run_df(path: Path, n_prompt, n_gen: int = N_GEN, env_extra: dict = None):
     max_ctx = _auto_max_ctx(n_prompt, n_gen)
     out_bin = TMPDIR / f"df_out.bin"
     cmd = [
@@ -141,21 +142,23 @@ def run_df(path: Path, n_prompt, n_gen: int = N_GEN, tria_env: dict = None):
         f"--ddtree-budget={BUDGET}",
         f"--max-ctx={max_ctx}",
     ]
+    # Merge env: inherit current env + tria settings
     run_env = os.environ.copy()
-    if tria_env:
-        run_env.update(tria_env)
+    if env_extra:
+        run_env.update(env_extra)
 
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=run_env)
     if r.returncode != 0:
         tail = (r.stderr or r.stdout or "<no output>").strip()[-2000:]
         raise RuntimeError(f"test_dflash exited {r.returncode}: {tail}")
 
+    # Parse TriAttention compression stats if present
+    tria_compressed = 0
     tria_n_kept = 0
     for line in (r.stdout + r.stderr).splitlines():
-        if "[TriAttention]" in line and "cur_pos" in line:
-            m = re.search(r"cur_pos.*?(\d+)", line)
-            if m:
-                tria_n_kept = int(m.group(1))
+        m = re.search(r"\[TriAttention\].*cur_pos.*(\d+)", line)
+        if m:
+            tria_n_kept = int(m.group(1))
 
     tps = re.search(r"(\d+(?:\.\d+)?)\s+tok/s", r.stdout)
     al = re.search(r"avg commit/step=(\d+(?:\.\d+)?)", r.stdout)
@@ -313,7 +316,8 @@ def main():
                         help="Wrap prompts in chat template with enable_thinking=False")
     parser.add_argument("--bench", nargs="+", choices=["HumanEval", "GSM8K", "Math500"],
                         help="Run only specified benchmarks (default: all)")
-    # TriAttention
+
+    # TriAttention args
     parser.add_argument("--tria", action="store_true",
                         help="Enable TriAttention KV compression")
     parser.add_argument("--tria-budget", type=int, default=TRIATTN_DEFAULT_KV_BUDGET,
@@ -329,6 +333,13 @@ def main():
     args = parser.parse_args()
     BUDGET = args.budget
 
+    if args.compare_tria:
+        args.tria = True  # need both OFF and ON
+
+    # Validate stats file if tria is enabled
+    if args.tria and not Path(args.tria_stats).is_file():
+        parser.error(f"TriAttention stats file not found: {args.tria_stats}")
+
     DRAFT = _resolve_draft()
     _require_file(TARGET, "target GGUF")
     _require_file(TEST_DFLASH, "test_dflash binary")
@@ -340,15 +351,19 @@ def main():
     print(f"[bench] df bin    = {TEST_DFLASH}", flush=True)
     print(f"[bench] tokenizer = {TOKENIZER}", flush=True)
     print(f"[bench] budget    = {BUDGET}", flush=True)
+    if args.tria:
+        print(f"[bench] tria      = ON (budget={args.tria_budget}, divide={args.tria_divide}, window={args.tria_window})", flush=True)
+        print(f"[bench] tria_stats = {args.tria_stats}", flush=True)
+    else:
+        print(f"[bench] tria      = OFF", flush=True)
 
-    if args.compare_tria:
-        args.tria = True  # need both modes
+    from datasets import load_dataset
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(TOKENIZER, trust_remote_code=True)
 
-    # Validate stats file if tria is enabled
-    if args.tria and not Path(args.tria_stats).is_file():
-        parser.error(f"TriAttention stats file not found: {args.tria_stats}")
+    bench_filter = set(args.bench) if args.bench else None
 
-    # Build tria env dict
+    # Build tria env dict once
     tria_env = {}
     if args.tria:
         tria_env = {
@@ -358,9 +373,6 @@ def main():
             "TRIATTN_DIVIDE_LENGTH": str(args.tria_divide),
             "TRIATTN_WINDOW_SIZE": str(args.tria_window),
         }
-        print(f"[bench] tria      = ON (budget={args.tria_budget}, divide={args.tria_divide})", flush=True)
-    else:
-        print(f"[bench] tria      = OFF", flush=True)
 
     # Modes: --compare-tria → [OFF, ON]; --tria → [ON]; else → [OFF]
     if args.compare_tria:
@@ -370,42 +382,6 @@ def main():
     else:
         tria_modes = [("OFF", {})]
 
-    from datasets import load_dataset
-    from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(TOKENIZER, trust_remote_code=True)
-
-    bench_filter = set(args.bench) if args.bench else None
-
-    if args.no_thinking and not getattr(tok, "chat_template", None):
-        parser.error(
-            f"--no-thinking requires a tokenizer with a chat template, "
-            f"but {TOKENIZER!r} has none. Use a Qwen3 tokenizer or drop --no-thinking."
-        )
-
-    def _wrap_prompt(raw_prompt: str) -> str:
-        if not args.no_thinking:
-            return raw_prompt
-        return tok.apply_chat_template(
-            [{"role": "user", "content": raw_prompt}],
-            tokenize=False, add_generation_prompt=True,
-            enable_thinking=False,
-        )
-
-    def _load_local_dataset(name: str):
-        """Fall back to local JSONL datasets when HuggingFace Hub is unavailable."""
-        eval_dir = ROOT / "eval"
-        if name == "HumanEval":
-            for candidate in (
-                eval_dir / "humaneval_plus" / "humanevalplus.jsonl",
-                eval_dir / "humaneval.jsonl",
-            ):
-                if candidate.is_file():
-                    with open(candidate) as f:
-                        return [json.loads(line) for line in f]
-            return None
-        return None
-
-    results = {}
     for name, ds_name, cfg, split, extract, gold_extract, gen in BENCHES:
         if bench_filter and name not in bench_filter:
             continue
@@ -429,11 +405,9 @@ def main():
         prompt_list = [extract(s) for s in ds_selected]
         gold_list = [gold_extract(s) for s in ds_selected] if gold_extract else [None] * len(prompt_list)
 
-        # Per-mode accumulators
-        mode_results = {}
-        for m_name, _ in tria_modes:
-            mode_results[m_name] = {"ar_tps": [], "df_tps": [], "df_al": [],
-                                     "tria_n_kept": [], "n_score_correct": 0, "n_scored": 0}
+        # Per-mode accumulators: results[name][mode] = {...}
+        mode_results = {m: {"ar_tps": [], "df_tps": [], "df_al": [], "tria_n_kept": [],
+                            "n_score_correct": 0, "n_scored": 0} for m, _ in tria_modes}
 
         for i, (p, gold) in enumerate(zip(prompt_list, gold_list)):
             path = TMPDIR / f"b_{name}_{i:02d}.bin"
@@ -441,18 +415,14 @@ def main():
             if n == 0 or n > 3500:
                 continue
 
-            try:
-                ar = run_ar(path, gen)
-            except Exception as e:
-                print(f"  [{i+1:02d}/{N_SAMPLE}] n_tok={n:4d}  AR FAILED: {e}", flush=True)
-                continue
+            ar = run_ar(path, gen)
 
             for mode_name, extra_env in tria_modes:
                 r = mode_results[mode_name]
                 try:
-                    df, al, df_bin, n_kept = run_df(path, n, gen, tria_env=extra_env if extra_env else None)
+                    df, al, df_bin, n_kept = run_df(path, n, gen, env_extra=extra_env if extra_env else None)
                 except Exception as e:
-                    print(f"  [{i+1:02d}/{N_SAMPLE}] [{mode_name}] n_tok={n:4d}  DFlash FAILED: {e}", flush=True)
+                    print(f"  [{i+1:02d}/{N_SAMPLE}] [{mode_name}] n_tok={n:4d}  FAILED: {e}", flush=True)
                     continue
 
                 score_detail = ""
@@ -467,11 +437,12 @@ def main():
                     r["df_tps"].append(df)
                     r["df_al"].append(al)
                     r["tria_n_kept"].append(n_kept)
+                if ar > 0:
+                    r["ar_tps"].append(ar)
                 kept_str = f"  kept={n_kept}" if n_kept > 0 else ""
                 print(f"  [{i+1:02d}/{N_SAMPLE}] [{mode_name}] n_tok={n:4d}  AR={ar:6.2f}  DFlash={df:7.2f}  AL={al:5.2f}{kept_str}{score_detail}", flush=True)
 
-        # Compute per-mode averages and store
-        results[name] = {}
+        # Compute per-mode averages
         for mode_name, _ in tria_modes:
             r = mode_results[mode_name]
             ar_m = sum(r["ar_tps"]) / len(r["ar_tps"]) if r["ar_tps"] else 0
@@ -480,11 +451,13 @@ def main():
             avg_kept = sum(r["tria_n_kept"]) / len(r["tria_n_kept"]) if r["tria_n_kept"] else 0
             score_str = f"{r['n_score_correct']}/{r['n_scored']}" if r["n_scored"] else ""
 
+            results[name] = results.get(name, {})
             results[name][mode_name] = {
                 "ar": ar_m, "dflash": df_m, "al": al_m,
                 "speedup": df_m / ar_m if ar_m else 0,
-                "tria_avg_kept": round(avg_kept), "score": score_str,
+                "tria_avg_kept": avg_kept, "score": score_str,
             }
+
             summary = f"  [{mode_name}] mean: AR={ar_m:.2f}  DFlash={df_m:.2f}  AL={al_m:.2f}  speedup={df_m/ar_m:.2f}x"
             if avg_kept > 0:
                 summary += f"  tria_avg_kept={avg_kept:.0f}"
@@ -501,22 +474,29 @@ def main():
             al_off = off_r.get("al", 0)
             al_on = on_r.get("al", 0)
             kept = on_r.get("tria_avg_kept", 0)
+            comp_print = ""
             if df_off > 0:
-                print(f"  [Compare] DFlash: OFF={df_off:.2f} vs ON={df_on:.2f} ({df_on/df_off*100-100:+.1f}%)  AL: OFF={al_off:.2f} vs ON={al_on:.2f}  tria_avg_kept={kept}", flush=True)
+                comp_print = f"  [Compare] DFlash: OFF={df_off:.2f} vs ON={df_on:.2f} ({df_on/df_off*100-100:+.1f}%)  AL: OFF={al_off:.2f} vs ON={al_on:.2f}"
+            if kept > 0:
+                comp_print += f"  tria_avg_kept={kept:.0f}"
+            print(comp_print, flush=True)
+            print(f"  [{i+1:02d}/{N_SAMPLE}] n_tok={n:4d}  AR={ar:6.2f}  DFlash={df:7.2f}  AL={al:5.2f}{score_detail}", flush=True)
+        ar_m = sum(ar_tps) / len(ar_tps) if ar_tps else 0
+        df_m = sum(df_tps) / len(df_tps) if df_tps else 0
+        al_m = sum(df_al) / len(df_al) if df_al else 0
+        score_str = f"{n_score_correct}/{n_scored}" if n_scored else ""
+        results[name] = {"ar": ar_m, "dflash": df_m, "al": al_m,
+                         "speedup": df_m / ar_m if ar_m else 0,
+                         "score": score_str}
+        summary = f"  {name} mean: AR={ar_m:.2f}  DFlash={df_m:.2f}  AL={al_m:.2f}  {results[name]['speedup']:.2f}x"
+        if score_str:
+            summary += f"  score={score_str} ({n_score_correct/n_scored*100:.0f}%)"
+        print(summary, flush=True)
 
     print("\n[bench] === SUMMARY ===")
-    if len(tria_modes) == 1:
-        # Single mode: flat format
-        print(f"{'Task':12s}  {'Mode':>5s}  {'AR':>8s}  {'DFlash':>8s}  {'AL':>6s}  {'Speedup':>8s}  {'Score':>8s}")
-        for name, modes in results.items():
-            for mode_name, r in modes.items():
-                print(f"{name:12s}  {mode_name:>5s}  {r['ar']:8.2f}  {r['dflash']:8.2f}  {r['al']:6.2f}  {r['speedup']:7.2f}x  {r.get('score',''):>8s}")
-    else:
-        # Compare mode
-        print(f"{'Task':12s}  {'Mode':>5s}  {'AR':>8s}  {'DFlash':>8s}  {'AL':>6s}  {'Speedup':>8s}  {'tria_kept':>9s}  {'Score':>8s}")
-        for name, modes in results.items():
-            for mode_name, r in modes.items():
-                print(f"{name:12s}  {mode_name:>5s}  {r['ar']:8.2f}  {r['dflash']:8.2f}  {r['al']:6.2f}  {r['speedup']:7.2f}x  {r.get('tria_avg_kept',''):>9s}  {r.get('score',''):>8s}")
+    print(f"{'Task':12s}  {'AR':>8s}  {'DFlash':>8s}  {'AL':>6s}  {'Speedup':>8s}  {'Score':>8s}")
+    for name, r in results.items():
+        print(f"{name:12s}  {r['ar']:8.2f}  {r['dflash']:8.2f}  {r['al']:6.2f}  {r['speedup']:7.2f}x  {r.get('score',''):>8s}")
 
     out_json = TMPDIR / "bench_llm_results.json"
     with open(out_json, "w") as f:
