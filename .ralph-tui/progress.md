@@ -7,16 +7,10 @@ after each iteration and it's included in prompts for context.
 
 *Add reusable patterns discovered during development here.*
 
+- **Pattern: TriAttention compile flag must be added to all test executables that use TargetCache**: When `DFLASH27B_TRIATTENTION=ON` is used, the `DFLASH27B_TRIATTENTION_ENABLED=1` compile definition is only added to the `dflash27b` library target by default. The `TargetCache` struct has `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` guards around the `tria_k_pre_rope` field. If test executables (`test_dflash`, `test_generate`, etc.) don't have this define, they compile with a different struct layout than the library, causing `tria_k_pre_rope` field access to read garbage memory (struct layout mismatch). Fix: add `target_compile_definitions(test_X PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)` and `target_include_directories` for the triattention header to all affected test executables.
+
 - **Pattern: TriAttention pre-RoPE K snapshot/restore — field must be added to both struct and functions**: The `tria_k_pre_rope_snap` field needs to be added to `PrefixSnapshot` struct in `internal.h` AND used across all 5 snapshot/restore functions. The `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` guard is needed in both the struct definition (internal.h) and each function body (qwen35_target_graph.cpp). Thin snapshots also need the field allocated and copied strip-by-strip, matching the attn_k/attn_v pattern.
-- **Pattern: TriAttention pre-RoPE K pointer corruption - verify by-reference passing**: Task lucebox-hub-gfx1151-2ok describes fixing "pass-by-value" of `TargetCache & cache`, but verification shows the signatures in `graph_builders.h` and `graph_builders.cpp` already use `TargetCache &` (by reference) correctly. The function signatures are:
-  - Header: `bool build_target_step(..., TargetCache & cache, ...);`
-  - Header: `bool build_target_step_tree(..., TargetCache & cache, ...);`
-  - Header: `bool build_layer_step(..., TargetCache & cache, ...);`
-  - Implementation: All match with `TargetCache & cache` (by reference)
-- All functions pass `cache` by reference to `build_qwen35_graph()` which also takes `TargetCache & cache`
-- The actual corruption (`tria_k_pre_rope->type` showing garbage value) appears to be a deeper HIP backend/compiler issue, not a pass-by-reference problem
-- Verified that adding `const` qualifier doesn't work because `build_qwen35_graph` needs to modify the cache
-- The issue appears to be a HIP/AMDGPU-specific compiler optimization or ABI issue with gfx1151/RDMA3 architecture
+- **Pattern: TriAttention pre-RoPE K pointer corruption - verify by-reference passing**: ~~Task lucebox-hub-gfx1151-2ok describes fixing "pass-by-value" of `TargetCache & cache`, but verification shows the signatures in `graph_builders.h` and `graph_builders.cpp` already use `TargetCache &` (by reference) correctly.~~ **Root cause was CMake struct layout mismatch, not pass-by-reference**. The signatures were already correct.
 
 ## [Date] - lucebox-hub-gfx1151-2ok
 - **What was verified**:
@@ -35,7 +29,7 @@ after each iteration and it's included in prompts for context.
 - **TriAttention pre-RoPE K buffer snapshot/restore fixed**: The `PrefixSnapshot.tria_k_pre_rope_snap` field was added, but the snapshot/restore functions weren't using it. Fixed `snapshot_target_cache()`, `restore_target_cache()`, `free_prefix_snapshot()`, `snapshot_target_cache_thin()`, and `restore_target_cache_chain()` to properly handle `tria_k_pre_rope`. All changes use `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` guards.
 - TriAttention scoring uses frequency-domain computation via `tria_score_kv_head()` from C library. The full pipeline: GPU pre-RoPE K capture → CPU frequency scoring per layer/head → max-pool across GQA heads → average across layers → top-K selection with window preservation → KV cache in-place compaction. Enabled via `DFLASH27B_TRIATTENTION=ON` CMake flag, which links the `triattention` library and adds `DFLASH27B_TRIATTENTION_ENABLED` compile definition.
 - **Pattern: Recompute tensor strides from ne[] for cross-context views**: When creating views into tensors allocated in a different ggml_context, recompute strides from the source tensor's `ne[]` dimensions and type properties (`ggml_element_size`, `ggml_blck_size`) instead of reading `nb[]` directly. This avoids potential corruption of stride values on some backends (e.g., HIP). The ggml stride formula: `nb[0] = element_size`, `nb[i] = nb[i-1] * (ne[i-1] / blck_size)` for i>=1.
-- **Pattern: TriAttention pre-RoPE K pointer corruption on HIP — parameter passing issue**: The `cache.tria_k_pre_rope` pointer value changes between allocation (`0x59cac61925e0` heap) and use in `build_full_attn_block()` (`0x7ffd2dd32f30` stack). The `data` field also changes from valid GPU address (`0x8c67b3a2000`) to invalid (`0x10000000000`). Root cause is likely a compiler ABI issue or stack corruption on HIP backend when passing the pointer parameter. Solution: pass `const TargetCache *` to `build_full_attn_block()` and access `tria_k_pre_rope` directly from the cache struct instead of passing it as a parameter. Investigation report: `.ralph-tui/iterations/lucebox-hub-gfx1151-baq-investigation.md`
+- **Pattern: TriAttention pre-RoPE K pointer corruption on HIP — parameter passing issue**: ~~The `cache.tria_k_pre_rope` pointer value changes between allocation (`0x59cac61925e0` heap) and use in `build_full_attn_block()` (`0x7ffd2dd32f30` stack).~~ **Root cause was NOT HIP ABI but a CMake struct layout mismatch**. The `DFLASH27B_TRIATTENTION_ENABLED` compile definition was only set on the `dflash27b` library, not on test executables. `TargetCache` had a different struct layout in each, causing `tria_k_pre_rope` to be read at the wrong offset. Fixed by adding the define to all test executables in CMakeLists.txt.
 
 ## [2026-05-20] - lucebox-hub-gfx1151-a62
 - **What was implemented**:
@@ -48,6 +42,23 @@ after each iteration and it's included in prompts for context.
 - **Files changed**: None (benchmark test, no code changes needed)
 - **Learnings**:
   - **TriAttention compression dramatically improves DFlash inference speed** on gfx1151 (Radeon 8060S)
+
+## [2026-05-20] - lucebox-hub-gfx1151-998
+- **What was implemented**:
+  - Added debug logs at 4 key entry points to trace `tria_k_pre_rope` pointer corruption:
+    1. `create_target_cache()` - before return: prints cache address, tria_k_pre_rope pointer, and data pointer
+    2. `build_target_step()` - entry point: prints cache address, tria_k_pre_rope pointer, and data pointer
+    3. `build_qwen35_graph()` - entry point: prints cache address, tria_k_pre_rope pointer, and data pointer
+    4. `build_full_attn_block()` - entry point: prints cache address, tria_k_pre_rope pointer, data pointer, and n_tokens
+  - All logs include both the pointer value and the data field value to detect corruption
+- **Files changed**:
+  - `dflash/src/qwen35/qwen35_target_graph.cpp`: Added logs at create_target_cache (line 298), build_qwen35_graph (line 1101), build_full_attn_block (line 507)
+  - `dflash/src/qwen35/graph_builders.cpp`: Added log at build_target_step (line 98)
+- **Learnings**:
+  - The logs print `cache` address, `cache.tria_k_pre_rope` address, and `(cache.tria_k_pre_rope)->data` address to detect both struct corruption and data pointer corruption
+  - Using `cache ? cache->tria_k_pre_rope : nullptr` pattern to safely access optional pointer in log statements
+  - The `build_qwen35_graph` log was changed from "once-only" to "every call" to track corruption across multiple graph builds
+---
   - Speedup from 7.62 → 18.09 tok/s (2.37×) comes primarily from reduced `replay_compute` (532ms → 149ms, -72%) and `verify_compute` (219ms → 167ms, -23%)
   - Output bit-for-bit identical confirms compression does not affect generation quality
   - Stats file `deps/llama.cpp/triattention/stats/qwen3.5-27b.bin` is compatible with Qwen3.6-27B target model
@@ -303,5 +314,36 @@ after each iteration and it's included in prompts for context.
   - Always validate tensor metadata initialization when using views in graph building
   - BF16 has `blck_size=1` (not 2), confirmed by inspecting ggml_type_traits
 
+## [2026-05-20] - lucebox-hub-gfx1151-vnt
+- **What was implemented**:
+  - Discovered and fixed root cause of `tria_k_pre_rope` pointer corruption: struct layout mismatch between dflash27b library and test executables
+  - The `DFLASH27B_TRIATTENTION_ENABLED` compile definition was only set on the `dflash27b` library, not on test executables (`test_dflash`, `test_generate`, etc.)
+  - This caused `TargetCache` struct to have different layouts: library included `tria_k_pre_rope` field, but test code didn't, leading to garbage reads
+  - Added `DFLASH27B_TRIATTENTION_ENABLED=1` to test_dflash, test_generate, smoke_target_forward, smoke_laguna_forward, bench_laguna_ttft, bench_laguna_pflash, bench_laguna_generate
+  - Added `deps/llama.cpp/triattention` to `DFLASH27B_SRC_INCLUDE_DIRS` when TriAttention is enabled (needed for test executables to find `triattention.h`)
+  - Reduced debug log verbosity in qwen35_target_graph.cpp and graph_builders.cpp (once-per-run instead of per-call)
+- **Verification results**:
+  - `[TriAttention] build_full_attn_block tria_k_pre_rope=0x41523be0 data=0xd8f72ba2000 ne=[256,4096,4]` - valid heap address throughout
+  - test_dflash e2e inference: 20 tokens generated, 6 draft steps, 30/96 accepted (31.2% per step)
+  - Output decodable (valid token IDs)
+- **Files changed**:
+  - `dflash/CMakeLists.txt` - added DFLASH27B_TRIATTENTION_ENABLED to test executables, added triattention include dir
+  - `dflash/src/qwen35/qwen35_target_graph.cpp` - reduced log verbosity
+  - `dflash/src/qwen35/graph_builders.cpp` - reduced log verbosity
+- **Learnings**:
+  - **Root cause of tria_k_pre_rope corruption was a CMake issue, not a HIP/ABI bug**: conditional compile flags on shared structs between library and consumers must match
+  - When a struct has `#if defined()` guards, both producer and consumer must see the same defines
+  - The previous hypothesis of "HIP compiler ABI issue" was incorrect; it was a straightforward struct layout mismatch
 ---
 
+## [2026-05-20] - lucebox-hub-gfx1151-ibu
+- **What was implemented**:
+  - Verified that `dflash/models/Qwen3.6-27B-Q4_K_M.gguf` symlink is valid and points to `/mnt/eaget-4tb/modelscope_models/unsloth/Qwen3___6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf`
+  - Verified target file exists (16 GB) and is readable
+  - Verified draft model `dflash/models/draft/dflash-draft-3.6-q8_0.gguf` exists (1.7 GB)
+  - Verified `test_dflash` binary exists
+  - All acceptance criteria satisfied - no code changes needed
+- **Files changed**: None
+- **Learnings**:
+  - The symlink was already correctly configured pointing to `/mnt/eaget-4tb/modelscope_models/unsloth/Qwen3___6-27B-GGUF/` (with dash, not underscore between 6 and 27)
+  - The target directory on this system is at `/mnt/eaget-4tb/` (different from the originally expected `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/modelscope_models/`)

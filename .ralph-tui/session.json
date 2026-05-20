@@ -3,10 +3,10 @@
   "sessionId": "78c6e87e-1f5e-4f1c-a842-6a67f277acbc",
   "status": "running",
   "startedAt": "2026-05-19T03:33:13.984Z",
-  "updatedAt": "2026-05-19T19:34:43.842Z",
-  "currentIteration": 16,
+  "updatedAt": "2026-05-20T04:54:55.274Z",
+  "currentIteration": 21,
   "maxIterations": 50,
-  "tasksCompleted": 8,
+  "tasksCompleted": 11,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -536,6 +536,56 @@
       "durationMs": 412866,
       "startedAt": "2026-05-19T17:53:40.614Z",
       "endedAt": "2026-05-19T18:00:33.480Z"
+    },
+    {
+      "iteration": 17,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-2ok",
+      "taskTitle": "fix: TargetCache struct copy causes tria_k_pre_rope pointer corruption",
+      "taskCompleted": true,
+      "durationMs": 5582889,
+      "startedAt": "2026-05-19T18:01:40.939Z",
+      "endedAt": "2026-05-19T19:34:43.828Z"
+    },
+    {
+      "iteration": 18,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-1ks",
+      "taskTitle": "investigate: tria_k_pre_rope pointer corrupted to stack address in build_qwen35_graph",
+      "taskCompleted": false,
+      "durationMs": 171500,
+      "startedAt": "2026-05-19T19:34:46.263Z",
+      "endedAt": "2026-05-19T19:37:37.763Z"
+    },
+    {
+      "iteration": 19,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-998",
+      "taskTitle": "investigate: add debug logs to trace tria_k_pre_rope corruption point",
+      "taskCompleted": true,
+      "durationMs": 429341,
+      "startedAt": "2026-05-20T01:39:28.628Z",
+      "endedAt": "2026-05-20T01:46:37.969Z"
+    },
+    {
+      "iteration": 20,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-vnt",
+      "taskTitle": "test: verify tria_k_pre_rope corruption fix with e2e inference",
+      "taskCompleted": false,
+      "durationMs": 3027627,
+      "startedAt": "2026-05-20T01:46:40.307Z",
+      "endedAt": "2026-05-20T02:37:07.934Z"
+    },
+    {
+      "iteration": 21,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-ibu",
+      "taskTitle": "fix: Qwen3.6-27B-Q4_K_M.gguf symlink target file missing",
+      "taskCompleted": true,
+      "durationMs": 288365,
+      "startedAt": "2026-05-20T03:21:35.558Z",
+      "endedAt": "2026-05-20T03:26:23.923Z"
     }
   ],
   "skippedTaskIds": [],
@@ -548,7 +598,9 @@
     "lucebox-hub-gfx1151-k3z",
     "lucebox-hub-gfx1151-baq",
     "lucebox-hub-gfx1151-j90",
-    "lucebox-hub-gfx1151-a62"
+    "lucebox-hub-gfx1151-a62",
+    "lucebox-hub-gfx1151-1ks",
+    "lucebox-hub-gfx1151-vnt"
   ],
   "subagentPanelVisible": false
 }

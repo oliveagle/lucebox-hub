@@ -294,6 +294,11 @@ bool create_target_cache_partial(const TargetWeights & w,
         }
     }
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    fprintf(stderr, "[TriAttention] create_target_cache RETURN: cache=%p tria_k_pre_rope=%p data=%p\n",
+            (void*)&out, (void*)out.tria_k_pre_rope,
+            out.tria_k_pre_rope ? out.tria_k_pre_rope->data : nullptr);
+#endif
     return true;
 }
 
@@ -497,6 +502,17 @@ static ggml_tensor * build_full_attn_block(
     const int n_head = w.n_head;
     const int n_head_kv = w.n_head_kv;
     const int q_dim = head_dim * n_head;
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    static bool logged_entry = false;
+    if (!logged_entry && n_tokens == 3) {
+        logged_entry = true;
+        fprintf(stderr, "[TriAttention] build_full_attn_block ENTRY: cache=%p tria_k_pre_rope=%p data=%p n_tokens=%d\n",
+                (void*)cache, cache ? (void*)cache->tria_k_pre_rope : nullptr,
+                (cache && cache->tria_k_pre_rope) ? cache->tria_k_pre_rope->data : nullptr,
+                n_tokens);
+    }
+#endif
     // ── Q projection (packed Q || gate), shape [2*q_dim, n_tokens]
     ggml_tensor * QG = apply_scale2(ctx, ggml_mul_mat(ctx, L.wq, cur), L.wq_s);
     // Reshape to [head_dim*2, n_head, n_tokens] so we can view the Q and gate halves
@@ -544,9 +560,13 @@ static ggml_tensor * build_full_attn_block(
 #if defined(DFLASH27B_TRIATTENTION_ENABLED)
     ggml_tensor * tria_k_pre_rope = cache ? cache->tria_k_pre_rope : nullptr;
     if (tria_k_pre_rope && tria_k_pre_rope->data) {
-        fprintf(stderr, "[TriAttention] build_full_attn_block tria_k_pre_rope=%p data=%p ne=[%zu,%zu,%zu]\n",
-                (void*)tria_k_pre_rope, tria_k_pre_rope->data,
-                tria_k_pre_rope->ne[0], tria_k_pre_rope->ne[1], tria_k_pre_rope->ne[2]);
+        static bool logged_once = false;
+        if (!logged_once) {
+            logged_once = true;
+            fprintf(stderr, "[TriAttention] build_full_attn_block tria_k_pre_rope=%p data=%p ne=[%zu,%zu,%zu]\n",
+                    (void*)tria_k_pre_rope, tria_k_pre_rope->data,
+                    tria_k_pre_rope->ne[0], tria_k_pre_rope->ne[1], tria_k_pre_rope->ne[2]);
+        }
         ggml_tensor * Kpre_T = ggml_permute(ctx, Kcur, 0, 2, 1, 3);
         const size_t elt_sz   = ggml_element_size(tria_k_pre_rope);
         const size_t blck_sz  = (size_t)ggml_blck_size(tria_k_pre_rope->type);
@@ -1086,11 +1106,12 @@ QwenGraphOutputs build_qwen35_graph(
     const int n_tokens = in.n_tokens;
 
 #if defined(DFLASH27B_TRIATTENTION_ENABLED)
-    static bool logged = false;
-    if (!logged) {
-        fprintf(stderr, "[TriAttention] build_qwen35_graph cache.tria_k_pre_rope=%p\n",
-                (void*)cache.tria_k_pre_rope);
-        logged = true;
+    static bool logged_qwen = false;
+    if (!logged_qwen && n_tokens == 3) {
+        logged_qwen = true;
+        fprintf(stderr, "[TriAttention] build_qwen35_graph ENTRY: cache=%p tria_k_pre_rope=%p data=%p\n",
+                (void*)&cache, (void*)cache.tria_k_pre_rope,
+                cache.tria_k_pre_rope ? cache.tria_k_pre_rope->data : nullptr);
     }
 #endif
 

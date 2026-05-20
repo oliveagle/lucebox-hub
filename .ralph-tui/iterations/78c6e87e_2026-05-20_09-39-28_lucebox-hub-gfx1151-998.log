@@ -1,0 +1,184 @@
+# Iteration 19 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-998
+- **Task Title**: investigate: add debug logs to trace tria_k_pre_rope corruption point
+- **Description**: ## 问题
+
+`cache.tria_k_pre_rope` 在 `create_target_cache()` 后变为栈地址。
+
+## 证据
+
+```
+[TriAttention] tria_k_pre_rope created ne=[256,4096,4]  (在 create_target_cache 内部)
+[TriAttention] base_buf=0x106743a0 tria_...
+- **Status**: completed
+- **Task Completed**: Yes
+- **Promise Detected**: Yes
+- **Started At**: 2026-05-20T01:39:28.628Z
+- **Ended At**: 2026-05-20T01:46:37.969Z
+- **Duration**: 7m 9s
+- **Input Tokens**: 2264783
+- **Output Tokens**: 18863
+- **Total Tokens**: 2448385
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+Let me explore the codebase to find the relevant files for adding debug logs.
+
+[94m[Agent][0m Find tria_k_pre_rope related code
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mtria_k_pre_rope[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mcreate_target_cache[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mbuild_target_step[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mbuild_qwen35_graph[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mbuild_full_attn_block[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/internal.h[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/graph_builders.h[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/graph_builders.cpp[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mstruct TargetCache[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mqwen35_target_graph[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mstruct StepGraph[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mQwenGraphInputs[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mQwenGraphOutputs[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/internal.h[0m pattern: [96mstruct TargetCache[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/graph_builders.h[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/common/step_graph.h[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/triattention_runner.h[0m
+Let me read the exact code at each location where I need to add debug logs.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m
+<think>Now I need to look at `build_target_step` in graph_builders.cpp and the `build_qwen35_graph` call to understand the flow. Let me also check how cache is passed to `build_full_attn_block`.
+
+Looking at the code, I can see:
+1. `create_target_cache` returns successfully with `out.tria_k_pre_rope` as a valid pointer (line 199-204, 221-223)
+2. `build_qwen35_graph` has a log at line 1091-1094 showing `cache.tria_k_pre_rope` as a stack address
+3. `build_full_attn_block` accesses `cache->tria_k_pre_rope` at line 545
+
+The key insight is that in `build_full_attn_block` at line 545:
+```cpp
+ggml_tensor * tria_k_pre_rope = cache ? cache->tria_k_pre_rope : nullptr;
+```
+
+And then the call site at line 1020 passes `&cache`:
+```cpp
+cur = build_full_attn_block(ctx, gf, w, L, cur, positions, w.rope_sections,
+                            cache.attn_k[fa_idx], cache.attn_v[fa_idx],
+                            attn_mask, kv_start, n_tokens,
+                            cache.kv_k_type, cache.kv_v_type,
+                            cache.kv_k_rotated,
+                            fa_window,
+                            q_tail_capture, q_tail_start,
+                            &cache);
+```
+
+And at line 1136:
+```cpp
+cur = build_full_attn_block(ctx, gf, w, L, cur, in.positions, w.rope_sections,
+                            cache.attn_k[fa_idx], cache.attn_v[fa_idx],
+                            in.attn_mask, in.kv_start, n_tokens,
+                            cache.kv_k_type, cache.kv_v_type,
+                            cache.kv_k_rotated,
+                            in.fa_window,
+                            /*q_tail_capture*/ nullptr, 0,
+                            &cache);
+```
+
+Both call sites pass `&cache` to `build_full_attn_block`. I need to examine `build_target_step` to see how `cache` is initialized and whether there's something happening at that layer that's causing the corruption.
+
+Looking at the provided evidence:
+- `tria_k_pre_rope` is created correctly in `create_target_cache` with proper device address
+- But later in `build_qwen35_graph`, it shows a stack address instead
+
+This points to a use-after-free or buffer overflow scenario. I should add logging at the key points: right after `create_target_cache` returns, at the entry of `build_target_step`, `build_qwen35_graph`, and `build_full_attn_block` to pinpoint where the corruption occurs.</think>
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/graph_builders.cpp[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/graph_builders.h[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/internal.h[0m
+Now I understand the code flow. Let me add debug logs at the requested locations to trace where `tria_k_pre_rope` gets corrupted.
+
+The key places to add logs:
+1. `create_target_cache()` - before returning (line 297)
+2. `build_target_step()` - entry point (line 84)
+3. `build_qwen35_graph()` - entry point (line 1079)
+4. `build_full_attn_block()` - entry point (line 476)
+
+Let me add these logs:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "    }
+
+    return true;
+}" → "    }
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)..."
+
+[91m[Error: <tool_use_error>Found 2 matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.
+String:     }
+
+    return true;
+}</tool_use_error>][0m
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "        }
+    }
+
+    return true;
+}
+
+void free_tar..." → "        }
+    }
+
+#if defined(DFLASH27B_TRIATTENTIO..."
+Now add log at `build_target_step` entry:
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/graph_builders.cpp[0m edit: "bool build_target_step(
+    StepGraph & sg,
+    co..." → "bool build_target_step(
+    StepGraph & sg,
+    co..."
+Now add log at `build_qwen35_graph` entry. There's already a `static bool logged` guard that only prints once. I'll add a permanent entry log:
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "QwenGraphOutputs build_qwen35_graph(
+    ggml_cont..." → "QwenGraphOutputs build_qwen35_graph(
+    ggml_cont..."
+Now I need to add a permanent log at `build_full_attn_block` entry. The existing log at line 547 only prints when `tria_k_pre_rope && tria_k_pre_rope->data` is true. I need one that always prints to see the corruption:
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m edit: "    const int head_dim = w.n_embd_head_k;
+    cons..." → "    const int head_dim = w.n_embd_head_k;
+    cons..."
+Now let me compile to verify the changes work:
+[94m[Bash][0m Compile test_dflash to verify changes $ cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build && cmake --build . --target test_...
+Good, compilation succeeded. Let me verify the edits look correct:
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35[0m pattern: [96m\[TriAttention\].*ENTRY|[TriAttention].*RETURN|build_qwen35_graph.*tria_k_pre_rope[0m
+Now let me update the progress.md file:
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+Now let me append the progress entry:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "## [2026-05-20] - lucebox-hub-gfx1151-a62
+- **What..." → "## [2026-05-20] - lucebox-hub-gfx1151-a62
+- **What..."
+Now let me close the bead:
+[94m[Bash][0m Close bead after implementing debug logs $ br close lucebox-hub-gfx1151-998 --reason "Added debug logs at create_target_cache, build_target_ste...
+<think>Now let me flush the tracker state.
+</think>
+
+[94m[Bash][0m Flush tracker state to JSONL $ cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151 && br sync --flush-only
+The implementation is complete. Summary:
+
+**Implemented:**
+- Added debug logs at 4 key points to trace `tria_k_pre_rope` pointer corruption:
+  1. `create_target_cache()` - before returning (line 298)
+  2. `build_target_step()` - entry point (line 98 in graph_builders.cpp)
+  3. `build_qwen35_graph()` - entry point (line 1101)
+  4. `build_full_attn_block()` - entry point (line 507)
+
+**Each log prints:**
+- `cache` address
+- `cache.tria_k_pre_rope` pointer value
+- `(cache.tria_k_pre_rope)->data` value
+
+This will pinpoint exactly where the pointer changes from a valid heap address to a stack address.
+
+<promise>COMPLETE</promise>

@@ -1,0 +1,69 @@
+# Iteration 18 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-1ks
+- **Task Title**: investigate: tria_k_pre_rope pointer corrupted to stack address in build_qwen35_graph
+- **Description**: ## 问题
+
+`cache.tria_k_pre_rope` 在 `build_qwen35_graph()` 中被损坏为栈地址 `0x7fff...`。
+
+## 证据
+
+```
+[TriAttention] base_buf=0x106743a0 tria_k_pre_rope=0x106c5960 data=0xcbd021a2000
+[TriAttention] build_qwen35_g...
+- **Status**: completed
+- **Task Completed**: No
+- **Promise Detected**: No
+- **Started At**: 2026-05-19T19:34:46.263Z
+- **Ended At**: 2026-05-19T19:37:37.763Z
+- **Duration**: 2m 51s
+- **Input Tokens**: 1389754
+- **Output Tokens**: 9599
+- **Total Tokens**: 1399353
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mtria_k_pre_rope[0m
+Looking at the progress log, I can see this issue was already fixed in task `lucebox-hub-gfx1151-j90`. The fix was to access `tria_k_pre_rope` directly from the cache struct instead of passing it as a parameter. Let me verify the current state of the code.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp[0m
+I can see the fix from `lucebox-hub-gfx1151-j90` is already implemented in the code. The `tria_k_pre_rope` corruption was resolved by:
+
+1. Adding `const TargetCache * cache` parameter to `build_full_attn_block()` (line 495)
+2. Accessing `tria_k_pre_rope` directly from the cache struct instead of passing as a parameter (line 545)
+3. Call sites pass `&cache` (lines 1020, 1136)
+
+Let me verify this compiles and runs correctly.
+
+[94m[Bash][0m Build test_dflash to verify compilation $ cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build && cmake --build . --target test_...
+[94m[Bash][0m Run test_dflash with TriAttention to verify no pointer corruption $ python3 -c " import struct tokens = [151644, 872, 570] with open('/tmp/test_prompt.bin', 'wb') as f:...
+The issue is STILL present despite the previous "fix"! The pointer `0x18ab3d20` at allocation becomes `0x7fff924e0a70` (stack address) in `build_qwen35_graph`. The `ne` dimensions are garbage values too.
+
+Let me investigate deeper - the corruption happens even when accessing `cache.tria_k_pre_rope` directly from the reference, not just as a parameter.
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src[0m pattern: [96mmigrate_prefill_cache[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src[0m pattern: [96mTargetCache[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_backend.cpp[0m
+Let me look at how `test_dflash` uses the cache and how `build_target_step` passes it.
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/graph_builders.h[0m pattern: [96mbuild_target_step[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src[0m pattern: [96mbuild_target_step\([0m
+
+[91m[Error: <tool_use_error>Path does not exist: /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/graph_builders.h. Note: your current working directory is /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build.</tool_use_error>][0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash[0m pattern: [96mbuild_target_step[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash[0m pattern: [96mbuild_target_step[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/graph_builders.h[0m
+Looking at the flow, the corruption happens in `migrate_prefill_cache()`. Let me trace the exact sequence.
+
+The `cache` object has `base_ctx` which contains `tria_k_pre_rope`, but `migrate_prefill_cache()` creates a new `rollback_ctx` and allocates new tensors. Let me check if there's a memory overlap or tensor descriptor corruption issue.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/internal.h[0m
+Let me look at the test_dflash source to trace the cache lifecycle.
+
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash[0m pattern: [96m**/test_dflash*[0m
+Let me look at test_dflash.cpp to understand how the cache flows through the call chain.

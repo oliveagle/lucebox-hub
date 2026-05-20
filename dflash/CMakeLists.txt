@@ -210,6 +210,12 @@ set(DFLASH27B_SRC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gemma4
 )
 
+# Add TriAttention include directory when enabled
+if(DFLASH27B_TRIATTENTION)
+    list(APPEND DFLASH27B_SRC_INCLUDE_DIRS
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/triattention)
+endif()
+
 add_library(dflash27b STATIC
     src/errors.cpp
     src/qwen35/gguf_target_loader.cpp
@@ -262,6 +268,9 @@ if(DFLASH27B_TRIATTENTION)
     target_compile_definitions(dflash27b PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
     target_link_libraries(dflash27b PRIVATE triattention)
 endif()
+
+# TriAttention also needs to be defined on test executables so that
+# TargetCache struct layout matches (tria_k_pre_rope field offset).
 
 # BSA (Block-Sparse Attention) backs the speculative-prefill drafter scoring
 # path. Default ON so prefill is fast out of the box. Turn OFF if you don't
@@ -560,21 +569,33 @@ if(DFLASH27B_TESTS)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/smoke_laguna_forward.cpp")
         add_executable(smoke_laguna_forward test/smoke_laguna_forward.cpp)
         target_include_directories(smoke_laguna_forward PRIVATE ${DFLASH27B_SRC_INCLUDE_DIRS})
+        if(DFLASH27B_TRIATTENTION)
+            target_compile_definitions(smoke_laguna_forward PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
+        endif()
         target_link_libraries(smoke_laguna_forward PRIVATE dflash27b ggml ggml-cuda)
     endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/bench_laguna_ttft.cpp")
         add_executable(bench_laguna_ttft test/bench_laguna_ttft.cpp)
         target_include_directories(bench_laguna_ttft PRIVATE ${DFLASH27B_SRC_INCLUDE_DIRS})
+        if(DFLASH27B_TRIATTENTION)
+            target_compile_definitions(bench_laguna_ttft PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
+        endif()
         target_link_libraries(bench_laguna_ttft PRIVATE dflash27b ggml ggml-cuda)
     endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/bench_laguna_pflash.cpp")
         add_executable(bench_laguna_pflash test/bench_laguna_pflash.cpp)
         target_include_directories(bench_laguna_pflash PRIVATE ${DFLASH27B_SRC_INCLUDE_DIRS})
+        if(DFLASH27B_TRIATTENTION)
+            target_compile_definitions(bench_laguna_pflash PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
+        endif()
         target_link_libraries(bench_laguna_pflash PRIVATE dflash27b ggml ggml-cuda)
     endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/bench_laguna_generate.cpp")
         add_executable(bench_laguna_generate test/bench_laguna_generate.cpp)
         target_include_directories(bench_laguna_generate PRIVATE ${DFLASH27B_SRC_INCLUDE_DIRS})
+        if(DFLASH27B_TRIATTENTION)
+            target_compile_definitions(bench_laguna_generate PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
+        endif()
         target_link_libraries(bench_laguna_generate PRIVATE dflash27b ggml ggml-cuda)
     endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_laguna_daemon.cpp")
@@ -585,11 +606,17 @@ if(DFLASH27B_TESTS)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/smoke_target_forward.cpp")
         add_executable(smoke_target_forward test/smoke_target_forward.cpp)
         target_include_directories(smoke_target_forward PRIVATE ${DFLASH27B_SRC_INCLUDE_DIRS})
+        if(DFLASH27B_TRIATTENTION)
+            target_compile_definitions(smoke_target_forward PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
+        endif()
         target_link_libraries(smoke_target_forward PRIVATE dflash27b ggml ${DFLASH27B_GGML_BACKEND_TARGET})
     endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_generate.cpp")
         add_executable(test_generate test/test_generate.cpp)
         target_include_directories(test_generate PRIVATE ${DFLASH27B_SRC_INCLUDE_DIRS})
+        if(DFLASH27B_TRIATTENTION)
+            target_compile_definitions(test_generate PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
+        endif()
         target_link_libraries(test_generate PRIVATE dflash27b ggml ${DFLASH27B_GGML_BACKEND_TARGET})
     endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_dflash.cpp")
@@ -601,6 +628,9 @@ if(DFLASH27B_TESTS)
             target_compile_definitions(test_dflash PRIVATE
                 DFLASH27B_BACKEND_CUDA=1
                 DFLASH27B_CUDA_MIN_SM=${_dflash27b_cuda_min_sm})
+        endif()
+        if(DFLASH27B_TRIATTENTION)
+            target_compile_definitions(test_dflash PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
         endif()
         target_link_libraries(test_dflash PRIVATE dflash27b ggml ${DFLASH27B_GGML_BACKEND_TARGET})
         # test_dflash uses cuda*/hip* runtime calls directly for fast rollback,

@@ -94,6 +94,15 @@ bool build_target_step(
     int fa_window,
     bool last_token_logits_only,
     int kq_stride_pad) {
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    static bool logged_step = false;
+    if (!logged_step) {
+        logged_step = true;
+        fprintf(stderr, "[TriAttention] build_target_step ENTRY: cache=%p tria_k_pre_rope=%p data=%p\n",
+                (void*)&cache, (void*)cache.tria_k_pre_rope,
+                cache.tria_k_pre_rope ? cache.tria_k_pre_rope->data : nullptr);
+    }
+#endif
     step_graph_free(sg);
 
     ggml_init_params ip{};
