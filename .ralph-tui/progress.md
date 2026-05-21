@@ -319,3 +319,21 @@ When adding debug logging to diagnose hangs in initialization/load paths:
   - 后续工作需要先解决 gfx1151 hang 问题
 
 ---
+
+## 2026-05-22 - lucebox-hub-gfx1151-k67
+- **Task**: [优化] 移除 tensor 分配时的逐张 cudaMemset 调用
+- **Status**: 代码修改完成，构建被预存的 HIP 编译器问题阻塞
+- **What was implemented**:
+  - 移除 `ggml_backend_cuda_buffer_set_tensor()` 中的 [DEBUG] 输出（减少 I/O 压力）
+  - 验证 `ggml_backend_cuda_buffer_init_tensor()` 中的 cudaMemset 跳过逻辑已存在（lines 667-672）
+- **Files changed**:
+  - `/dflash/deps/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu`:
+    - Lines 688-691: Removed fprintf(stderr, "[DEBUG] set_tensor:...") calls
+    - Lines 667-672: Confirmed existing cudaMemset skip logic for quantized tensors
+- **BLOCKED**: 构建失败，原因是预存的 HIP 编译器错误（mmf-instance-ncols 模板文件的 `Invalid dpp_ctrl value: wavefront shifts are not supported on GFX10+`）
+- **Learnings**:
+  - cudaMemset 跳过逻辑已在之前实现（条件：`ggml_is_quantized(tensor->type)` 且 `tensor->view_src == nullptr`）
+  - [DEBUG] 输出已移除，减少 I/O 压力
+  - 完整验证需要先解决 HIP 编译器问题
+
+---

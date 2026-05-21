@@ -1,0 +1,75 @@
+# Iteration 12 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-tq7
+- **Task Title**: [总结] HIP/ROCm 平台 TriAttention 验证状态 - 20260521
+- **Description**: ## 状态总结 (2026-05-21)
+
+### ✅ 已完成
+1. TriAttention 代码集成完成
+2. GGML HIP 初始化成功
+3. 模型加载到 220/850 tensors
+
+### 🔴 当前阻塞
+**HIP/ROCm 平台 hang 问题** - 程序卡在 tensor 分配阶段
+
+### 📊 发现
+1. gfx1151 有已知 hang 问题 (GGML 已有特殊处理...
+- **Status**: completed
+- **Task Completed**: Yes
+- **Promise Detected**: Yes
+- **Started At**: 2026-05-21T15:54:32.570Z
+- **Ended At**: 2026-05-21T15:55:58.214Z
+- **Duration**: 1m 25s
+- **Input Tokens**: 199524
+- **Output Tokens**: 2797
+- **Total Tokens**: 202321
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+Let me start by reading the current progress and understanding the task context.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.beads/issues.jsonl[0m
+Let me understand the task. This is a summary bead (lucebox-hub-gfx1151-tq7) for TriAttention verification status on HIP/ROCm platform. Based on the progress.md and beads, I can see:
+
+1. **Completed**: 
+   - TriAttention code integration
+   - GGML HIP initialization 
+   - Model loading reaches 220/850 tensors
+
+2. **Current blocker**: HIP/ROCm hang issue during tensor allocation
+
+3. **Key findings**:
+   - gfx1151 has known hang issues (GGML has special handling)
+   - HIP sync operations still cause hangs
+   - Need to disable HIP Graphs or other optimizations
+
+4. **Related beads**: 8pw (gfx1151 hang), 8mh (HIP kernel compilation), biv (850 tensors allocation), x98 (TriAttention advantage verification)
+
+Looking at the current state:
+- Bead 8pw already added auto-disable of HIP Graphs for gfx1151
+- Bead 8mh confirmed HIP kernels are pre-compiled (not JIT)
+- Bead 3po identified `hipStreamPerThread` as a root cause of hangs
+
+This is a summary bead that needs to document the current status. Let me check if there's anything more to add or if this is already complete.
+
+Looking at the bead description, it's a summary of the current state as of 2026-05-21. The key points are already captured. Let me verify if there are any updates needed based on the latest progress.
+
+From progress.md, the latest entry is 8pw which:
+- Added auto-disable of HIP Graphs for gfx1151 at compile time
+- Added debug logging
+- Created test script
+- Notes that build fails with "Invalid dpp_ctrl value" error (separate pre-existing issue)
+
+The summary bead tq7 appears to be current and captures the state correctly. Let me close this bead and update the progress.</think>This is a summary bead documenting the TriAttention verification status on HIP/ROCm. Let me verify the current state is accurate and close it.
+[94m[Bash][0m Close summary bead tq7 $ br close lucebox-hub-gfx1151-tq7 --reason "Summary completed - documented TriAttention HIP/ROCm stat...
+[94m[Bash][0m Flush tracker state to JSONL $ br sync --flush-only
+Now let me append the summary to progress.md:
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+Now let me append the summary for this bead:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "  3. If hang persists, investigate VMM and mmap'd ..." → "  3. If hang persists, investigate VMM and mmap'd ..."
+<promise>COMPLETE</promise>
