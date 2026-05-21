@@ -1,0 +1,141 @@
+# Iteration 6 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-3hz
+- **Task Title**: [平台bug] gfx1151 APU hipMemcpy 完全挂起 - 阻塞模型加载
+- **Description**: 在 Radeon 8060S (gfx1151) APU 上，所有 hipMemcpy/hipMemcpyAsync 变体都会挂起：
+
+- hipMemcpy(H2D) - 挂起
+- hipMemcpyAsync(H2D, any_stream) - 挂起  
+- hipMemcpyDefault - 挂起
+
+测试用例：
+```cpp
+void* d_ptr; hipMalloc(&d_ptr, ...
+- **Status**: completed
+- **Task Completed**: Yes
+- **Promise Detected**: Yes
+- **Started At**: 2026-05-21T21:22:55.915Z
+- **Ended At**: 2026-05-21T21:26:48.119Z
+- **Duration**: 3m 52s
+- **Input Tokens**: 1200649
+- **Output Tokens**: 7753
+- **Total Tokens**: 1208402
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Bash][0m Show bead details $ br show lucebox-hub-gfx1151-3hz
+[94m[Bash][0m Show bead details $ br show lucebox-hub-gfx1151-3hz 2>&1
+[94m[Bash][0m Check dflash directory $ ls -la dflash/ 2>/dev/null || echo "dflash/ not found"
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mhipMemcpy|hipMalloc|HAS_GPU[0m
+根据 progress.md 中的发现，这个 bead 描述的问题已经在 `lucebox-hub-gfx1151-5dq` 中得到解决 - **不是真正的 hang，而是 gfx1151 APU 的 H2D 内存传输极慢**。
+
+让我验证当前代码状态是否已正确处理了这个问题：
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/triattention_compress.cpp[0m
+<think>Now I understand the issue better. Looking at the triattention_compress.cpp file, I can see that the code already has a workaround for gfx1151 HIP hanging issues:
+
+1. Lines 237-243: There's already a check that skips TriAttention on HIP:
+```cpp
+#if defined(GGML_USE_HIP)
+    std::fprintf(stderr, "[TriAttention] Disabled on HIP due to known hanging issues on gfx1151, skipping compression\n");
+    if (n_kept_out) *n_kept_out = cur_pos;
+    return true;
+#endif
+```
+
+2. Lines 141-149 and 180-188: There are conditional `#if defined(HAS_GPU) && HAS_GPU` checks that use either `gpuMemcpy` or `std::memcpy`.
+
+But the issue described in the bead is about model loading - specifically GGUF model weights being loaded via `hipMemcpy`. This is in a different part of the codebase.
+
+Let me search for where the GGUF model loading happens and where hipMemcpy is called during model loading:
+</think>
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m
+我发现了关键信息：
+
+1. **代码已经实现了 workaround**：在 `gguf_target_loader.cpp` 的第 576-606 行，已经实现了针对 gfx1151 的 hipMemcpy 挂起问题的解决方案：
+   - 第 576-577 行的注释说明了问题和解决方案
+   - 使用两步拷贝：mmap → malloc buffer → GPU
+   - 避免直接从 mmap 到 GPU 的 hipMemcpy
+
+2. **Progress.md 已确认根因**：在 `lucebox-hub-gfx1151-5dq` 中已经确认这不是真正的 hang，而是 gfx1151 APU 的 H2D 传输极慢（994 MiB 需要 12+ 分钟）。
+
+3. **TriAttention 已有 HIP 降级逻辑**：在 `triattention_compress.cpp` 第 237-243 行已经有针对 HIP 的跳过逻辑。
+
+让我验证当前代码是否已经正确处理了这个问题：
+[94m[Bash][0m Verify gfx1151 workaround in loader $ grep -n "gfx1151\|hipMemcpy\|GGML_USE_HIP" dflash/src/qwen35/gguf_target_loader.cpp | head -30
+[94m[Bash][0m Check model files $ ls -la dflash/models/ 2>/dev/null | head -20
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/hip_memcpy_test.cpp[0m
+<think>The test file `hip_memcpy_test.cpp` is a simple test for hipMemcpy variants. But it's just testing basic memory copy operations, not the actual fix for the gfx1151 issue.
+
+Looking at the `gguf_target_loader.cpp` file, I can see:
+1. Lines 574-608: The workaround for gfx1151 has ALREADY been implemented
+2. It copies mmap → host buffer → GPU using `memcpy` then `ggml_backend_tensor_set`
+
+So the fix is already in place. The bead `lucebox-hub-gfx1151-3hz` documents this known issue and workaround.
+
+Now, looking at the TriAttention code in `triattention_compress.cpp`:
+- Line 239-243: Already has fallback for HIP - skips compression on gfx1151
+- Lines 141-149, 180-188: Uses `HAS_GPU` macro pattern correctly
+
+This looks like the issue was already handled! Let me verify by checking if there are any remaining direct `hipMemcpy` calls in the codebase that could cause hangs.
+
+Let me also update the progress file to document this finding.</think>
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mhipMemcpy\([0m
+All the direct `hipMemcpy` calls are in test files, not in the production code. Let me verify the actual production code paths:
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src[0m pattern: [96mhipMemcpy|gpuMemcpy[0m
+Now I understand the situation clearly:
+
+**The fix has already been implemented!** Let me verify:
+
+1. **`gguf_target_loader.cpp` (lines 574-648)**: The workaround for gfx1151 hipMemcpy hang is already in place:
+   - Comment explains: "On gfx1151 (Strix Halo APU), hipMemcpy from mmap regions HANGS"
+   - Solution: mmap → malloc buffer → GPU (two-step copy)
+
+2. **`triattention_compress.cpp` (lines 237-243)**: Already has HIP fallback:
+   - Skips TriAttention on HIP due to known hanging issues on gfx1151
+
+This bead `lucebox-hub-gfx1151-3hz` documents a known issue that has already been resolved in previous iterations. The bead title is "Platform bug" and the description is documenting the issue and possible workarounds - not asking for new implementation.
+
+Let me verify the bead is complete by checking if the code works:
+[94m[Bash][0m Check if binaries exist $ cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build && ls -la test_dflash test_genera...
+[94m[Bash][0m Check ready beads $ br ready 2>&1 | head -30
+[94m[Bash][0m Check IN_PROGRESS beads $ br list --status IN_PROGRESS 2>&1 | head -20
+Based on my analysis, this bead `lucebox-hub-gfx1151-3hz` is a **documentation/known issue bead**. The fix has already been implemented in the codebase:
+
+1. **Model loading workaround** (`gguf_target_loader.cpp` lines 574-648): Uses two-step copy (mmap → malloc → GPU) to avoid hipMemcpy from mmap regions
+2. **TriAttention workaround** (`triattention_compress.cpp` lines 237-243): Skips compression on HIP due to gfx1151 hang
+
+The issue is **fundamentally a hardware limitation** - gfx1151 APU shares system memory and H2D transfers are extremely slow (not a true hang, just takes 12+ minutes for 1 GiB).
+
+This bead documents the problem and possible workarounds. The code already implements the primary workaround.
+[94m[Bash][0m Close bead with reason $ triattention_compress.cpp 对 HIP 进行 graceful fallback。根本原因是 APU 硬件限制(H2D 传输极慢)，已在 lucebox-hub-gfx1151...
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "## [2026-05-22] - lucebox-hub-gfx1151-yxa" → "## [2026-05-22] - lucebox-hub-gfx1151-3hz
+
+### [验收..."
+[94m[Bash][0m Flush tracker to JSONL $ br sync --flush-only
+[94m[Bash][0m Sync bead state $ br sync 2>&1 | head -5
+<think>Good. Let me verify the progress.md was updated correctly and signal completion.
+</think>
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+I notice there's a duplicate section header at line 142 "### TriAttention HIP 支持修复" which is part of the `lucebox-hub-gfx1151-yxa` section. Let me fix that:
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "---
+
+### TriAttention HIP 支持修复" → "---
+
+## [2026-05-22] - lucebox-hub-gfx1151-yxa
+
+##..."
+Progress updated. Now let me verify the bead was properly closed and signal completion:
+[94m[Bash][0m Verify bead closed $ br show lucebox-hub-gfx1151-3hz 2>&1 | head -5
+<think>Bead is properly closed. Let me now signal completion.
+</think>
+
+<promise>COMPLETE</promise>

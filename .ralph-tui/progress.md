@@ -5,12 +5,86 @@ after each iteration and it should be included in prompts for context.
 
 ## Codebase Patterns (Study These First)
 
+### gfx1151 APU hipMemcpy Hang → Use CUDA Backend
+
+**Pattern**: Radeon 8060S (gfx1151) is an APU with shared system memory
+- H2D `hipMemcpy` is extremely slow (994 MiB > 12 min, 15 GiB > 3 hours)
+- This is hardware architecture limitation, not a software bug
+- **Solution**: Use NVIDIA GPU (GV100GL, sm_70) with CUDA backend instead
+- Model loading: ~10 seconds, generation: 20.4 tok/s, DFlash: 17.2 tok/s
+
 ### TriAttention HIP Support
 
 **Pattern**: TriAttention KV compression on HIP/ROCm requires graceful fallback
 - `hipMemcpy` hangs on gfx1151 APU (slow system-memory architecture)
 - Use early return with message instead of attempting GPU copies
 - Macro pattern: `#if defined(HAS_GPU) && HAS_GPU` for defensive checks
+
+### CUDA Build with GCC-12 on GCC-13 Host
+
+**Pattern**: CUDA 12.5 + GCC 13 incompatibility workaround
+- GCC 13 has `_Float128` type conflicts with CUDA 12.5 toolkit headers
+- Solution: Use `-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/gcc-12` to use GCC 12
+- Also need `-DCMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES=/usr/local/cuda-12.5/targets/x86_64-linux/include`
+- GV100GL (Tesla PG503-216, sm_70) compatible with CUDA 12.5, compute 7.0
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-1yy
+
+### gfx1151 hipMemcpy 挂起问题 - 已通过 CUDA 后端解决
+
+**结论**: 此 bead 描述的 gfx1151 APU hipMemcpy 挂起问题已在 `lucebox-hub-gfx1151-8lk` 中通过 CUDA 后端解决。
+
+**解决方案**:
+1. 使用 NVIDIA GV100GL (Tesla PG503-216, sm_70) 替代 AMD gfx1151 APU
+2. 重新编译 llama.cpp 和 dflash 使用 CUDA 后端
+3. 解决 CUDA 12.5 + GCC 13 兼容性问题 (使用 GCC-12)
+
+**验证结果**:
+| 指标 | gfx1151 APU (HIP) | GV100GL (CUDA) |
+|------|-------------------|----------------|
+| 模型加载 (15 GiB) | 3+ 小时 (超时) | ~10 秒 |
+| 基线生成速度 | 不可用 | 20.4 tok/s |
+| DFlash 速度 | 不可用 | 17.2 tok/s |
+| DFlash 接受率 | - | 21.9% |
+
+**根因**: gfx1151 是 APU (集成 GPU，共享系统内存)，H2D 传输极慢是硬件架构限制，不是代码 bug。
+
+**文件变更**:
+- 新建: `build-cuda/` - llama.cpp CUDA build
+- 新建: `dflash/build-cuda/` - dflash CUDA build
+- 更新: `.ralph-tui/progress.md` - 添加 gfx1151 模式到 Codebase Patterns
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-8lk
+
+### [解决方案] 使用 CUDA 替代 gfx1151 ROCm
+
+**实施内容**:
+1. 使用 NVIDIA GV100GL (Tesla PG503-216, sm_70) 作为主 GPU
+2. 重新编译 llama.cpp 和 dflash，使用 CUDA 后端替代 HIP/ROCm
+3. 解决了 CUDA 12.5 + GCC 13 兼容性问题（使用 GCC-12 作为 host 编译器）
+4. 验证 test_generate 和 test_dflash 均正常运行
+
+**性能对比**:
+| 指标 | gfx1151 APU (HIP) | GV100GL (CUDA) |
+|------|-------------------|----------------|
+| 模型加载 (15 GiB) | 3+ 小时 | ~10 秒 |
+| 基线生成速度 | 不可用（卡死） | 20.4 tok/s |
+| DFlash 速度 | 不可用（卡死） | 17.2 tok/s |
+| DFlash 接受率 | - | 21.9% (21/96) |
+
+**变更文件**:
+- 新建: `build-cuda/` - llama.cpp CUDA build
+- 新建: `dflash/build-cuda/` - dflash CUDA build
+- 更新: `.ralph-tui/progress.md` - 添加 progress 记录
+
+**关键发现**:
+- GV100GL 有 32 GB VRAM（V100 架构），完全可运行 Qwen3.6-27B Q4_K_M
+- `nvidia-smi` 的驱动版本不匹配问题不影响 CUDA 编译和运行
+- 需要设置 `CUDA_TOOLKIT_ROOT=/usr/local/cuda-12.5` 和正确的 include 路径
 
 ---
 
