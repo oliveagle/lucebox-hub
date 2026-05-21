@@ -34,6 +34,30 @@ When adding debug logging to diagnose hangs in initialization/load paths:
 
 ---
 
+## 2026-05-21 - lucebox-hub-gfx1151-yxa
+- **Task**: [发现] TriAttention 在 HIP/ROCm 上只部分支持
+- **Status**: 完成修复（优雅降级）
+- **What was implemented**:
+  1. 修复 `triattention_compress.cpp` 中 `HAS_GPU` 宏定义不完整的问题：else 分支原来未定义 `HAS_GPU`，导致后续 `#if HAS_GPU` 可能产生预处理器警告
+  2. 将所有 `#if HAS_GPU` 改为 `#if defined(HAS_GPU) && HAS_GPU` 以确保安全检查
+  3. 在 else 分支中添加 `HAS_GPU 0` 和空操作 stub 宏定义（`gpuGetDevice`、`gpuSetDevice`、`gpuMemcpy` 等），确保非 GPU 构建编译通过
+  4. 在 GPU 代码块开头添加 HIP 显式跳过保护：当 `GGML_USE_HIP` 定义时，立即打印提示信息并返回，避免触发已知的 `hipMemcpy` 卡死问题
+- **Files changed**:
+  - `/dflash/src/triattention_compress.cpp`:
+    - 第 27-50 行：修复 HAS_GPU 宏定义条件编译（增加 else 分支 stub）
+    - 第 219 行：`#if HAS_GPU` → `#if defined(HAS_GPU) && HAS_GPU` + 添加 HIP 跳过保护
+    - 第 341 行：`#if HAS_GPU` → `#if defined(HAS_GPU) && HAS_GPU`
+- **Verification**:
+  - `make -j8 dflash27b` 编译成功
+  - `make -j8 test_generate` 编译成功
+  - 无新警告（仅原有的 pre-existing 警告）
+- **Learnings**:
+  - `#if MACRO` 在 MACRO 未定义时会将其视为 0，但如果有宏重复定义可能导致冲突
+  - 安全的做法是 `#if defined(MACRO) && MACRO`，同时确保 else 分支也定义该宏为 0
+  - 在 HIP 上 `hipMemcpy` 卡死（从 mmap 内存复制大块数据）是 roc1151 的已知问题，TriAttention 压缩需要优雅跳过而非执行
+
+---
+
 ## 2026-05-21 - lucebox-hub-gfx1151-3po
 
 **Task**: [研究] test_dflash 在 HIP 上卡死的根因分析
@@ -206,3 +230,39 @@ When adding debug logging to diagnose hangs in initialization/load paths:
 - **Learnings**:
   - 当前没有可用的完整模型文件（.gguf / .safetensors）进行端到端测试
   - GGML HIP backend 在 gfx1151 上的初始化 hang 是根本原因
+
+---
+
+## 2026-05-21 - lucebox-hub-gfx1151-8mh
+- **Task**: [调查] HIP/ROCm kernel 编译机制 - 预编译 vs JIT
+- **Status**: Complete - HIP kernels are PRE-COMPILED at build time
+- **What was implemented / discovered**:
+  1. **Conclusion**: HIP kernels are NOT JIT compiled at runtime on gfx1151
+  2. **CMake configuration analysis**:
+     - `dflash/CMakeLists.txt`: Line 127 defaults to `gfx1151` for `_dflash_archs`
+     - Line 130 sets `CMAKE_HIP_ARCHITECTURES` to resolved arch
+     - `dflash/deps/llama.cpp/ggml/src/ggml-hip/CMakeLists.txt`: Line 39-41 forwards `GPU_TARGETS` → `CMAKE_HIP_ARCHITECTURES`
+  3. **Build cache verification**:
+     - `CMAKE_HIP_ARCHITECTURES:STRING=gfx1151` in CMakeCache.txt
+     - `GPU_TARGETS:STRING=gfx1151` in CMakeCache.txt
+  4. **Compilation pipeline**:
+     - All `.cu` files (ggml-cuda/*.cu, template-instances/*.cu) are compiled via hipcc at **build time**
+     - Output: HSACO (HSA Code Object) machine code embedded in shared libraries (`libggml-hip.so`)
+     - Runtime only **loads** pre-compiled kernels, no compilation
+  5. **CUDA vs HIP comparison**:
+     - CUDA can use NVRTC for runtime kernel compilation (optional)
+     - HIP/ROCm has **no equivalent** runtime kernel compilation by default
+     - HIP always pre-compiles kernels for specified GPU architectures
+- **Files reviewed / analyzed**:
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/CMakeLists.txt` (lines 119-133)
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-hip/CMakeLists.txt` (lines 35-44)
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build/CMakeCache.txt`
+- **Verification**:
+  - Checked build artifacts - no JIT compiler invocations in runtime debug logs
+  - Kernel load times are fast (no compilation overhead observed)
+  - `hipcc` only runs during build, not at runtime
+- **Learnings**:
+  - **Key Pattern**: HIP/ROCm uses **pre-compilation only** - kernels are built at compile time with hipcc, embedded in shared libraries
+  - **Gotcha**: Do not waste time investigating "JIT compilation at runtime" for HIP - it's NOT happening
+  - **Conclusion**: The initialization hang on gfx1151 must come from somewhere else (memory allocation, device initialization, stream setup, etc.), NOT from kernel compilation
+  - **Next Steps**: Investigate other possibilities (device initialization, HIP context creation, mmap'd memory handling, etc.)

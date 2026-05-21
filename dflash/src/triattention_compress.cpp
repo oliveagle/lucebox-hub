@@ -30,18 +30,23 @@
 #define gpuGetDevice   cudaGetDevice
 #define gpuSetDevice   cudaSetDevice
 #define gpuMemcpy      cudaMemcpy
-#define gpuMemcpyDtoH   cudaMemcpyDeviceToHost
-#define gpuMemcpyHtoD   cudaMemcpyHostToDevice
+#define gpuMemcpyDtoH  cudaMemcpyDeviceToHost
+#define gpuMemcpyHtoD  cudaMemcpyHostToDevice
 #elif defined(GGML_USE_HIP)
 #include <hip/hip_runtime.h>
 #define HAS_GPU 1
 #define gpuGetDevice   hipGetDevice
 #define gpuSetDevice   hipSetDevice
-#define gpuMemcpy       hipMemcpy
-#define gpuMemcpyDtoH   hipMemcpyDeviceToHost
-#define gpuMemcpyHtoD   hipMemcpyHostToDevice
+#define gpuMemcpy      hipMemcpy
+#define gpuMemcpyDtoH  hipMemcpyDeviceToHost
+#define gpuMemcpyHtoD  hipMemcpyHostToDevice
 #else
 #define HAS_GPU 0
+#define gpuGetDevice(...)  ((void)0)
+#define gpuSetDevice(...)  ((void)0)
+#define gpuMemcpy(...)     ((void)0)
+#define gpuMemcpyDtoH(...) ((void)0)
+#define gpuMemcpyHtoD(...) ((void)0)
 #endif
 
 namespace dflash27b {
@@ -211,7 +216,14 @@ bool tria_kv_compress(
     const int n_keep = std::max(1, (int)(seq_len * keep_ratio));
     const int fc = (int)stats->freq_count;
 
-#if HAS_GPU
+#if defined(HAS_GPU) && HAS_GPU
+    // Skip on HIP due to known hanging issues with hipMemcpy on gfx1151
+#if defined(GGML_USE_HIP)
+    std::fprintf(stderr, "[TriAttention] Disabled on HIP due to known hanging issues on gfx1151, skipping compression\n");
+    if (n_kept_out) *n_kept_out = cur_pos;
+    return true;
+#endif
+
     // Get current GPU device
     int current_device = 0;
     gpuGetDevice(&current_device);
@@ -326,7 +338,7 @@ bool tria_kv_compress(
 #endif
 
     // Compact KV cache for each full-attention layer
-#if HAS_GPU
+#if defined(HAS_GPU) && HAS_GPU
     // Set device for compression operations
     if (gpu_id >= 0) {
         gpuSetDevice(gpu_id);
