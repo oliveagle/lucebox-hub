@@ -213,6 +213,36 @@ This is fundamentally slower than discrete GPU H2D transfers over PCIe.
 
 ---
 
+## [2026-05-22] - lucebox-hub-gfx1151-7ae
+
+### [验证] TriAttention 端到端验证 - 部分完成
+
+**验证结果**: TriAttention 在 CUDA 后端 (NVIDIA GV100GL) 上初始化成功，但在实际压缩时崩溃
+
+**测试结果**:
+
+| 配置 | 速度 (tok/s) | 状态 |
+|------|-------------|------|
+| Baseline (no TriAttention, no DFlash) | 20.22 | ✓ |
+| DFlash (no TriAttention) | 37.88 | ✓ |
+| DFlash + TriAttention (kv=2048, no compression) | 38.26 | ✓ |
+| TriAttention only (kv=512, compression) | crash | ✗ |
+
+**发现**:
+1. TriAttention 初始化成功: stats 加载 (64 layers, 24 heads, head_dim=64)
+2. 当 kv_budget >= context 大小时，compression 不会触发，工作正常
+3. 当 compression 触发时崩溃: `free(): corrupted unsorted chunks`
+   - 根因: stats 文件 (Qwen3.5-27B, head_dim=64) 与模型 (Qwen3.6-27B, head_dim=256) 维度不匹配
+   - 这与 `lucebox-hub-gfx1151-x98` 中发现的问题一致
+
+**结论**: TriAttention 在 CUDA 上可初始化运行，但压缩功能因 stats 维度不匹配而失败
+
+**下一步**:
+- 需要为 Qwen3.6-27B 生成新的 stats 文件 (head_dim=256)
+- 或使用 Qwen3.5-27B 模型进行完整测试
+
+---
+
 ## [2026-05-22] - lucebox-hub-gfx1151-yxa
 
 ### TriAttention HIP 支持修复
