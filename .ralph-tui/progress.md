@@ -20,6 +20,14 @@ When implementing TriAttention KV compression in new inference paths, follow thi
 - `w.n_head_kv`, `w.n_embd_head_k`: Model architecture parameters
 - `g_tria_state.kv_budget`: Target KV budget from env var `TRIATTN_KV_BUDGET`
 
+### Debug Logging Pattern
+When adding debug logging to diagnose hangs in initialization/load paths:
+- Use `[DEBUG]` prefix for all debug messages
+- Use `fprintf(stderr, "[DEBUG] ...")` with `std::fflush(stderr)` immediately after to ensure unbuffered output
+- Log entry and exit points to functions that might hang
+- Include key parameters: device id, buffer offsets, sizes (with human-readable conversion like `(double)size / (1024*1024)` for MB)
+- Include tensor names where available (using `tensor->name` with a safe length limit like `%.16s`)
+
 ---
 
 ## 2026-05-21 - lucebox-hub-gfx1151-3po
@@ -112,6 +120,27 @@ When implementing TriAttention KV compression in new inference paths, follow thi
   - The build system already has `DFLASH27B_TRIATTENTION_ENABLED` compile flag configured
   - `triattention_runner.h` is already included by `internal.h`
   - test_generate is already linked against libdflash27b which includes triattention code
+
+---
+
+## 2026-05-21 - lucebox-hub-gfx1151-95x
+- **Task**: [改进] 添加详细的初始化调试日志
+- **Files changed**:
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu`:
+    - Added `[DEBUG]` logging in `ggml_backend_cuda_init()`: device validation, context creation, backend struct construction
+    - Added `[DEBUG]` logging in `ggml_backend_cuda_buffer_init_tensor()`: tensor name, device, nbytes, view_src
+    - Added `[DEBUG]` logging in `ggml_backend_cuda_buffer_set_tensor()`: tensor name, device, offset, size (with MB conversion), cudaMemcpy entry/exit markers
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_daemon.cpp`:
+    - Added `[DEBUG]` logging at entry, config building, backend creation, backend.init() call and result, daemon loop entry
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp`:
+    - Added `[DEBUG]` logging at main() entry
+- **Verification**:
+  - Build completes successfully (cmake --build . --target test_dflash -j8)
+  - Only pre-existing warnings remain (unused hipError_t return values)
+- **Learnings**:
+  - Actual file locations differ from bead description: `ggml-cuda.cu` (not `.c`) is in `dflash/deps/llama.cpp/ggml/src/ggml-cuda/`
+  - No `qwen35_daemon.cpp` in root `src/`, actual location is `dflash/src/qwen35/qwen35_daemon.cpp`
+  - All debug output uses `fprintf(stderr, "[DEBUG] ...")` with `fflush(stderr)` for unbuffered visibility during hang scenarios
 
 ---
 

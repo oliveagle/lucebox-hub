@@ -643,6 +643,7 @@ static int run_target_layer_split_harness(
 // ─── Main ─────────────────────────────────────────────────────────
 
 int main(int argc, char ** argv) {
+    std::fprintf(stderr, "[DEBUG] test_dflash main(): entering, argc=%d\n", argc); std::fflush(stderr);
     if (argc >= 2 && std::strcmp(argv[1], "--draft-ipc-daemon") == 0) {
         if (argc < 3) {
             std::fprintf(stderr,

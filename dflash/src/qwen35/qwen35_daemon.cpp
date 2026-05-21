@@ -17,9 +17,11 @@
 namespace dflash27b {
 
 int run_qwen35_daemon(const Qwen35DaemonArgs & args) {
+    std::fprintf(stderr, "[DEBUG] run_qwen35_daemon(): entering\n"); std::fflush(stderr);
 #if defined(DFLASH27B_TRIATTENTION_ENABLED)
     // Initialize TriAttention KV compression from environment variables.
     // This loads the stats file and configures compression parameters.
+    std::fprintf(stderr, "[DEBUG] run_qwen35_daemon(): calling init_triattention_from_env()\n"); std::fflush(stderr);
     init_triattention_from_env();
     if (g_tria_state.enabled) {
         std::fprintf(stderr, "[TriAttention] Enabled with stats loaded\n");
@@ -28,6 +30,7 @@ int run_qwen35_daemon(const Qwen35DaemonArgs & args) {
     }
 #endif
 
+    std::fprintf(stderr, "[DEBUG] run_qwen35_daemon(): building config\n"); std::fflush(stderr);
     Qwen35Config cfg;
     cfg.target_path        = args.target_path;
     cfg.draft_path         = args.draft_path;
@@ -46,14 +49,21 @@ int run_qwen35_daemon(const Qwen35DaemonArgs & args) {
     cfg.ddtree_chain_seed  = args.ddtree_chain_seed;
     cfg.use_feature_mirror = args.use_feature_mirror;
 
+    std::fprintf(stderr, "[DEBUG] run_qwen35_daemon(): creating Qwen35Backend\n"); std::fflush(stderr);
     Qwen35Backend backend(cfg);
-    if (!backend.init()) return 1;
+    std::fprintf(stderr, "[DEBUG] run_qwen35_daemon(): calling backend.init()\n"); std::fflush(stderr);
+    if (!backend.init()) {
+        std::fprintf(stderr, "[DEBUG] run_qwen35_daemon(): backend.init() FAILED\n"); std::fflush(stderr);
+        return 1;
+    }
+    std::fprintf(stderr, "[DEBUG] run_qwen35_daemon(): backend.init() OK\n"); std::fflush(stderr);
 
     DaemonLoopArgs dargs;
     dargs.stream_fd = args.stream_fd;
     dargs.chunk     = args.chunk;
     dargs.max_ctx   = args.device.max_ctx;
 
+    std::fprintf(stderr, "[DEBUG] run_qwen35_daemon(): entering daemon loop\n"); std::fflush(stderr);
     return run_daemon(backend, dargs);
 }
 
