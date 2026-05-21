@@ -1,0 +1,144 @@
+# Iteration 10 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-8mh
+- **Task Title**: [调查] HIP/ROCm kernel 编译机制 - 预编译 vs JIT
+- **Description**: ## 问题
+
+HIP/ROCm 上的 GGML kernel 是 JIT 编译还是在编译时预编译？
+
+## 当前状态
+
+测试显示每个 tensor 分配都有一个对应的调试输出：
+```
+[DEBUG] ggml_backend_cuda_buffer_init_tensor(): tensor=0x... name=blk.16.ffn_up.we device=0 nbytes=50135040...
+- **Status**: completed
+- **Task Completed**: Yes
+- **Promise Detected**: Yes
+- **Started At**: 2026-05-21T15:34:30.572Z
+- **Ended At**: 2026-05-21T15:40:34.169Z
+- **Duration**: 6m 3s
+- **Input Tokens**: 1715818
+- **Output Tokens**: 11452
+- **Total Tokens**: 1727270
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/CMakeLists.txt[0m
+
+[91m[Error: File does not exist. Note: your current working directory is /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151.][0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server[0m pattern: [96m**/CMakeLists.txt[0m
+让我查看项目结构和相关文件来了解 HIP 编译机制。
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96m**/*.txt[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96m**/CMakeLists.txt[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+<think>Let me look at the main CMakeLists.txt in the lucebox-hub-gfx1151 project directory.
+</think>
+
+[94m[Bash][0m List root directory contents $ ls -la /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/CMakeLists.txt[0m
+
+[91m[Error: File does not exist. Note: your current working directory is /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151.][0m
+让我先探索项目结构，找到 dflash 子模块和相关的构建文件。
+[94m[Bash][0m List dflash directory contents $ ls -la /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+<think>OK, the dflash directory has a CMakeLists.txt. Let me read it and look for HIP-related settings.
+</think>
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/CMakeLists.txt[0m
+Now let me look at the ggml HIP build configuration in the llama.cpp submodule.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/CMakeLists.txt[0m
+Now let me look at the ggml-hip build configuration.
+
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/cmake[0m pattern: [96m**/*hip*[0m
+Let me search for HIP build files in the ggml directory.</think>
+[94m[Bash][0m List ggml src directory contents $ ls -la /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml[0m pattern: [96mAMDGPU_TARGETS|CMAKE_HIP_ARCHITECTURES[0m
+[94m[Bash][0m Find all cmake files in ggml directory $ find /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml -name "*.cmake" -...
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-hip/CMakeLists.txt[0m
+<think>Now I have a clear picture. Let me also check the common.cmake for any HIP-related settings and the ggml-cuda CMakeLists.txt to understand the multi-arch approach.
+</think>
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/cmake[0m pattern: [96mAMDGPU_TARGETS|GPU_TARGETS|CMAKE_HIP_ARCHITECTURES|multi.*arch|HIP_ARCH[0m
+Now let me look at what we have and create a summary and some build insights. First, let me check how the current build is configured.
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build[0m pattern: [96mCMakeCache.txt[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build[0m pattern: [96mAMDGPU_TARGETS|GPU_TARGETS|CMAKE_HIP_ARCHITECTURES|DFLASH27B_HIP_ARCHITECTURES[0m
+Perfect! Now I have a clear understanding of the HIP kernel compilation approach. Let me update the progress document and close this bead.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "### HIP Build Architecture (Pre-compile vs JIT)
+- ..." → "### HIP Build Architecture (Pre-compile vs JIT)
+- ..."
+
+[91m[Error: <tool_use_error>String to replace not found in file.
+String: ### HIP Build Architecture (Pre-compile vs JIT)
+- **结论: HIP kernels are pre-compiled at build time, NOT JIT compiled at runtime**
+- hipcc/clang++ compiles all `.cu` files into HSACO code objects targeting `CMAKE_HIP_ARCHITECTURES` (gfx1151)
+- These are embedded into the shared libraries (`libggml-hip.so`, `libdflash27b.a`)
+- At runtime: only loading of pre-compiled code objects, no compilation
+- Key difference: CUDA can compile kernels at runtime via NVRTC/NVVM; HIP has no equivalent JIT by default
+- The "kernel compilation" at runtime in CUDA is via NVRTC/NVVM; HIP does not use NVVM-like JIT compilation
+- The hang during initialization is therefore NOT caused by runtime kernel compilation
+
+## Learnings:
+- **Pattern discovered:** HIP on ROCm pre-compiles kernels via hipcc at build time for specified `CMAKE_HIP_ARCHITECTURES`
+- **Key files:** `dflash/deps/llama.cpp/ggml/src/ggml-hip/CMakeLists.txt` contains the build configuration
+- **Gotcha:** CUDA can JIT-compile via NVRTC; HIP cannot — all kernels must be pre-compiled
+- **Conclusion:** The initialization hang is NOT caused by JIT kernel compilation on HIP/gfx1151</tool_use_error>][0m
+The file may have been modified since last read. Let me fetch the current version directly.
+
+[94m[Bash][0m Read current progress.md content $ cat /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "- **结论**: The initialization hang is NOT caused by..." → "- **结论**: The initialization hang is NOT caused by..."
+
+[91m[Error: <tool_use_error>String to replace not found in file.
+String: - **结论**: The initialization hang is NOT caused by JIT kernel compilation on HIP/gfx1151</tool_use_error>][0m
+<think>Let me read the progress.md file more carefully to find the exact text I need to append to.
+</think>
+
+[94m[Bash][0m Read last 50 lines of progress.md $ tail -50 /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md
+Now I can append the new entry. Let me do that.</think>
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "- **Learnings**:
+  - 当前没有可用的完整模型文件（.gguf / .safete..." → "- **Learnings**:
+  - 当前没有可用的完整模型文件（.gguf / .safete..."
+Now let me close the bead and signal completion.
+[94m[Bash][0m Close the bead $ br close lucebox-hub-gfx1151-8mh --reason "HIP kernels are pre-compiled at build time (not JIT). Inv...
+[94m[Bash][0m Flush tracker state $ br sync --flush-only
+<think>Bead closed and tracker state flushed. The investigation is complete.
+</think>
+
+调查完成。以下是关键发现：
+
+## 结论：HIP kernels 在编译时预编译，而非运行时 JIT 编译
+
+### 证据
+
+1. **CMake 配置分析**:
+   - `dflash/CMakeLists.txt` 第 127 行：默认设置 `_dflash_archs = "gfx1151"`
+   - 第 130 行：`CMAKE_HIP_ARCHITECTURES` 被设置为该架构
+   - `ggml/src/ggml-hip/CMakeLists.txt` 第 39-41 行：将 `GPU_TARGETS` 转发到 `CMAKE_HIP_ARCHITECTURES`
+
+2. **构建缓存验证**:
+   - `CMAKE_HIP_ARCHITECTURES:STRING=gfx1151`
+   - `GPU_TARGETS:STRING=gfx1151`
+
+3. **编译流程**:
+   - 所有 `.cu` 文件（ggml-cuda/*.cu, template-instances/*.cu）在**构建时**通过 hipcc 编译
+   - 输出：HSACO（ HSA Code Object）机器码嵌入共享库
+   - 运行时仅加载预编译的 kernels，无编译
+
+4. **CUDA vs HIP**:
+   - CUDA 可使用 NVRTC 进行运行时 kernel 编译（可选）
+   - HIP/ROCm **默认没有**运行时 kernel 编译的等效机制
+
+### 结论
+
+gfx1151 上的初始化 hang **不是**由 kernel 编译引起的。必须从其他方面调查（设备初始化、内存分配、HIP context 创建、mmap 内存处理等）。
+
+<promise>COMPLETE</promise>

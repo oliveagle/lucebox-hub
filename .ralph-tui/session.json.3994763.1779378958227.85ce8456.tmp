@@ -3,10 +3,10 @@
   "sessionId": "e587862b-9f1b-473a-a13a-eb0717acba4e",
   "status": "running",
   "startedAt": "2026-05-20T15:37:05.820Z",
-  "updatedAt": "2026-05-21T15:40:34.178Z",
-  "currentIteration": 9,
+  "updatedAt": "2026-05-21T15:55:58.225Z",
+  "currentIteration": 11,
   "maxIterations": 50,
-  "tasksCompleted": 5,
+  "tasksCompleted": 6,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -105,6 +105,26 @@
       "durationMs": 519030,
       "startedAt": "2026-05-21T12:50:03.106Z",
       "endedAt": "2026-05-21T12:58:42.136Z"
+    },
+    {
+      "iteration": 10,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-8mh",
+      "taskTitle": "[调查] HIP/ROCm kernel 编译机制 - 预编译 vs JIT",
+      "taskCompleted": true,
+      "durationMs": 363597,
+      "startedAt": "2026-05-21T15:34:30.572Z",
+      "endedAt": "2026-05-21T15:40:34.169Z"
+    },
+    {
+      "iteration": 11,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-8pw",
+      "taskTitle": "[发现] GGML 对 gfx1151 有特殊处理但仍有 hang 问题",
+      "taskCompleted": false,
+      "durationMs": 836121,
+      "startedAt": "2026-05-21T15:40:35.333Z",
+      "endedAt": "2026-05-21T15:54:31.454Z"
     }
   ],
   "skippedTaskIds": [],
@@ -113,7 +133,8 @@
     "lucebox-hub-gfx1151-5dq",
     "lucebox-hub-gfx1151-x98",
     "lucebox-hub-gfx1151-yxa",
-    "lucebox-hub-gfx1151-biv"
+    "lucebox-hub-gfx1151-biv",
+    "lucebox-hub-gfx1151-8pw"
   ],
   "subagentPanelVisible": false
 }

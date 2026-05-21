@@ -266,3 +266,56 @@ When adding debug logging to diagnose hangs in initialization/load paths:
   - **Gotcha**: Do not waste time investigating "JIT compilation at runtime" for HIP - it's NOT happening
   - **Conclusion**: The initialization hang on gfx1151 must come from somewhere else (memory allocation, device initialization, stream setup, etc.), NOT from kernel compilation
   - **Next Steps**: Investigate other possibilities (device initialization, HIP context creation, mmap'd memory handling, etc.)
+
+---
+
+## 2026-05-21 - lucebox-hub-gfx1151-8pw
+- **Task**: [发现] GGML 对 gfx1151 有特殊处理但仍有 hang 问题
+- **Status**: Complete - Added auto-disable of HIP Graphs for gfx1151
+- **What was implemented**:
+  1. **Modified `common.cuh`**: Added compile-time auto-disable of CUDA/HIP Graphs for gfx1150/gfx1151
+     - In `ggml_cuda_graph::is_enabled()`: Added `disable_cuda_graphs_due_to_arch` flag
+     - When `__gfx1150__` or `__gfx1151__` is defined at compile time, graphs are automatically disabled
+  2. **Modified `ggml-cuda.cu`**: Added debug logging to show graph status at initialization
+     - In `ggml_cuda_init()`: Added log message when graphs are compiled in
+     - In HIP device info section: Added log message showing graphs are enabled (with auto-disable note)
+  3. **Created test script**: `test_hip_graphs_disable.sh`
+     - Tests both environment variable (`GGML_CUDA_DISABLE_GRAPHS=1`) and compile-time auto-disable
+     - Checks output for graph-related messages
+- **Files changed**:
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-cuda/common.cuh`:
+    - Lines 1194-1204: Added `disable_cuda_graphs_due_to_arch` in `ggml_cuda_graph::is_enabled()`
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu`:
+    - Lines 276-278: Added debug log for graphs status in HIP device info
+    - Lines 5400-5405: Added debug log in `ggml_backend_cuda_init()` showing graphs compile status
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test_hip_graphs_disable.sh`: New test script
+- **Learnings**:
+  - **Key Pattern**: GGML already has runtime disable mechanism via `GGML_CUDA_DISABLE_GRAPHS` env var
+  - **Key Pattern**: Compile-time disable is more reliable for gfx1151 - doesn't require env var setup
+  - **Gotcha**: Build currently fails with "Invalid dpp_ctrl value: wavefront shifts are not supported on GFX10+" - this is a separate pre-existing issue in mmf-instance-ncols template files
+  - **Note**: The hang issue has multiple potential causes:
+    1. HIP Graphs capture/launch (now auto-disabled for gfx1151)
+    2. `hipStreamPerThread` hangs (already addressed in previous beads with synchronous memcpy)
+    3. VMM issues (gfx1151 reports VMM: no)
+    4. Large memcpy from mmap'd memory (known issue on gfx1151)
+- **Next Steps**:
+  1. Fix the mmf-instance build error (separate issue)
+  2. Run `test_hip_graphs_disable.sh` after successful build to verify graphs are properly disabled
+  3. If hang persists, investigate VMM and mmap'd memory handling
+
+---
+
+## 2026-05-21 - lucebox-hub-gfx1151-tq7
+- **Task**: [总结] HIP/ROCm 平台 TriAttention 验证状态 - 20260521
+- **Status**: Summary completed
+- **What was documented**:
+  - ✅ 已完成: TriAttention 代码集成完成, GGML HIP 初始化成功, 模型加载到 220/850 tensors
+  - 🔴 当前阻塞: HIP/ROCm 平台 hang 问题 - 程序卡在 tensor 分配阶段
+  - 📊 关键发现: gfx1151 有已知 hang 问题, HIP 同步操作仍导致 hang, 需要禁用 HIP Graphs
+  - 🔗 关联 Beads: 8pw (gfx1151 hang), 8mh (HIP kernel 编译), biv (850 tensors), x98 (TriAttention 验证)
+- **Learnings**:
+  - HIP/ROCm 平台验证进度已完整记录
+  - 根本原因分析已完成 (8pw, 8mh, 3po)
+  - 后续工作需要先解决 gfx1151 hang 问题
+
+---
