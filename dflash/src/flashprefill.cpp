@@ -595,9 +595,9 @@ int flash_prefill_forward_f16(
 {
     // Query the current device's compute capability to pick the kernel.
     int device = 0;
-    hipGetDevice(&device);
-    hipDeviceProp_t prop{};
-    hipGetDeviceProperties(&prop, device);
+    cudaGetDevice(&device);
+    cudaDeviceProp prop{};
+    cudaGetDeviceProperties(&prop, device);
     const int sm = prop.major * 10 + prop.minor;
 
 #if defined(DFLASH27B_HAVE_VOLTA_FLASHPREFILL) && defined(DFLASH27B_HAVE_PASCAL_FLASHPREFILL)

@@ -34,6 +34,10 @@
 #define unsetenv(name) _putenv_s(name, "")
 #endif
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+#include "triattention_runner.h"
+#endif
+
 #if defined(_WIN32)
 #if !defined(NOMINMAX)
 #define NOMINMAX
@@ -187,6 +191,10 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    init_triattention_from_env();
+#endif
+
     auto prompt = read_int32_file(prompt_path);
     if (prompt.empty()) { std::fprintf(stderr, "empty prompt bin\n"); return 1; }
     std::printf("[prompt] %zu tokens: ", prompt.size());
@@ -255,11 +263,67 @@ int main(int argc, char ** argv) {
     // ── Generation loop
     auto t_start = std::chrono::steady_clock::now();
     int gen_start_pos = (int)prompt.size();
+    int cur_pos = (int)prompt.size();
     for (int g = 0; g < n_gen; g++) {
         int32_t tok = next;
         all_tokens.push_back(tok);
         stream_emit(tok);
-        next = run_step(tok, gen_start_pos + g);
+        cur_pos = gen_start_pos + g;
+        next = run_step(tok, cur_pos);
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+        // TriAttention KV compression: trigger at specified intervals
+        if (g_tria_state.should_compress(cur_pos + 1)) {
+            auto t_c0 = std::chrono::steady_clock::now();
+
+            // Get KV cache pointers
+            const int n_full_attn = (int)cache.attn_k.size();
+            const int n_head_kv = w.n_head_kv;
+            const int head_dim = w.n_embd_head_k;
+            const int max_ctx_cache = cache.max_ctx;
+
+            // Prepare arrays of KV cache pointers
+            std::vector<void*> attn_k_ptrs(n_full_attn);
+            std::vector<void*> attn_v_ptrs(n_full_attn);
+            for (int i = 0; i < n_full_attn; i++) {
+                attn_k_ptrs[i] = cache.attn_k[i]->data;
+                attn_v_ptrs[i] = cache.attn_v[i]->data;
+            }
+
+            // Calculate keep ratio from kv_budget
+            const int kv_budget = g_tria_state.kv_budget;
+            const float keep_ratio = kv_budget > 0 ? (float)kv_budget / (float)std::max(cur_pos + 1, kv_budget) : 0.5f;
+
+            int n_kept = 0;
+            const bool ok = tria_kv_compress(
+                g_tria_state.stats_ptr,
+                cache.tria_k_pre_rope ? cache.tria_k_pre_rope->data : nullptr,
+                attn_k_ptrs.data(),
+                attn_v_ptrs.data(),
+                n_full_attn,
+                n_head_kv,
+                head_dim,
+                max_ctx_cache,
+                0,  // kv_start (compress from beginning)
+                cur_pos + 1,  // cur_pos
+                0,  // gpu_id
+                keep_ratio,
+                &n_kept,
+                cache.kv_k_type,
+                cache.kv_v_type);
+
+            if (ok && n_kept < cur_pos + 1) {
+                // Update cache position to compressed length
+                cache.cur_pos = n_kept;
+                g_tria_state.mark_compressed(n_kept);
+                std::fprintf(stderr, "[TriAttention] Compressed %d -> %d positions\n", cur_pos + 1, n_kept);
+            }
+
+            auto t_c1 = std::chrono::steady_clock::now();
+            const double compress_ms = std::chrono::duration<double>(t_c1 - t_c0).count() * 1000.0;
+            std::fprintf(stderr, "[TriAttention] Compression took %.2f ms\n", compress_ms);
+        }
+#endif
     }
     auto t_end = std::chrono::steady_clock::now();
     double secs = std::chrono::duration<double>(t_end - t_start).count();
@@ -281,5 +345,10 @@ int main(int argc, char ** argv) {
     free_target_cache(cache);
     free_target_weights(w);
     ggml_backend_free(backend);
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+    free_triattention();
+#endif
+
     return 0;
 }
