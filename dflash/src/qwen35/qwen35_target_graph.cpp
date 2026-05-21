@@ -89,6 +89,9 @@ bool create_target_cache_partial(const TargetWeights & w,
                                  int layer_begin,
                                  int layer_end,
                                  bool allocate_target_feat) {
+    std::fprintf(stderr, "[CACHE_DEBUG] create_target_cache_partial: ENTER (max_ctx=%d, layers=[%d,%d), allocate_target_feat=%d)\n",
+                 max_ctx, layer_begin, layer_end, allocate_target_feat);
+    std::fflush(stderr);
     if (layer_begin < 0) layer_begin = 0;
     if (layer_end < 0 || layer_end > w.n_layer) layer_end = w.n_layer;
     if (layer_begin > layer_end) {

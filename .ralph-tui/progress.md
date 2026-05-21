@@ -22,11 +22,15 @@ When implementing TriAttention KV compression in new inference paths, follow thi
 
 ### Debug Logging Pattern
 When adding debug logging to diagnose hangs in initialization/load paths:
-- Use `[DEBUG]` prefix for all debug messages
+- Use `[DEBUG]` prefix for GGML backend (ggml-cuda.cu) messages
+- Use `[LOADER]` prefix for loader (gguf_target_loader.cpp) messages
+- Use `[CACHE_DEBUG]` prefix for cache creation messages
 - Use `fprintf(stderr, "[DEBUG] ...")` with `std::fflush(stderr)` immediately after to ensure unbuffered output
 - Log entry and exit points to functions that might hang
 - Include key parameters: device id, buffer offsets, sizes (with human-readable conversion like `(double)size / (1024*1024)` for MB)
 - Include tensor names where available (using `tensor->name` with a safe length limit like `%.16s`)
+- Include mmap addresses and lengths when tracing tensor loading hangs
+- Progress counters (tensor_count, progress percentage) help identify exactly which tensor causes the hang
 
 ---
 
@@ -141,6 +145,52 @@ When adding debug logging to diagnose hangs in initialization/load paths:
   - Actual file locations differ from bead description: `ggml-cuda.cu` (not `.c`) is in `dflash/deps/llama.cpp/ggml/src/ggml-cuda/`
   - No `qwen35_daemon.cpp` in root `src/`, actual location is `dflash/src/qwen35/qwen35_daemon.cpp`
   - All debug output uses `fprintf(stderr, "[DEBUG] ...")` with `fflush(stderr)` for unbuffered visibility during hang scenarios
+
+---
+
+## 2026-05-21 - lucebox-hub-gfx1151-x98
+- **Task**: [验收] TriAttention 优势验证 - HIP/ROCm 完整测试
+- **Status**: 代码实现完成，端到端测试被 HIP 初始化阻塞
+- **What was implemented**:
+  - TriAttention KV compression 已在 `test_generate.cpp` 完整集成
+  - 构建验证通过（DDFLASH27B_TRIATTENTION=ON 编译成功）
+  - 代码审查确认 `spec_decode.cpp` 和 `test_generate.cpp` 路径一致
+- **Files changed**:
+  - `/dflash/test/test_generate.cpp`: TriAttention 集成（已有，lucebox-hub-gfx1151-jmb）
+  - `/dflash/deps/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu`: 调试日志（lucebox-hub-gfx1151-95x）
+- **BLOCKED**: 无可用完整模型文件，且 GGML HIP 初始化卡死（lucebox-hub-gfx1151-3po）
+- **Learnings**:
+  - TriAttention 集成模式已验证编译可行
+  - 完整端到端测试需要 HIP 初始化修复 + 实际模型文件
+  - 当前项目无 Qwen3.5-35B-A3B 模型文件（只有 vocab GGUF 文件）
+---
+
+## 2026-05-21 - lucebox-hub-gfx1151-k0l
+- **What was implemented**:
+  - Added `[LOADER]` debug logging function to `gguf_target_loader.cpp`
+  - Added debug logging at key points:
+    - `load_target_gguf_partial` ENTER
+    - `gguf_init_from_file` entry/exit
+    - `ggml_backend_alloc_buffer` entry/exit with size info
+    - `mm.open_ro` entry/exit with mmap address and length
+    - `ggml_backend_tensor_set` for each tensor with size and progress
+  - Added `[CACHE_DEBUG]` logging to `create_target_cache_partial`
+  - Rebuilt test_generate with debug logging enabled
+- **Files Changed**:
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp`:
+    - Added `loader_debug()` function with `[LOADER]` prefix
+    - Added debug statements at all major checkpoints
+  - `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/qwen35_target_graph.cpp`:
+    - Added `[CACHE_DEBUG]` logging in `create_target_cache_partial`
+- **Learnings**:
+  - The debug logging pattern from bead `95x` in `ggml-cuda.cu` should be extended to loader code for end-to-end visibility
+  - GGUF model files for `qwen35` architecture are not present in the local file system
+  - The symlink `dflash/models/Qwen3.6-27B-Q4_K_M.gguf` points to a non-existent file
+  - A minimal qwen3-0.6b GGUF exists but is not `qwen35` architecture compatible
+- **BLOCKED**: 
+  - No valid GGUF model file available for testing the hang location
+  - Model file path: `/mnt/eaget-4tb/data/llm_server/modelscope_models/unsloth/Qwen3___6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf` does not exist
+  - Need to either: 1) Download the model file, 2) Use an existing qwen35 model, or 3) Create a mock test
 
 ---
 

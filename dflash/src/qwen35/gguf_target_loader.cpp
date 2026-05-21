@@ -61,6 +61,18 @@
 #include <unistd.h>
 #endif
 
+#include <cstdarg>
+
+static void loader_debug(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    std::fprintf(stderr, "[LOADER] ");
+    std::vfprintf(stderr, fmt, args);
+    std::fprintf(stderr, "\n");
+    std::fflush(stderr);
+    va_end(args);
+}
+
 namespace dflash27b {
 
 // CpuEmbedder destructor + embed() method
@@ -248,7 +260,10 @@ bool load_target_gguf_partial(const std::string & path,
                               const TargetLoadPlan & plan_in,
                               TargetWeights &      out) {
 
+    loader_debug("ENTER: path=%s", path.c_str());
+
     // ── 1. Parse metadata + create a ggml_context holding tensor descriptors ─
+    loader_debug("calling gguf_init_from_file...");
     ggml_context * meta_ctx = nullptr;
     gguf_init_params gip{};
     gip.no_alloc = true;
@@ -258,6 +273,7 @@ bool load_target_gguf_partial(const std::string & path,
         set_last_error("gguf_init_from_file failed: " + path);
         return false;
     }
+    loader_debug("gguf_init_from_file SUCCESS");
 
     // Validate arch + the dimensions we hardcode everywhere.
     {
@@ -523,9 +539,9 @@ bool load_target_gguf_partial(const std::string & path,
         return false;
     }
 
+    loader_debug("calling ggml_backend_alloc_buffer with size=%.2f GiB...", alloc_total / (1024.0 * 1024.0 * 1024.0));
     out.buf = ggml_backend_alloc_buffer(backend, alloc_total);
-    std::fprintf(stderr, "[loader] ggml_backend_alloc_buffer alloc_total=%zu (%.2f GiB), buf_ptr=%p\n", alloc_total, alloc_total / (1024.0 * 1024.0 * 1024.0), (void*)out.buf);
-    std::fflush(stderr);
+    loader_debug("ggml_backend_alloc_buffer returned: %p", (void*)out.buf);
     if (!out.buf) {
         set_last_error("ggml_backend_alloc_ctx_tensors failed (target)");
         gguf_free(gctx);
@@ -559,8 +575,10 @@ bool load_target_gguf_partial(const std::string & path,
     // SKIP uploading token_embd.weight — it stays on CPU for embedding
     // lookup (CUDA get_rows doesn't support k-quants). We hand the mmap
     // ownership to TargetWeights::embedder at the end.
+    loader_debug("calling mm.open_ro...");
     Mmap mm;
     if (!mm.open_ro(path, err)) { set_last_error(err); gguf_free(gctx); return false; }
+    loader_debug("mm.open_ro SUCCESS: mmap_addr=%p, len=%zu (%.2f GiB)", mm.addr, mm.len, mm.len / (1024.0 * 1024.0 * 1024.0));
     const size_t data_start = gguf_get_data_offset(gctx);
 
     std::fprintf(stderr, "[loader] mmap opened (len=%zu bytes), starting tensor set copies...\n", mm.len);
@@ -592,12 +610,15 @@ bool load_target_gguf_partial(const std::string & path,
             continue;
         }
         tensor_count++;
-        if (tensor_count <= 5 || tensor_count % 10 == 0) {
-            std::fprintf(stderr, "[loader] ggml_backend_tensor_set tensor %d/%ld (%s, %zu bytes), total so far: %.2f GiB\n", tensor_count, n_tensors, tname, sz, total / (1024.0 * 1024.0 * 1024.0));
-            std::fflush(stderr);
+        if (tensor_count <= 10 || tensor_count % 10 == 0) {
+            loader_debug("tensor_set: %d/%ld (%s, %zu bytes = %.2f MiB), src_addr=%p, total_so_far: %.2f GiB",
+                tensor_count, n_tensors, tname, sz, sz / (1024.0 * 1024.0), (const uint8_t *)mm.addr + off, total / (1024.0 * 1024.0 * 1024.0));
         }
         ggml_backend_tensor_set(t, (const uint8_t *)mm.addr + off, 0, sz);
         total += sz;
+        if (tensor_count <= 10 || tensor_count % 10 == 0) {
+            loader_debug("tensor_set: COMPLETE %d (%s)", tensor_count, tname);
+        }
     }
     std::fprintf(stderr, "[loader] all tensor set copies complete (total: %d tensors, %.2f GiB)\n", tensor_count, total / (1024.0 * 1024.0 * 1024.0));
     std::fflush(stderr);
