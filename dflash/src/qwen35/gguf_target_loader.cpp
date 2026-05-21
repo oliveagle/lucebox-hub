@@ -45,6 +45,7 @@
 
 #include "internal.h"
 
+#include <chrono>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -570,7 +571,10 @@ bool load_target_gguf_partial(const std::string & path,
     std::fprintf(stderr, "[loader] all tensor allocations complete (total: %d)\n", alloc_count);
     std::fflush(stderr);
 
-    // ── 4. mmap the file and copy tensor bytes to CUDA ────────────────
+    // ── 4. mmap the file and copy tensor bytes to CUDA ─────────────
+    //
+    // CRITICAL: On gfx1151 (Strix Halo APU), hipMemcpy from mmap regions HANGS.
+    // Solution: copy mmap -> regular malloc buffer first, then buffer -> GPU.
     //
     // SKIP uploading token_embd.weight — it stays on CPU for embedding
     // lookup (CUDA get_rows doesn't support k-quants). We hand the mmap
@@ -581,13 +585,30 @@ bool load_target_gguf_partial(const std::string & path,
     loader_debug("mm.open_ro SUCCESS: mmap_addr=%p, len=%zu (%.2f GiB)", mm.addr, mm.len, mm.len / (1024.0 * 1024.0 * 1024.0));
     const size_t data_start = gguf_get_data_offset(gctx);
 
-    std::fprintf(stderr, "[loader] mmap opened (len=%zu bytes), starting tensor set copies...\n", mm.len);
-    std::fflush(stderr);
-
     size_t total = 0;
     int tensor_count = 0;
     size_t tok_embd_off = 0, tok_embd_sz = 0;
     ggml_type tok_embd_type = GGML_TYPE_COUNT;
+
+    // Find max tensor size for buffer allocation
+    size_t max_tensor_size = 0;
+    for (int64_t tid = 0; tid < n_tensors; tid++) {
+        const size_t sz = gguf_get_tensor_size(gctx, tid);
+        if (sz > max_tensor_size) max_tensor_size = sz;
+    }
+
+    // Allocate reusable host buffer (use regular malloc, not mmap)
+    void *host_buf = malloc(max_tensor_size);
+    if (!host_buf) {
+        set_last_error("Failed to allocate host buffer for tensor upload");
+        gguf_free(gctx);
+        return false;
+    }
+    std::fprintf(stderr, "[loader] allocated host buffer: %zu bytes\n", max_tensor_size);
+
+    std::fprintf(stderr, "[loader] starting tensor upload loop: %ld total tensors in file\n", n_tensors);
+    std::fflush(stderr);
+
     for (int64_t tid = 0; tid < n_tensors; tid++) {
         const char * tname = gguf_get_tensor_name(gctx, tid);
         ggml_tensor * t = ggml_get_tensor(meta_ctx, tname);
@@ -597,10 +618,10 @@ bool load_target_gguf_partial(const std::string & path,
         if (off + sz > mm.len) {
             set_last_error(std::string("tensor '") + tname + "' overflows file");
             gguf_free(gctx);
+            free(host_buf);
             return false;
         }
         if (std::string(tname) == "token_embd.weight") {
-            // Remember offset + size for the CPU embedder; don't upload to GPU.
             tok_embd_off  = off;
             tok_embd_sz   = sz;
             tok_embd_type = gguf_get_tensor_type(gctx, tid);
@@ -611,16 +632,23 @@ bool load_target_gguf_partial(const std::string & path,
         }
         tensor_count++;
         if (tensor_count <= 10 || tensor_count % 10 == 0) {
-            loader_debug("tensor_set: %d/%ld (%s, %zu bytes = %.2f MiB), src_addr=%p, total_so_far: %.2f GiB",
-                tensor_count, n_tensors, tname, sz, sz / (1024.0 * 1024.0), (const uint8_t *)mm.addr + off, total / (1024.0 * 1024.0 * 1024.0));
+            std::fprintf(stderr, "[loader] tensor %d/%d: %s (%.2f MiB)\n",
+                         tensor_count, (int)n_tensors, tname, sz / (1024.0 * 1024.0));
+            std::fflush(stderr);
         }
-        ggml_backend_tensor_set(t, (const uint8_t *)mm.addr + off, 0, sz);
+
+        // Step 1: Copy from mmap to regular malloc buffer
+        memcpy(host_buf, (const uint8_t *)mm.addr + off, sz);
+
+        // Step 2: Copy from host buffer to GPU
+        ggml_backend_tensor_set(t, host_buf, 0, sz);
         total += sz;
-        if (tensor_count <= 10 || tensor_count % 10 == 0) {
-            loader_debug("tensor_set: COMPLETE %d (%s)", tensor_count, tname);
-        }
     }
-    std::fprintf(stderr, "[loader] all tensor set copies complete (total: %d tensors, %.2f GiB)\n", tensor_count, total / (1024.0 * 1024.0 * 1024.0));
+
+    free(host_buf);
+
+    std::fprintf(stderr, "[loader] all tensor copies complete (total: %d tensors, %.2f GiB)\n",
+                 tensor_count, total / (1024.0 * 1024.0 * 1024.0));
     std::fflush(stderr);
 
     // ── 4b. Read NVFP4 per-tensor weight scales (optional; 1.0 for non-NVFP4).
