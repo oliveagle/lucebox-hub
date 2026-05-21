@@ -32,6 +32,31 @@ after each iteration and it should be included in prompts for context.
 
 ---
 
+## [2026-05-22] - lucebox-hub-gfx1151-biv
+
+### [发现] 模型加载 850 tensors 分配耗时过长 - 调查结果
+
+**假设验证**: 原假设 "HIP JIT kernel 编译在 gfx1151 上很慢" **被推翻**
+
+**实际根因**: 在后续 bead `lucebox-hub-gfx1151-5dq` 中发现是 **gfx1151 APU 的 H2D 内存传输极慢**
+
+| 发现 | 详情 |
+|------|------|
+| 显卡类型 | Radeon 8060S (gfx1151) - **APU** (集成GPU，共享系统内存) |
+| H2D 传输速度 | 994 MiB 需要 **>12 分钟** |
+| 15 GiB 模型总耗时 | 预计 **3+ 小时** |
+| 问题本质 | 不是代码 bug，是硬件限制 |
+
+**加载流程分析** (来自本次调查):
+1. GGUF init → mmap 文件
+2. GPU buffer 分配 → 14.99 GiB 一次分配成功
+3. Tensor 逐个初始化 → 850 tensors × 2 HIP calls = ~1700 次同步调用
+4. Tensor 数据复制 → `cudaMemcpy(HostToDevice)` 是同步调用
+
+**结论**: GGML 已经应用了 gfx1151 的所有 workaround，但 H2D 传输本身在 APU 上就是极慢的。
+
+---
+
 ## [2026-05-22] - lucebox-hub-gfx1151-5dq
 
 The "hang" in test_dflash and test_generate is NOT a hang - it's extremely slow H2D memory transfer on the gfx1151 APU.
