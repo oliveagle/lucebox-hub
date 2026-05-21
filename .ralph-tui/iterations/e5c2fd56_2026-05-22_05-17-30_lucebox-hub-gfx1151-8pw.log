@@ -1,0 +1,115 @@
+# Iteration 4 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-8pw
+- **Task Title**: [发现] GGML 对 gfx1151 有特殊处理但仍有 hang 问题
+- **Description**: ## 发现
+
+在  中发现对 gfx1151 的特殊处理：
+
+```cpp
+// Use synchronous hipMemcpy instead of hipMemcpyAsync + hipStreamSynchronize(hipStreamPerThread)
+// This avoids hangs on some HIP devices (e.g., gfx1151)
+```
+
+这表...
+- **Status**: completed
+- **Task Completed**: No
+- **Promise Detected**: No
+- **Started At**: 2026-05-21T21:17:30.319Z
+- **Ended At**: 2026-05-21T21:20:07.349Z
+- **Duration**: 2m 37s
+- **Input Tokens**: 848769
+- **Output Tokens**: 8298
+- **Total Tokens**: 857067
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+[94m[TodoWrite][0m
+<think>Let me check the progress.md and also search for the relevant GGML code.
+</think>
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/.ralph-tui/progress.md[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server[0m pattern: [96m**/*.md[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server[0m pattern: [96mgfx1151[0m
+
+[91m[Error: File does not exist. Note: your current working directory is /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151. Did you mean /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md?][0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash[0m pattern: [96mgfx1151[0m
+[94m[TodoWrite][0m
+从 progress.md 看到，之前的 bead `lucebox-hub-gfx1151-5dq` 已经彻底调查了这个问题：
+
+1. **"hang" 不是真正卡死**，而是 gfx1151 APU 的 H2D 内存传输极慢
+2. **HIP Graphs 已经自动禁用** (Auto-disabled for gfx1151)
+3. **所有 gfx1151 workaround 已经到位**
+
+让我验证这些发现是否完整。
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash[0m pattern: [96mgfx1151|HIP_GRAPHS_DISABLE|VMM: no[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash[0m pattern: [96mGGML_CUDA_DISABLE_GRAPHS|hipGraph|HIP.*Graph[0m
+<think>Based on my research, I found that:
+
+1. **GGML already has gfx1151 workarounds in place**:
+   - In `common.cuh`, there's automatic disabling of CUDA/HIP graphs for gfx1151 (line 1195-1198)
+   - In `ggml-cuda.cu`, synchronous operations are used to avoid hangs (lines 669, 681)
+   - There's also `GGML_CUDA_DISABLE_GRAPHS` environment variable support
+
+2. **The "hang" is actually extremely slow H2D memory transfer** - this was discovered in previous beads. It's an APU hardware limitation, not a bug.
+
+3. **TriAttention is already disabled on HIP** due to known hanging issues (line 238-240 in triattention_compress.cpp)
+
+Looking at the bead description more carefully, it says:
+- "GGML has special handling for gfx1151"
+- "Even with synchronous operations, program still hangs at tensor allocation stage"
+- "Possible causes: HIP runtime kernel JIT, VMM support issues, HIP Graphs initialization"
+
+The bead suggests disabling HIP Graphs with `GGML_CUDA_DISABLE_GRAPHS=1` and checking ROCm version compatibility.
+
+Let me check if the work is already done - it seems like the GGML already has the auto-disable for gfx1151. Let me read the common.cuh to verify the exact implementation.
+</think>
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-cuda/common.cuh[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash[0m pattern: [96mVMM:|vmm[0m
+根据 progress.md 和代码分析，**这个 bead 的工作已经完成**：
+
+1. **GGML 已有 gfx1151 特殊处理**：
+   - `common.cuh:1198-1199` - 编译时自动禁用 HIP Graphs
+   - `ggml-cuda.cu:669,681` - 使用同步 memcpy 避免 hang
+   - `GGML_CUDA_DISABLE_GRAPHS` 环境变量支持
+
+2. **根因已在 `lucebox-hub-gfx1151-5dq` 中查明**：不是真正的 hang，而是 gfx1151 APU 的 H2D 传输极慢（12+ 分钟传输 994 MiB）
+
+3. **test_hip_graphs_disable.sh 脚本已存在**，用于验证 HIP Graphs 禁用行为
+[94m[TodoWrite][0m
+更新 progress.md，然后关闭 bead。
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "## [2026-05-22] - lucebox-hub-gfx1151-5dq" → "## [2026-05-22] - lucebox-hub-gfx1151-8pw
+
+此 bead ..."
+Now close the bead.
+
+[94m[Bash][0m Close bead 8pw $ br close lucebox-hub-gfx1151-8pw --reason "验证重复：GGML gfx1151 workaround 已全部到位，根因已在 5dq 中确认为 APU H2D ...
+Now flush to JSONL.
+[94m[Bash][0m Flush beads to JSONL $ br sync --flush-only
+[94m[Bash][0m Flush beads to JSONL from project root $ cd /mnt/eaget-4tb/data/llm_server && br sync --flush-only
+
+[91m[Error: Exit code 2
+Error: Beads not initialized: run 'br init' first
+Hint: Run: br init][0m
+<think>The beads sync command didn't work, probably because we're not in the right directory context. Let me try running it directly from the project directory.
+</think>
+
+[94m[Bash][0m Flush beads to JSONL from lucebox-hub-gfx1151 $ br sync --flush-only
+The flush shows no dirty issues because the close was already processed. Let me verify the bead status.
+[94m[Bash][0m Verify bead 8pw is closed $ br show lucebox-hub-gfx1151-8pw
+Bead is closed. Update todo list and signal completion.
+[94m[TodoWrite][0m
+The bead was a duplicate investigation. The GGML gfx1151 workarounds were already in place:
+- Auto-disable of HIP Graphs at compile time (`common.cuh:1198-1199`)
+- Synchronous memcpy instead of async (`ggml-cuda.cu:669,681`)
+- `GGML_CUDA_DISABLE_GRAPHS` env var support
+
+The root cause was already identified in bead `lucebox-hub-gfx1151-5dq`: not a real hang, but extremely slow H2D memory transfer on the gfx1151 APU (994 MiB takes 12+ minutes).

@@ -3,10 +3,10 @@
   "sessionId": "e5c2fd56-9d60-4af3-950a-f399109e64a1",
   "status": "running",
   "startedAt": "2026-05-21T18:50:25.154Z",
-  "updatedAt": "2026-05-21T21:15:56.060Z",
-  "currentIteration": 2,
+  "updatedAt": "2026-05-21T21:22:54.792Z",
+  "currentIteration": 4,
   "maxIterations": 50,
-  "tasksCompleted": 2,
+  "tasksCompleted": 3,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -41,8 +41,8 @@
       {
         "id": "lucebox-hub-gfx1151-biv",
         "title": "[发现] 模型加载 850 tensors 分配耗时过长",
-        "status": "open",
-        "completedInSession": false
+        "status": "completed",
+        "completedInSession": true
       },
       {
         "id": "lucebox-hub-gfx1151-k0l",
@@ -126,12 +126,32 @@
       "durationMs": 4882963,
       "startedAt": "2026-05-21T19:54:31.920Z",
       "endedAt": "2026-05-21T21:15:54.883Z"
+    },
+    {
+      "iteration": 3,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-biv",
+      "taskTitle": "[发现] 模型加载 850 tensors 分配耗时过长",
+      "taskCompleted": true,
+      "durationMs": 93138,
+      "startedAt": "2026-05-21T21:15:56.019Z",
+      "endedAt": "2026-05-21T21:17:29.157Z"
+    },
+    {
+      "iteration": 4,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-8pw",
+      "taskTitle": "[发现] GGML 对 gfx1151 有特殊处理但仍有 hang 问题",
+      "taskCompleted": false,
+      "durationMs": 157030,
+      "startedAt": "2026-05-21T21:17:30.319Z",
+      "endedAt": "2026-05-21T21:20:07.349Z"
     }
   ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
   "activeTaskIds": [
-    "lucebox-hub-gfx1151-biv"
+    "lucebox-hub-gfx1151-8pw"
   ],
   "subagentPanelVisible": false
 }

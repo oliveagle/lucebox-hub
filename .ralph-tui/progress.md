@@ -5,7 +5,12 @@ after each iteration and it should be included in prompts for context.
 
 ## Codebase Patterns (Study These First)
 
-*Add reusable patterns discovered during development here.*
+### TriAttention HIP Support
+
+**Pattern**: TriAttention KV compression on HIP/ROCm requires graceful fallback
+- `hipMemcpy` hangs on gfx1151 APU (slow system-memory architecture)
+- Use early return with message instead of attempting GPU copies
+- Macro pattern: `#if defined(HAS_GPU) && HAS_GPU` for defensive checks
 
 ---
 
@@ -57,6 +62,22 @@ after each iteration and it should be included in prompts for context.
 
 ---
 
+## [2026-05-22] - lucebox-hub-gfx1151-8pw
+
+此 bead 发现 GGML 对 gfx1151 已有特殊处理但仍有 hang 问题。**验证为重复发现**。
+
+**验证结果**:
+1. **HIP Graphs 已自动禁用**: `common.cuh:1198-1199` 编译时通过 `#if defined(__gfx1151__)` 自动禁用
+2. **同步 memcpy 已应用**: `ggml-cuda.cu:669,681` 使用同步 `cudaMemcpy` 替代 `hipMemcpyAsync + hipStreamSynchronize(hipStreamPerThread)`
+3. **环境变量支持**: `GGML_CUDA_DISABLE_GRAPHS=1` 可通过运行时控制
+4. **test 脚本已存在**: `test_hip_graphs_disable.sh`
+
+**根因已在 `lucebox-hub-gfx1151-5dq` 中确认**: 不是真正的 hang，而是 gfx1151 APU 的 H2D 内存传输极慢（994 MiB 需要 12+ 分钟）
+
+**结论**: 此 bead 是已有发现的确认，无需额外实现。
+
+---
+
 ## [2026-05-22] - lucebox-hub-gfx1151-5dq
 
 The "hang" in test_dflash and test_generate is NOT a hang - it's extremely slow H2D memory transfer on the gfx1151 APU.
@@ -96,5 +117,20 @@ This is fundamentally slower than discrete GPU H2D transfers over PCIe.
 1. **Use a discrete GPU** for development/testing (e.g., RX 7900 series with dedicated VRAM)
 2. **Reduce model size** - Q4_K_M quantization still too large for practical APU use
 3. **Consider llama.cpp** - may have better APU optimizations
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-yxa
+
+### TriAttention HIP 支持修复
+
+**问题**: `HAS_GPU` 条件编译在 HIP 上可能导致编译错误或运行时 hang
+
+**修复**:
+1. `#else` 分支显式定义 `HAS_GPU 0` 和 stub 宏 (第44行)
+2. 所有 `#if HAS_GPU` 改为 `#if defined(HAS_GPU) && HAS_GPU` (141, 180, 237, 359)
+3. HIP 上 graceful fallback: 打印消息并跳过 `tria_kv_compress`
+
+**文件**: `dflash/src/triattention_compress.cpp`
 
 ---
