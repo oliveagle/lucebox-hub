@@ -3,7 +3,7 @@
   "sessionId": "e5c2fd56-9d60-4af3-950a-f399109e64a1",
   "status": "running",
   "startedAt": "2026-05-21T18:50:25.154Z",
-  "updatedAt": "2026-05-21T21:22:55.953Z",
+  "updatedAt": "2026-05-21T21:26:48.129Z",
   "currentIteration": 5,
   "maxIterations": 50,
   "tasksCompleted": 4,
@@ -161,8 +161,7 @@
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
   "activeTaskIds": [
-    "lucebox-hub-gfx1151-8pw",
-    "lucebox-hub-gfx1151-3hz"
+    "lucebox-hub-gfx1151-8pw"
   ],
   "subagentPanelVisible": false
 }

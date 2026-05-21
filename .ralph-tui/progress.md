@@ -120,6 +120,25 @@ This is fundamentally slower than discrete GPU H2D transfers over PCIe.
 
 ---
 
+## [2026-05-22] - lucebox-hub-gfx1151-3hz
+
+### [验收] gfx1151 APU hipMemcpy 完全挂起 - 已验证代码中已有 workaround
+
+**结论**: 此 bead 记录的已知问题在代码中已有完整 workaround，无需额外实现。
+
+**已实现的 workaround**:
+1. **`gguf_target_loader.cpp`** (lines 574-648): 两步拷贝避免直接 hipMemcpy
+   - 注释: "CRITICAL: On gfx1151, hipMemcpy from mmap regions HANGS"
+   - 方案: mmap → malloc buffer → GPU (`ggml_backend_tensor_set`)
+2. **`triattention_compress.cpp`** (lines 237-243): HIP 优雅降级
+   - 跳过 TriAttention 压缩，打印提示信息
+
+**根本原因** (已在 `lucebox-hub-gfx1151-5dq` 确认): gfx1151 APU 硬件限制
+- H2D 传输极慢: 994 MiB 需要 12+ 分钟
+- 不是真正的 hang，是系统内存架构的性能问题
+
+---
+
 ## [2026-05-22] - lucebox-hub-gfx1151-yxa
 
 ### TriAttention HIP 支持修复
