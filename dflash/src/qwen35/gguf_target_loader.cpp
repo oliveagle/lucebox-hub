@@ -524,21 +524,35 @@ bool load_target_gguf_partial(const std::string & path,
     }
 
     out.buf = ggml_backend_alloc_buffer(backend, alloc_total);
+    std::fprintf(stderr, "[loader] ggml_backend_alloc_buffer alloc_total=%zu (%.2f GiB), buf_ptr=%p\n", alloc_total, alloc_total / (1024.0 * 1024.0 * 1024.0), (void*)out.buf);
+    std::fflush(stderr);
     if (!out.buf) {
         set_last_error("ggml_backend_alloc_ctx_tensors failed (target)");
         gguf_free(gctx);
         return false;
     }
     ggml_backend_buffer_set_usage(out.buf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+    std::fprintf(stderr, "[loader] set buffer usage to weights complete\n");
+    std::fflush(stderr);
 
     char * base = (char *)ggml_backend_buffer_get_base(out.buf);
+    std::fprintf(stderr, "[loader] buffer base addr=%p, starting ggml_backend_tensor_alloc for %ld tensors...\n", (void*)base, allocs.size());
+    std::fflush(stderr);
+    int alloc_count = 0;
     for (const TargetTensorAlloc & a : allocs) {
+        alloc_count++;
+        if (alloc_count % 20 == 0) {
+            std::fprintf(stderr, "[loader] ggml_backend_tensor_alloc %d/%ld (%s)\n", alloc_count, allocs.size(), a.tensor->name);
+            std::fflush(stderr);
+        }
         if (ggml_backend_tensor_alloc(out.buf, a.tensor, base + a.buffer_offset) != GGML_STATUS_SUCCESS) {
             set_last_error("ggml_backend_tensor_alloc failed (target)");
             gguf_free(gctx);
             return false;
         }
     }
+    std::fprintf(stderr, "[loader] all tensor allocations complete (total: %d)\n", alloc_count);
+    std::fflush(stderr);
 
     // ── 4. mmap the file and copy tensor bytes to CUDA ────────────────
     //
@@ -549,7 +563,11 @@ bool load_target_gguf_partial(const std::string & path,
     if (!mm.open_ro(path, err)) { set_last_error(err); gguf_free(gctx); return false; }
     const size_t data_start = gguf_get_data_offset(gctx);
 
+    std::fprintf(stderr, "[loader] mmap opened (len=%zu bytes), starting tensor set copies...\n", mm.len);
+    std::fflush(stderr);
+
     size_t total = 0;
+    int tensor_count = 0;
     size_t tok_embd_off = 0, tok_embd_sz = 0;
     ggml_type tok_embd_type = GGML_TYPE_COUNT;
     for (int64_t tid = 0; tid < n_tensors; tid++) {
@@ -573,9 +591,16 @@ bool load_target_gguf_partial(const std::string & path,
         if (!should_load_target_tensor(tname, plan.layer_begin, plan.layer_end, plan.load_output)) {
             continue;
         }
+        tensor_count++;
+        if (tensor_count <= 5 || tensor_count % 10 == 0) {
+            std::fprintf(stderr, "[loader] ggml_backend_tensor_set tensor %d/%ld (%s, %zu bytes), total so far: %.2f GiB\n", tensor_count, n_tensors, tname, sz, total / (1024.0 * 1024.0 * 1024.0));
+            std::fflush(stderr);
+        }
         ggml_backend_tensor_set(t, (const uint8_t *)mm.addr + off, 0, sz);
         total += sz;
     }
+    std::fprintf(stderr, "[loader] all tensor set copies complete (total: %d tensors, %.2f GiB)\n", tensor_count, total / (1024.0 * 1024.0 * 1024.0));
+    std::fflush(stderr);
 
     // ── 4b. Read NVFP4 per-tensor weight scales (optional; 1.0 for non-NVFP4).
     //

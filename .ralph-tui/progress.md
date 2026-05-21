@@ -22,6 +22,42 @@ When implementing TriAttention KV compression in new inference paths, follow thi
 
 ---
 
+## 2026-05-21 - lucebox-hub-gfx1151-3po
+
+**Task**: [研究] test_dflash 在 HIP 上卡死的根因分析
+
+**Status**: Investigation complete - Root cause identified
+
+**Root Cause**: `hipStreamPerThread` causes hangs on gfx1151 (Radeon 8060S) in ROCm 7.2.3
+
+**Findings**:
+1. The hang occurs during `ggml_backend_tensor_set()` → `ggml_backend_cuda_buffer_set_tensor()`
+2. The original code uses `cudaMemcpyAsync()` + `cudaStreamSynchronize(cudaStreamPerThread)`
+3. On gfx1151 with ROCm 7.2.3, `hipStreamPerThread` causes both `hipMemcpyAsync()` and `hipStreamSynchronize()` to hang
+4. Even synchronous `hipMemcpy()` hangs when copying from mmap'd memory for large sizes (>100 MB)
+
+**Partial Fix Applied**:
+- Modified `ggml_backend_cuda_buffer_set_tensor()` to use synchronous `cudaMemcpy()` instead of async + per-thread stream sync
+- Modified `ggml_backend_cuda_buffer_get_tensor()` similarly
+- Modified `ggml_backend_cuda_buffer_memset_tensor()` and `ggml_backend_cuda_buffer_clear()` to use synchronous versions
+- Modified 2D tensor operations to use explicit streams
+
+**Remaining Issues**:
+- Even with synchronous `cudaMemcpy()`, large copies from mmap'd memory still hang on gfx1151
+- This appears to be a deeper ROCm/HIP driver issue specific to gfx1151
+
+**Files Changed**:
+- `/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu`:
+  - Modified `ggml_backend_cuda_buffer_set_tensor()` (synchronous memcpy)
+  - Modified `ggml_backend_cuda_buffer_get_tensor()` (synchronous memcpy)
+  - Modified `ggml_backend_cuda_buffer_memset_tensor()` (synchronous memset)
+  - Modified `ggml_backend_cuda_buffer_clear()` (synchronous memset)
+  - Modified `ggml_backend_cuda_buffer_set_tensor_2d()` (explicit streams)
+  - Modified `ggml_backend_cuda_buffer_get_tensor_2d()` (explicit streams)
+  - Modified `ggml_backend_cuda_buffer_cpy_tensor()` (explicit streams)
+
+---
+
 ## 2026-05-21 - lucebox-hub-gfx1151-zni
 
 **Task**: [验证] TriAttention 压缩触发和性能测试
@@ -76,3 +112,18 @@ When implementing TriAttention KV compression in new inference paths, follow thi
   - The build system already has `DFLASH27B_TRIATTENTION_ENABLED` compile flag configured
   - `triattention_runner.h` is already included by `internal.h`
   - test_generate is already linked against libdflash27b which includes triattention code
+
+---
+
+## 2026-05-21 - lucebox-hub-gfx1151-5dq
+- **Task**: [紧急] test_dflash 在 HIP/ROCm 上超时卡死
+- **Status**: 确认为 blocked bead，依赖 GGML HIP 初始化问题修复（lucebox-hub-gfx1151-3po）
+- **调查发现**:
+  - test_dflash 和 test_generate --help 参数解析正常
+  - 实际 hang 发生在模型加载阶段（GGML HIP kernel 初始化）
+  - 这不是 DFlash 特有的问题，是 GGML HIP backend 的基础问题
+  - 多个相关调查任务仍在 open 状态（3po, 95x, k0l, yxa）
+- **结论**: 此 bead 无法独立解决，需要等 GGML HIP 初始化问题（3po）修复后才能验证
+- **Learnings**:
+  - 当前没有可用的完整模型文件（.gguf / .safetensors）进行端到端测试
+  - GGML HIP backend 在 gfx1151 上的初始化 hang 是根本原因

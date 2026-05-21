@@ -1046,7 +1046,9 @@ int main(int argc, char ** argv) {
     }
 
     int cuda_device_count = 0;
+    std::fprintf(stderr, "[DEBUG] Before cudaGetDeviceCount()\n"); std::fflush(stderr);
     cudaGetDeviceCount(&cuda_device_count);
+    std::fprintf(stderr, "[DEBUG] After cudaGetDeviceCount(), device_count=%d\n", cuda_device_count); std::fflush(stderr);
     for (int gpu : target_gpus) {
         if (gpu >= cuda_device_count) {
             std::fprintf(stderr, "bad target gpu id %d device_count=%d\n",
@@ -1146,7 +1148,10 @@ int main(int argc, char ** argv) {
     }
 
     const bool split_gpus = target_gpu != draft_gpu;
-    ggml_backend_t target_backend = ggml_backend_cuda_init(target_gpu);
+    ggml_backend_t target_backend = nullptr;
+    std::fprintf(stderr, "[DEBUG] Before ggml_backend_cuda_init(target_gpu=%d)\n", target_gpu); std::fflush(stderr);
+    target_backend = ggml_backend_cuda_init(target_gpu);
+    std::fprintf(stderr, "[DEBUG] After ggml_backend_cuda_init(), backend=%p\n", (void*)target_backend); std::fflush(stderr);
     if (!target_backend) { std::fprintf(stderr, "target cuda init failed\n"); return 1; }
     ggml_backend_t draft_backend = target_backend;
     if (split_gpus) {
@@ -1164,6 +1169,7 @@ int main(int argc, char ** argv) {
     ggml_backend_t backend = target_backend; // legacy target-side alias
 
     TargetWeights w;
+    std::fprintf(stderr, "[DEBUG] Before load_target_gguf()\n"); std::fflush(stderr);
     if (!load_target_gguf(target_path, target_backend, w)) {
         std::fprintf(stderr, "target load: %s\n", dflash27b_last_error());
         return 1;
