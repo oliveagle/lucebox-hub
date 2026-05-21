@@ -9,9 +9,30 @@ after each iteration and it should be included in prompts for context.
 
 ---
 
-## [2026-05-22] - lucebox-hub-gfx1151-5dq
+## [2026-05-22] - lucebox-hub-gfx1151-x98
 
-### Root Cause: gfx1151 APU Host-to-Device Memory Copy is Extremely Slow
+### 发现关键问题：TriAttention Stats 与模型维度不匹配
+
+**问题**: Qwen3.6-27B 模型 (head_dim=256) 与现有 stats 文件 (Qwen3.5-27B, head_dim=64) 维度不匹配
+
+**调试发现**:
+- CUDA 后端 (NVIDIA V100) 可正常工作
+- TriAttention 初始化成功: "Loaded stats with 64 layers, 24 heads, head_dim=64"
+- 但模型实际 head_dim=256 (6144 / 24 = 256)
+- 压缩触发时维度不匹配导致内存崩溃
+
+**修复**:
+1. 修正了 `compact_kv_head_positions` 使用 `gpuMemcpy` 而非 `std::memcpy`
+2. 修正了 `compact_tria_k_pre_rope` 使用 `gpuMemcpy`
+3. 添加了调试输出验证维度传递
+
+**待解决**:
+- 需要为 Qwen3.6-27B 生成新的 stats 文件
+- 或使用 Qwen3.5-27B 模型进行测试
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-5dq
 
 The "hang" in test_dflash and test_generate is NOT a hang - it's extremely slow H2D memory transfer on the gfx1151 APU.
 

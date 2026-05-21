@@ -3,10 +3,10 @@
   "sessionId": "e5c2fd56-9d60-4af3-950a-f399109e64a1",
   "status": "running",
   "startedAt": "2026-05-21T18:50:25.154Z",
-  "updatedAt": "2026-05-21T19:54:30.548Z",
-  "currentIteration": 0,
+  "updatedAt": "2026-05-21T21:15:54.894Z",
+  "currentIteration": 1,
   "maxIterations": 50,
-  "tasksCompleted": 0,
+  "tasksCompleted": 1,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
@@ -77,8 +77,8 @@
       {
         "id": "lucebox-hub-gfx1151-5dq",
         "title": "[紧急] test_dflash 在 HIP/ROCm 上超时卡死",
-        "status": "open",
-        "completedInSession": false
+        "status": "completed",
+        "completedInSession": true
       },
       {
         "id": "lucebox-hub-gfx1151-zni",
@@ -106,7 +106,18 @@
       }
     ]
   },
-  "iterations": [],
+  "iterations": [
+    {
+      "iteration": 1,
+      "status": "completed",
+      "taskId": "lucebox-hub-gfx1151-5dq",
+      "taskTitle": "[紧急] test_dflash 在 HIP/ROCm 上超时卡死",
+      "taskCompleted": true,
+      "durationMs": 3845317,
+      "startedAt": "2026-05-21T18:50:25.208Z",
+      "endedAt": "2026-05-21T19:54:30.525Z"
+    }
+  ],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
   "activeTaskIds": [],

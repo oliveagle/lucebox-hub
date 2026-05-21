@@ -138,9 +138,15 @@ static void compact_kv_head_positions(
         const size_t src_offset = ((size_t)kv_head * head_stride) + ((size_t)kv_start + src_pos) * head_bytes;
         const size_t dst_offset = ((size_t)kv_head * head_stride) + ((size_t)kv_start + dst_pos) * head_bytes;
 
+#if defined(HAS_GPU) && HAS_GPU
+        std::vector<uint8_t> tmp(head_bytes);
+        gpuMemcpy(tmp.data(), (char*)cache_data + src_offset, head_bytes, gpuMemcpyDtoH);
+        gpuMemcpy((char*)cache_data + dst_offset, tmp.data(), head_bytes, gpuMemcpyHtoD);
+#else
         std::vector<uint8_t> tmp(head_bytes);
         std::memcpy(tmp.data(), (char*)cache_data + src_offset, head_bytes);
         std::memcpy((char*)cache_data + dst_offset, tmp.data(), head_bytes);
+#endif
     }
 }
 
@@ -171,9 +177,15 @@ static void compact_tria_k_pre_rope(
             const size_t src_offset = ((size_t)h * head_stride) + ((size_t)kv_start + src_pos) * head_bytes;
             const size_t dst_offset = ((size_t)h * head_stride) + ((size_t)kv_start + dst_pos) * head_bytes;
 
+#if defined(HAS_GPU) && HAS_GPU
+            std::vector<uint8_t> tmp(head_bytes);
+            gpuMemcpy(tmp.data(), (char*)tria_data + src_offset, head_bytes, gpuMemcpyDtoH);
+            gpuMemcpy((char*)tria_data + dst_offset, tmp.data(), head_bytes, gpuMemcpyHtoD);
+#else
             std::vector<uint8_t> tmp(head_bytes);
             std::memcpy(tmp.data(), (char*)tria_data + src_offset, head_bytes);
             std::memcpy((char*)tria_data + dst_offset, tmp.data(), head_bytes);
+#endif
         }
     }
 }
@@ -200,6 +212,12 @@ bool tria_kv_compress(
     // Get element sizes from ggml types
     const size_t k_bytes = head_dim * ggml_type_size(k_type) / ggml_blck_size(k_type);
     const size_t v_bytes = head_dim * ggml_type_size(v_type) / ggml_blck_size(v_type);
+
+    std::fprintf(stderr, "[TriAttention] tria_kv_compress: n_full_attn=%d n_head_kv=%d head_dim=%d max_ctx=%d kv_start=%d cur_pos=%d seq_len=%d\n",
+                n_full_attn, n_head_kv, head_dim, max_ctx, kv_start, cur_pos, cur_pos - kv_start);
+    std::fprintf(stderr, "[TriAttention] stats: num_layers=%u num_heads=%u num_kv_heads=%u head_dim=%u freq_count=%u\n",
+                stats->num_layers, stats->num_heads, stats->num_kv_heads, stats->head_dim, stats->freq_count);
+    std::fflush(stderr);
 
     if (!stats || cur_pos <= 0) {
         if (n_kept_out) *n_kept_out = cur_pos;
