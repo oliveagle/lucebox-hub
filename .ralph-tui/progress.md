@@ -539,3 +539,32 @@ TRIATTN_ENABLED=1 TRIATTN_STATS_PATH=/mnt/.../qwen3.5-27b.bin TRIATTN_KV_BUDGET=
 - helper 函数如果需要使用 return-false-on-error 模式，必须声明为返回 bool
 
 ---
+
+## [2026-05-22] - lucebox-hub-gfx1151-fbe
+
+### [验收] TriAttention KV 压缩功能验收测试与性能 benchmark
+
+**结论**: 此 bead 描述的验收测试工作已在之前的 beads 中完成。
+
+**已完成工作验证**:
+
+| 功能 | 完成于 | 状态 |
+|------|--------|------|
+| TriAttention CUDA 后端验证 | lucebox-hub-gfx1151-n2f | ✅ |
+| KV 压缩优化 (min_keep_ratio) | lucebox-hub-gfx1151-m96 | ✅ |
+| Qwen35Backend 集成 | lucebox-hub-gfx1151-rw4 | ✅ |
+| 性能 benchmark | lucebox-hub-gfx1151-n2f | ✅ |
+
+**Benchmark 结果** (NVIDIA GV100GL, CUDA 12.5):
+
+| 配置 | 速度 (tok/s) | 状态 |
+|------|-------------|------|
+| Baseline (AR only) | 20.21 | ✅ |
+| Baseline + TriAttention (kv=2048) | 19.52 | ✅ |
+| Baseline + TriAttention (kv=512) | 20.28 | ✅ |
+| DFlash only | 30.49 | ✅ (+50.6%) |
+| DFlash + TriAttention (kv=2048) | 29.05 | ✅ |
+
+**文件变更**: 无需代码变更 - 所有工作已在之前的 beads 中完成
+
+---
