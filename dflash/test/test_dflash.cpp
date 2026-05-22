@@ -699,6 +699,11 @@ int main(int argc, char ** argv) {
     if (const char * s = std::getenv("DFLASH27B_DRAFT_CTX_MAX")) {
         g_draft_ctx_max = std::max(0, std::atoi(s));
     }
+
+    // Initialize TriAttention KV compression from environment variables
+    // This loads stats and config from TRIATTN_* env vars
+    init_triattention_from_env();
+
     const char * target_path = argv[1];
 
     // ---- Architecture detection ------------------------------------------

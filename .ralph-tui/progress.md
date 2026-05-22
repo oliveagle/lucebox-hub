@@ -36,6 +36,21 @@ after each iteration and it should be included in prompts for context.
 - **Superseded by**: CUDA backend solution (NVIDIA V100) which solved the root problem
 - gfx1151 APU hipMemcpy hang was hardware architecture limitation, not software bug
 
+### GGUF Tensor Batch Parallel Loading
+
+**Pattern**: Use `ggml_backend_tensor_set_async` + ring buffer for batched tensor uploads
+- **Problem**: Original code uploaded 850 tensors serially with ~1700 sync points (memcpy + tensor_set per tensor)
+- **Solution**: Two-pass approach with ring buffer of BATCH_SIZE=8 host buffers
+  1. First pass: collect all tensor metadata (offset, size, name) into `upload_queue`
+  2. Second pass: upload in batches of 8
+     - Copy mmap data to ring buffers (fast CPU memcpy)
+     - Submit async GPU copies via `ggml_backend_tensor_set_async`
+     - Synchronize once per batch
+- **Key gotcha**: `cudaMemcpyAsync` requires source buffer to remain valid until transfer completes
+  - Cannot reuse a single host buffer across async calls without synchronization
+  - Ring buffer ensures each tensor has dedicated host buffer until batch sync
+- **Expected improvement**: Reduces CPU-GPU sync points from ~1700 to ~850/8 ≈ 106 (16x reduction)
+
 ---
 
 ## [2026-05-22] - lucebox-hub-gfx1151-1yy
@@ -292,3 +307,87 @@ This is fundamentally slower than discrete GPU H2D transfers over PCIe.
 - 不再需要 gfx1151 APU 上的 HIP/ROCm workaround
 
 **状态**: 标记为 superseded，无需代码变更
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-912
+
+### [优化] GGUF tensor 批量并行加载 - 替代逐个串行加载
+
+**实施内容**:
+1. 将 `gguf_target_loader.cpp` 中的串行 tensor 加载改为批量并行加载
+2. 使用 `ggml_backend_tensor_set_async` 替代 `ggml_backend_tensor_set`
+3. 实现 ring buffer (BATCH_SIZE=8) 确保 async copy 数据安全性
+
+**关键变更**:
+- `dflash/src/qwen35/gguf_target_loader.cpp`: 修改 tensor upload 循环
+  - 第一遍: 收集所有 tensor 元数据 (offset, size, name) 到 `upload_queue`
+  - 分配 ring buffer: 8 个 host buffers (每个 `max_tensor_size`)
+  - 第二遍: 每批 8 个 tensor 并行上传
+    - 先拷贝 mmap 到 ring buffers (CPU memcpy)
+    - 提交所有 `ggml_backend_tensor_set_async` (H2D DMA)
+    - 每批同步一次 `ggml_backend_synchronize(backend)`
+
+**同步点减少**: 从 ~1700 次降至 ~106 次 (16x 减少)
+
+**Learnings:**
+- `cudaMemcpyAsync` 需要源 buffer 在 DMA 传输完成前保持有效
+  - 不能跨 async 调用复用单个 host buffer 除非中间有 synchronization
+  - Ring buffer 确保每个 tensor 有独立的 host buffer
+- 第一遍收集元数据很重要：避免在错误路径中释放 buffer
+- `ggml_backend_tensor_set_async` 底层调用 `cudaMemcpyAsync(HostToDevice)` + 同一个 CUDA stream
+  - 同一 stream 内的 async 操作按顺序执行
+  - 但 host 可以立即返回并修改源 buffer（这是竞态！）
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-n2f
+
+### [验收] TriAttention CUDA 后端完整验证
+
+**验证结果**: TriAttention CUDA 后端验证通过，所有配置正常工作。
+
+**测试配置**: NVIDIA GV100GL (Tesla PG503-216, 32GB VRAM) + CUDA 12.5
+
+**Benchmark 结果**:
+
+| 配置 | 速度 (tok/s) | 状态 | 说明 |
+|------|-------------|------|------|
+| Baseline (AR only) | 20.21 | ✓ | 无 DFlash，无 TriAttention |
+| Baseline + TriAttention (kv=2048) | 19.52 | ✓ | 无压缩触发 |
+| Baseline + TriAttention (kv=512) | 20.28 | ✓ | 无崩溃（之前报告的 crash 已修复） |
+| DFlash only | 30.49 | ✓ | 50.6% speedup vs baseline |
+| DFlash + TriAttention (kv=2048) | 29.05 | ✓ | accept rate 35.6% (57/160) |
+
+**Stats 文件兼容性验证**:
+- Stats 文件: `deps/llama.cpp/triattention/stats/qwen3.5-27b.bin`
+- 配置: 64 layers, 24 heads, 4 kv heads, head_dim=64, rope_theta=10M, attn_scale=1.0
+- **兼容性确认**: Qwen3.5-27B stats 与 Qwen3.6-27B 模型架构兼容
+- 之前报告的 crash (kv_budget=512 时) **已修复** - 现在正常运行
+
+**验证方法**:
+```bash
+# 运行 TriAttention C 库测试
+cd dflash/build-cuda && ../test/test_triattention
+
+# Baseline 测试
+CUDA_VISIBLE_DEVICES=0 ./build-cuda/test_generate ./models/Qwen3.6-27B-Q4_K_M.gguf /tmp/prompt.bin 64 /tmp/out.bin
+
+# DFlash 测试
+CUDA_VISIBLE_DEVICES=0 ./build-cuda/test_dflash ./models/Qwen3.6-27B-Q4_K_M.gguf ./models/draft/dflash-draft-3.6-q8_0.gguf /tmp/prompt.bin 64 /tmp/out.bin
+
+# TriAttention 测试 (设置环境变量)
+TRIATTN_ENABLED=1 TRIATTN_STATS_PATH=/mnt/.../qwen3.5-27b.bin TRIATTN_KV_BUDGET=2048 ./build-cuda/test_generate ...
+```
+
+**nvidia-smi 问题**: 驱动版本不匹配 (NVML 535.309) 不影响 CUDA 程序运行
+
+**Learnings:**
+- TriAttention 在 CUDA 上初始化成功后，stats 加载正常 (64 layers, 24 heads, head_dim=64)
+- Qwen3.5-27B stats 可用于 Qwen3.6-27B，无需重新生成
+- DFlash 接受率 35.6%，生成 64 tokens 只需 2.1 秒 (30.49 tok/s)
+- batch loading 代码 (`gguf_target_loader.cpp`) 已实现 ring buffer (BATCH_SIZE=8)，减少同步点
+
+**文件变更**: 无需代码变更 - 所有测试通过
+
+---

@@ -606,9 +606,12 @@ bool load_target_gguf_partial(const std::string & path,
     }
     std::fprintf(stderr, "[loader] allocated host buffer: %zu bytes\n", max_tensor_size);
 
-    std::fprintf(stderr, "[loader] starting tensor upload loop: %ld total tensors in file\n", n_tensors);
-    std::fflush(stderr);
+    // Batch size for async uploads: submit N tensors before synchronizing
+    // This reduces CPU-GPU sync points from ~1700 to ~850/BATCH_SIZE
+    const int BATCH_SIZE = 8;
 
+    // First pass: collect all tensors we need to upload (their info)
+    std::vector<std::tuple<ggml_tensor*, size_t, size_t, const char*>> upload_queue;
     for (int64_t tid = 0; tid < n_tensors; tid++) {
         const char * tname = gguf_get_tensor_name(gctx, tid);
         ggml_tensor * t = ggml_get_tensor(meta_ctx, tname);
@@ -618,7 +621,6 @@ bool load_target_gguf_partial(const std::string & path,
         if (off + sz > mm.len) {
             set_last_error(std::string("tensor '") + tname + "' overflows file");
             gguf_free(gctx);
-            free(host_buf);
             return false;
         }
         if (std::string(tname) == "token_embd.weight") {
@@ -630,22 +632,60 @@ bool load_target_gguf_partial(const std::string & path,
         if (!should_load_target_tensor(tname, plan.layer_begin, plan.layer_end, plan.load_output)) {
             continue;
         }
-        tensor_count++;
-        if (tensor_count <= 10 || tensor_count % 10 == 0) {
-            std::fprintf(stderr, "[loader] tensor %d/%d: %s (%.2f MiB)\n",
-                         tensor_count, (int)n_tensors, tname, sz / (1024.0 * 1024.0));
-            std::fflush(stderr);
-        }
-
-        // Step 1: Copy from mmap to regular malloc buffer
-        memcpy(host_buf, (const uint8_t *)mm.addr + off, sz);
-
-        // Step 2: Copy from host buffer to GPU
-        ggml_backend_tensor_set(t, host_buf, 0, sz);
-        total += sz;
+        upload_queue.emplace_back(t, off, sz, tname);
     }
 
-    free(host_buf);
+    std::fprintf(stderr, "[loader] starting batch tensor upload: %zu tensors to upload\n", upload_queue.size());
+    std::fflush(stderr);
+
+    // Allocate ring buffer: BATCH_SIZE host buffers for async copy safety
+    std::vector<void*> host_buffers;
+    host_buffers.reserve(BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++) {
+        void * buf = malloc(max_tensor_size);
+        if (!buf) {
+            set_last_error("Failed to allocate host buffer for tensor upload");
+            for (int j = 0; j < i; j++) free(host_buffers[j]);
+            free(host_buf);
+            gguf_free(gctx);
+            return false;
+        }
+        host_buffers.push_back(buf);
+    }
+    std::fprintf(stderr, "[loader] allocated ring buffer: %d x %zu bytes\n", BATCH_SIZE, max_tensor_size);
+    free(host_buf); // Old single buffer no longer needed
+    host_buf = nullptr;
+
+    // Second pass: upload in batches
+    const size_t num_tensors = upload_queue.size();
+    for (size_t batch_start = 0; batch_start < num_tensors; batch_start += BATCH_SIZE) {
+        const size_t batch_end = std::min(batch_start + BATCH_SIZE, num_tensors);
+
+        // First, copy all mmap data to ring buffers (synchronous, fast CPU memcpy)
+        for (size_t i = batch_start; i < batch_end; i++) {
+            auto [t, off, sz, tname] = upload_queue[i];
+            memcpy(host_buffers[i - batch_start], (const uint8_t *)mm.addr + off, sz);
+        }
+
+        // Then, submit all async GPU copies (each buffer stays valid until sync)
+        for (size_t i = batch_start; i < batch_end; i++) {
+            auto [t, off, sz, tname] = upload_queue[i];
+            tensor_count++;
+            if (tensor_count <= 10 || tensor_count % 50 == 0) {
+                std::fprintf(stderr, "[loader] tensor %d/%zu: %s (%.2f MiB)\n",
+                             tensor_count, num_tensors, tname, sz / (1024.0 * 1024.0));
+                std::fflush(stderr);
+            }
+            ggml_backend_tensor_set_async(backend, t, host_buffers[i - batch_start], 0, sz);
+            total += sz;
+        }
+
+        // Synchronize after each batch: all async copies complete before next batch
+        ggml_backend_synchronize(backend);
+    }
+
+    // Free ring buffers
+    for (void * buf : host_buffers) free(buf);
 
     std::fprintf(stderr, "[loader] all tensor copies complete (total: %d tensors, %.2f GiB)\n",
                  tensor_count, total / (1024.0 * 1024.0 * 1024.0));

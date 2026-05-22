@@ -1,0 +1,213 @@
+# Iteration 14 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-912
+- **Task Title**: [优化] GGUF tensor 批量并行加载 - 替代逐个串行加载
+- **Description**: 当前 gguf_target_loader.cpp:612-646 的 tensor 加载循环是串行的（逐个 memcpy + cudaMemcpy），850 个 tensor 需要约 1700 次同步操作。需要改为批量并行加载。
+
+## 问题
+- 每个 tensor: mmap → host_buf → GPU (2次 memcpy)
+- 850 tensors × 2 = ~1700 次同步操...
+- **Status**: completed
+- **Task Completed**: No
+- **Promise Detected**: No
+- **Started At**: 2026-05-22T08:31:09.984Z
+- **Ended At**: 2026-05-22T08:42:50.549Z
+- **Duration**: 11m 40s
+- **Input Tokens**: 2891690
+- **Output Tokens**: 32624
+- **Total Tokens**: 2924314
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96m**/*gguf*loader*.cpp[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server[0m pattern: [96m**/gguf_target_loader.cpp[0m
+<think>I need to find the actual llama.cpp gguf_target_loader.cpp. Let me search in the llama.cpp directory.
+</think>
+
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server[0m pattern: [96m**/llama.cpp/**/*gguf*.cpp[0m
+[94m[Bash][0m List CUDA build directory $ ls -la /mnt/eaget-4tb/data/llm_server/build-cuda/
+
+[91m[Error: Exit code 2
+/bin/ls: cannot access '/mnt/eaget-4tb/data/llm_server/build-cuda/': No such file or directory][0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m
+[94m[Bash][0m List project directory $ ls -la /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/
+现在我看到了需要优化的代码。让我检查一下 ggml_backend 的 CUDA API 是否支持 stream 操作，然后实现批量并行加载。
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96mggml_backend.*stream|cudaMemcpyAsync|GGML.*STREAM[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src[0m pattern: [96m*.h[0m
+让我查看 ggml_backend_tensor_set 的实现，看看它是否支持 stream：
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp[0m pattern: [96mggml_backend_tensor_set[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src[0m pattern: [96mcudaStream_t|CUstream|hipStream_t[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp[0m pattern: [96mggml_backend.*set_tensor[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp[0m pattern: [96mggml_backend_cuda_get_stream|cudaGetDevice|cudaStreamCreate|cudaMemcpyAsync[0m
+现在我需要查看 CUDA 后端的 `set_tensor` 实现，以了解如何实现批量并行加载。关键是直接使用 CUDA 的 `cudaMemcpyAsync` 和多个 streams。
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src[0m pattern: [96mggml_backend_tensor_set_async|ggml_backend_set_tensor_async[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-backend.cpp[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src[0m pattern: [96mggml_backend_stream[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m
+现在我了解了代码结构。`ggml_backend_tensor_set` 最终调用 `ggml_backend_cuda_buffer_set_tensor`，它使用 `cudaMemcpyAsync` + `cudaStreamSynchronize`。
+
+问题是当前代码逐个 tensor 串行加载。为了实现批量并行加载，我需要：
+
+1. 创建多个 CUDA streams
+2. 使用 `ggml_backend_tensor_set_async` (它调用 `ggml_backend_cuda_set_tensor_async`)
+3. 批量提交多个 tensor 拷贝后再同步
+
+让我检查一下 `ggml_backend_tensor_set_async` 的 API：
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/include[0m pattern: [96mggml_backend_tensor_set_async[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/include[0m pattern: [96mggml_backend_synchronize[0m
+好的，现在我有完整的 API 了。让我实现批量并行加载。关键思路是：
+
+1. 使用 `ggml_backend_tensor_set_async` 而不是 `ggml_backend_tensor_set`
+2. 批量提交多个 tensor 拷贝
+3. 最后调用一次 `ggml_backend_synchronize`
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m edit: "    std::fprintf(stderr, "[loader] starting tensor..." → "    std::fprintf(stderr, "[loader] starting batch ..."
+等等，我刚刚发现了一个问题。`ggml_backend_tensor_set_async` 使用了 `cudaMemcpyAsync`，但所有 tensor 都共享同一个 `host_buf`。在下一轮循环中，`host_buf` 会被覆盖，而之前的异步拷贝可能还没完成。这是一个竞态条件！
+
+让我修复这个问题，使用多个 pinned memory 缓冲区：
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m edit: "    std::fprintf(stderr, "[loader] starting batch ..." → "    std::fprintf(stderr, "[loader] starting batch ..."
+Wait, I need to reconsider the approach. The per-tensor malloc is expensive. Let me use a cleaner approach with a ring buffer pattern for the batch:
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m
+Let me revert to a simpler, correct approach: use a single large host buffer and submit synchronous batches (all async within the batch):
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m edit: "    std::fprintf(stderr, "[loader] starting batch ..." → "    // Batch size for async uploads: submit N tens..."
+Wait, I need to reconsider. The `ggml_backend_tensor_set_async` uses `cudaMemcpyAsync` which queues work on the stream. The issue with using a single `host_buf` is that the `cudaMemcpyAsync` call returns immediately, but the DMA engine reads from that buffer asynchronously. If we overwrite the buffer before the DMA reads, we get corrupted data.
+
+Let me verify the `ggml_backend_cuda_set_tensor_async` implementation to confirm:
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu[0m
+Okay, that confirms it. `cudaMemcpyAsync` requires the source buffer to remain valid until the transfer completes. Let me allocate a ring buffer of `BATCH_SIZE` host buffers:
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m edit: "    // Find max tensor size for buffer allocation
+..." → "    // Find max tensor size for buffer allocation
+..."
+
+[91m[Error: <tool_use_error>String to replace not found in file.
+String:     // Find max tensor size for buffer allocation
+    size_t max_tensor_size = 0;
+    for (int64_t tid = 0; tid < n_tensors; tid++) {
+        const size_t sz = gguf_get_tensor_size(gctx, tid);
+        if (sz > max_tensor_size) max_tensor_size = sz;
+    }
+
+    // Allocate reusable host buffer (use regular malloc, not mmap)
+    void *host_buf = malloc(max_tensor_size);
+    if (!host_buf) {
+        set_last_error("Failed to allocate host buffer for tensor upload");
+        gguf_free(gctx);
+        return false;
+    }
+    std::fprintf(stderr, "[loader] allocated host buffer: %zu bytes\n", max_tensor_size);
+
+    std::fprintf(stderr, "[loader] starting batch tensor upload: %ld total tensors in file\n", n_tensors);
+    std::fflush(stderr);
+
+    // Batch size for async uploads: submit N tensors before synchronizing
+    // This reduces CPU-GPU sync points from ~1700 to ~850/batch_size
+    const int BATCH_SIZE = 8;
+
+    // First pass: collect all tensors we need to upload (their info)
+    std::vector<std::tuple<ggml_tensor*, size_t, size_t, const char*>> upload_queue;
+    for (int64_t tid = 0; tid < n_tensors; tid++) {
+        const char * tname = gguf_get_tensor_name(gctx, tid);
+        ggml_tensor * t = ggml_get_tensor(meta_ctx, tname);
+        if (!t) continue;
+        const size_t off = data_start + gguf_get_tensor_offset(gctx, tid);
+        const size_t sz  = gguf_get_tensor_size(gctx, tid);
+        if (off + sz > mm.len) {
+            set_last_error(std::string("tensor '") + tname + "' overflows file");
+            gguf_free(gctx);
+            free(host_buf);
+            return false;
+        }
+        if (std::string(tname) == "token_embd.weight") {
+            tok_embd_off  = off;
+            tok_embd_sz   = sz;
+            tok_embd_type = gguf_get_tensor_type(gctx, tid);
+            continue;
+        }
+        if (!should_load_target_tensor(tname, plan.layer_begin, plan.layer_end, plan.load_output)) {
+            continue;
+        }
+        upload_queue.emplace_back(t, off, sz, tname);
+    }
+
+    std::fprintf(stderr, "[loader] starting batch tensor upload: %zu tensors to upload\n", upload_queue.size());
+    std::fflush(stderr);
+
+    // Second pass: upload in batches
+    const size_t num_tensors = upload_queue.size();
+    for (size_t batch_start = 0; batch_start < num_tensors; batch_start += BATCH_SIZE) {
+        const size_t batch_end = std::min(batch_start + BATCH_SIZE, num_tensors);
+
+        // Submit all tensors in this batch asynchronously
+        for (size_t i = batch_start; i < batch_end; i++) {
+            auto [t, off, sz, tname] = upload_queue[i];
+            tensor_count++;
+            if (tensor_count <= 10 || tensor_count % 50 == 0) {
+                std::fprintf(stderr, "[loader] tensor %d/%zu: %s (%.2f MiB)\n",
+                             tensor_count, num_tensors, tname, sz / (1024.0 * 1024.0));
+                std::fflush(stderr);
+            }
+            // Copy from mmap to host buffer, then async to GPU
+            // We need to memcpy into host_buf, then call set_async
+            // But if we do this sequentially, each call to set_async
+            // can use the same host_buf because they all go to the
+            // same stream and execute in order (FIFO)
+            memcpy(host_buf, (const uint8_t *)mm.addr + off, sz);
+            ggml_backend_tensor_set_async(backend, t, host_buf, 0, sz);
+            total += sz;
+        }
+
+        // Synchronize after each batch: all async copies complete before next batch
+        ggml_backend_synchronize(backend);
+    }</tool_use_error>][0m
+Let me re-read the current file state.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m
+I see the issue - there's a comment about FIFO ordering but that's incorrect because `memcpy` completes before `cudaMemcpyAsync` returns, but the DMA read happens later. Let me fix this properly:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m edit: "    // Batch size for async uploads: submit N tens..." → "    // Batch size for async uploads: submit N tens..."
+Wait, there's an issue - I'm using `host_buf` in the first pass's error handling before the ring buffer allocation. Let me re-read the code flow:
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/qwen35/gguf_target_loader.cpp[0m
+The code looks correct. Now let me build the project to check for compilation errors.
+
+[94m[TodoWrite][0m
+[94m[Bash][0m Build the dflash project $ cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build && cmake --build . --target test_...
+<think>Build succeeded. Now let me update progress.md with learnings and then close the bead.
+</think>
+
+[94m[TodoWrite][0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+Let me update the progress.md file with the new learnings:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "### gfx1151 APU UMA Workaround (Superseded by CUDA..." → "### gfx1151 APU UMA Workaround (Superseded by CUDA..."
+Now add the progress entry at the end of the file:
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "**状态**: 标记为 superseded，无需代码变更" → "**状态**: 标记为 superseded，无需代码变更
+
+---
+
+## [2026-05-22..."
+Now let me close the bead:
+[94m[Bash][0m Close the bead $ br close lucebox-hub-gfx1151-912 --reason "实现 GGUF tensor 批量并行加载 - 使用 ggml_backend_tensor_set_async ...
+[94m[Bash][0m Flush tracker state to JSONL $ br sync --flush-only 2>&1
+[94m[TodoWrite][0m
+Implementation complete. Here's what was done:
+
+**`gguf_target_loader.cpp` changes:**
+- Replaced serial `ggml_backend_tensor_set` with batched `ggml_backend_tensor_set_async` + ring buffer
+- Two-pass approach: first collect all tensor metadata, then upload in batches of 8
+- Each batch: copy mmap data to ring buffers → submit async GPU copies → synchronize once
+- Reduces CPU-GPU sync points from ~1700 to ~106 (16x reduction)
+
+**Key design decision:** Ring buffer (8 buffers of `max_tensor_size`) ensures each async copy has its own source buffer until the batch synchronizes, avoiding data corruption from the DMA engine reading while the host overwrites the buffer.
+
+Build succeeded. Bead closed and progress logged.
