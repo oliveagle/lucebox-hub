@@ -233,9 +233,9 @@ bool ggml_hip_tria_score(
         std::fprintf(stderr, "[TriAttention HIP] null pointer passed\n");
         return false;
     }
-    if (fc > TRIA_MAX_FREQ_COUNT || fc <= 0) {
+    if (fc > TRIA_MAX_FC || fc <= 0) {
         std::fprintf(stderr, "[TriAttention HIP] fc=%d out of range [1, %d]\n",
-                     fc, TRIA_MAX_FREQ_COUNT);
+                     fc, TRIA_MAX_FC);
         return false;
     }
     if (n_kv_heads <= 0 || seq_len <= 0 || n_full_attn <= 0) {
