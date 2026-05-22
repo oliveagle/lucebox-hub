@@ -4,7 +4,11 @@ __pycache__/
 *$py.class
 *.so
 .Python
+# Build directories
 build/
+build-*/
+build-cuda/
+build-triatt/
 develop-eggs/
 dist/
 downloads/
