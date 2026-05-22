@@ -273,7 +273,7 @@ int main(int argc, char ** argv) {
 
 #if defined(DFLASH27B_TRIATTENTION_ENABLED)
         // TriAttention KV compression: trigger at specified intervals
-        if (g_tria_state.should_compress(cur_pos + 1)) {
+        if (g_tria_state.should_compress(cur_pos + 1, cur_pos + 1)) {
             auto t_c0 = std::chrono::steady_clock::now();
 
             // Get KV cache pointers

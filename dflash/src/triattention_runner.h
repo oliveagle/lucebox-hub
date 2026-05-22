@@ -45,10 +45,11 @@ struct TriAttentionState {
     bool enabled = false;
 
     // Configuration (from environment or defaults)
-    int kv_budget = 2048;           // Max tokens to retain
+    int kv_budget = 512;           // Max tokens to retain (default 512 for better trigger)
     int divide_length = 128;        // Compression trigger interval
     int window_size = 128;          // Recent tokens always preserved
     float min_keep_ratio = 0.5f;    // Minimum keep ratio (default 50% to prevent over-compression)
+    bool force_compress = false;    // Force compression regardless of budget (for testing)
 
     // Runtime state
     int last_compressed_pos = 0;    // Track when we last compressed
@@ -68,7 +69,8 @@ struct TriAttentionState {
     TriAttentionState(TriAttentionState&& other) noexcept
         : stats_ptr(other.stats_ptr), enabled(other.enabled),
           kv_budget(other.kv_budget), divide_length(other.divide_length),
-          window_size(other.window_size), last_compressed_pos(other.last_compressed_pos) {
+          window_size(other.window_size), min_keep_ratio(other.min_keep_ratio),
+          force_compress(other.force_compress), last_compressed_pos(other.last_compressed_pos) {
         other.stats_ptr = nullptr;
     }
 
@@ -81,11 +83,13 @@ struct TriAttentionState {
     }
 
     // Check if compression should trigger at the given position.
-    // Only compress when (1) divide_length has passed AND (2) committed tokens
+    // If force_compress is set, only the divide_length check applies.
+    // Otherwise, only compress when (1) divide_length has passed AND (2) committed tokens
     // exceed kv_budget. Avoids compressing when cache is already small.
     bool should_compress(int cur_pos, int committed) const {
         if (!enabled) return false;
         if (cur_pos - last_compressed_pos < divide_length) return false;
+        if (force_compress) return true;  // Bypass budget check (testing/debug mode)
         if (committed <= kv_budget) return false;  // No need to compress when under budget
         return true;
     }
@@ -113,10 +117,11 @@ extern TriAttentionState g_tria_state;
 // Initialize TriAttention from environment variables.
 // Reads:
 //   - TRIATTN_STATS_PATH: path to .bin stats file
-//   - TRIATTN_KV_BUDGET: max tokens to retain (default 2048)
+//   - TRIATTN_KV_BUDGET: max tokens to retain (default 512)
 //   - TRIATTN_DIVIDE_LENGTH: compression interval (default 128)
 //   - TRIATTN_WINDOW_SIZE: recent tokens preserved (default 128)
 //   - TRIATTN_MIN_KEEP_RATIO: minimum keep ratio to prevent over-compression (default 0.5)
+//   - TRIATTN_FORCE_COMPRESS: force compression every divide_length regardless of budget (default 0)
 void init_triattention_from_env();
 
 // Free TriAttention resources

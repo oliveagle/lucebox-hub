@@ -48,10 +48,19 @@ with open('/tmp/test_prompt.bin', 'wb') as f:
 ```bash
 export TRIATTN_ENABLED=1
 export TRIATTN_STATS_PATH=deps/llama.cpp/triattention/stats/qwen3.6-27b.bin
-export TRIATTN_KV_BUDGET=2048
-export TRIATTN_DIVIDE_LENGTH=128
-export TRIATTN_WINDOW_SIZE=128
+export TRIATTN_KV_BUDGET=512       # Max tokens to retain (默认 512)
+export TRIATTN_DIVIDE_LENGTH=128   # Compression trigger interval
+export TRIATTN_WINDOW_SIZE=128     # Recent tokens always preserved
+export TRIATTN_MIN_KEEP_RATIO=0.5  # Minimum keep ratio (default 50%)
+export TRIATTN_FORCE_COMPRESS=1    # Force compress every divide_length (for testing/debug)
 ```
+
+**关键配置说明**：
+
+- `TRIATTN_KV_BUDGET`: 压缩后保留的最大 token 数。默认值从 2048 改为 512，以更容易触发压缩
+- `TRIATTN_FORCE_COMPRESS`: 设置为 1 时，无论 budget 如何都会每 `divide_length` 个 token 压缩一次（用于测试/调试）
+- 压缩触发条件: `divide_length` 已过 AND (`committed > kv_budget` OR `force_compress=true`)
+- **短上下文测试**: 使用 `TRIATTN_FORCE_COMPRESS=1` 来验证压缩功能是否正常
 
 Stats 文件路径: `dflash/deps/llama.cpp/triattention/stats/qwen3.6-27b.bin`
 

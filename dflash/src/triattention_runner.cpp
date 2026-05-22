@@ -83,8 +83,14 @@ void init_triattention_from_env() {
         g_tria_state.min_keep_ratio = std::atof(min_keep_ratio_env);
     }
 
-    std::fprintf(stderr, "[TriAttention] Enabled: kv_budget=%d, divide_length=%d, window_size=%d, min_keep_ratio=%.2f\n",
-                g_tria_state.kv_budget, g_tria_state.divide_length, g_tria_state.window_size, g_tria_state.min_keep_ratio);
+    // Force compress mode (bypasses budget check, useful for testing/debug)
+    const char* force_compress_env = std::getenv("TRIATTN_FORCE_COMPRESS");
+    if (force_compress_env && std::strcmp(force_compress_env, "1") == 0) {
+        g_tria_state.force_compress = true;
+    }
+
+    std::fprintf(stderr, "[TriAttention] Enabled: kv_budget=%d, divide_length=%d, window_size=%d, min_keep_ratio=%.2f, force_compress=%d\n",
+                g_tria_state.kv_budget, g_tria_state.divide_length, g_tria_state.window_size, g_tria_state.min_keep_ratio, g_tria_state.force_compress);
 #else
     std::fprintf(stderr, "[TriAttention] TriAttention not compiled in (DFLASH27B_TRIATTENTION_ENABLED not set)\n");
 #endif

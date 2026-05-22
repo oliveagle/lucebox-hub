@@ -3270,14 +3270,11 @@ int main(int argc, char ** argv) {
                                     sizeof(float) * vocab);
             last_tok = argmax_f32(last_logits.data(), vocab);
             auto T_replay_logits = sync_us();
-            tt_replay_logits += std::chrono::duration<double, std::micro>(T_replay_logits - T_replay_compute).count();
+            tt_replay_logits += std::chrono::duration<double, std::milli>(T_replay_logits - T_replay_compute).count();
 
-            bool hit_eos = false;
             for (int i = 0; i < commit_n; i++) {
                 out_all.push_back(replay_tok[i]); stream_emit(replay_tok[i]);
-                if (IS_EOS_TOK(replay_tok[i], w)) hit_eos = true;
             }
-            if (hit_eos) break;
         }
 
         if (!sync_draft_feature_mirror(committed, commit_n)) {
@@ -3292,9 +3289,10 @@ int main(int argc, char ** argv) {
 
 #if defined(DFLASH27B_TRIATTENTION_ENABLED)
         // TriAttention KV compression: trigger at specified intervals
+        // IMPORTANT: Run BEFORE hit_eos check so compression happens even when EOS is reached
         std::fprintf(stderr, "[DEBUG] TriAttention: g_tria_state.enabled=%d, committed=%d, last_compressed_pos=%d, should_compress=%d\n",
-                     g_tria_state.enabled, committed, g_tria_state.last_compressed_pos, g_tria_state.should_compress(committed));
-        if (g_tria_state.should_compress(committed)) {
+                     g_tria_state.enabled, committed, g_tria_state.last_compressed_pos, g_tria_state.should_compress(committed, committed));
+        if (g_tria_state.should_compress(committed, committed)) {
             auto t_c0 = std::chrono::steady_clock::now();
 
             const int n_full_attn = (int)cache.attn_k.size();
@@ -3342,13 +3340,14 @@ int main(int argc, char ** argv) {
             std::fprintf(stderr, "[DEBUG] TriAttention: compress ok=%d, n_kept=%d\n", ok, n_kept);
 
             if (ok && n_kept < committed) {
+                const int committed_before = committed;
                 cache.cur_pos = n_kept;
                 committed = n_kept;
                 // n_generated was (committed_prev - prefill_start), now (n_kept - prefill_start)
                 // Don't adjust n_generated - it just counts generated tokens since prefill ended
                 g_tria_state.mark_compressed(n_kept);
-                std::fprintf(stderr, "[TriAttention] Compressed KV: cur_pos %d -> %d\n",
-                             committed + (committed - n_kept), n_kept);
+                std::fprintf(stderr, "[TriAttention] Updated cache.cur_pos to %d (reduced from %d)\n",
+                             n_kept, committed_before);
             }
 
             auto t_c1 = std::chrono::steady_clock::now();
@@ -3356,6 +3355,16 @@ int main(int argc, char ** argv) {
             std::fprintf(stderr, "[TriAttention] Compression took %.2f ms\n", compress_ms);
         }
 #endif
+
+        // Check for EOS after compression (so compression can still trigger on last step)
+        {
+            bool hit_eos = false;
+            for (int i = 0; i < commit_n; i++) {
+                int32_t tok = out_all[out_all.size() - commit_n + i];
+                if (IS_EOS_TOK(tok, w)) hit_eos = true;
+            }
+            if (hit_eos) break;
+        }
 
     }
 
