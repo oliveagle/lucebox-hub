@@ -1,0 +1,291 @@
+# Iteration 5 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-61r
+- **Task Title**: [P0-阻塞] TriAttention 压缩触发后性能未验证 - 需要长上下文测试
+- **Description**: 当前状态:
+1. qwen3.6-27b.bin stats 文件存在且参数正确
+2. 但从未在长上下文场景测试过 TriAttention 压缩
+3. kv_budget=2048 时短 context 压缩不触发
+
+验证计划:
+1. 使用长 prompt (8192+ tokens) 触发压缩
+2. 设置 kv_budget=4096 确保压缩触发
+3. 观察 [TriAttention] 日...
+- **Status**: completed
+- **Task Completed**: Yes
+- **Promise Detected**: Yes
+- **Started At**: 2026-05-22T15:05:34.058Z
+- **Ended At**: 2026-05-22T15:22:34.483Z
+- **Duration**: 17m 0s
+- **Input Tokens**: 4366459
+- **Output Tokens**: 34171
+- **Total Tokens**: 4400630
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+<think>Let me start by understanding the current state of the project and the task at hand. I need to:
+
+1. Study the PRD context if available
+2. Study `.ralph-tui/progress.md` to understand overall status
+3. Implement the requirements for verifying TriAttention compression performance with long context
+
+Let me first read the progress file and understand the project structure.
+</think>
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/.ralph-tui/progress.md[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server[0m pattern: [96m**/*.md[0m
+
+[91m[Error: File does not exist. Note: your current working directory is /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151. Did you mean /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md?][0m
+Let me read the progress file from the correct path and understand the project structure.
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96m**/*.py[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96m**/*.jsonc[0m
+Let me explore the codebase to understand the current state of the TriAttention implementation and test infrastructure.
+
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96m**/*triattention*[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96m**/test_dflash*[0m
+[94m[Glob][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151[0m pattern: [96m**/CLAUDE.md[0m
+Let me explore the directory structure and read the key files.
+
+[94m[Bash][0m List project root directory $ ls /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/
+[94m[Bash][0m List test directory $ ls /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/
+[94m[Bash][0m List TriAttention source files $ ls /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/triattention*
+Let me read the key files to understand the current implementation and what needs to be done for long context testing.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/CLAUDE.md[0m
+Let me now read the test_dflash.cpp file to understand how the testing works.</think>
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/triattention_runner.h[0m
+<think>Let me search for where the TriAttention compression is actually called in test_dflash.cpp. I need to find the code that checks `should_compress` and calls the compression function.
+</think>
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m pattern: [96mshould_compress|tria_kv_compress|triattention|TriAttention[0m
+[94m[Bash][0m Check model files availability $ ls /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/models/ 2>/dev/null || echo "No models ...
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src[0m pattern: [96mtria_kv_compress|compact_kv_head_positions|compact_tria_k_pre_rope[0m
+[94m[Bash][0m Check model files, binaries, and stats files $ ls -lh /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/deps/llama.cpp/triattention/stats/
+Let me understand the current state of the build system and how to run the tests.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_generate.cpp[0m
+[94m[TodoWrite][0m
+I understand the current state. The code is already integrated and working. Now I need to:
+
+1. **Increase `max_ctx`** to support 8192+ tokens (both test files hardcode `max_ctx = 4096`)
+2. **Create a long prompt generator** (8192+ tokens)
+3. **Run baseline vs TriAttention tests**
+4. **Compare performance**
+
+Let me start by increasing the max_ctx limit.
+
+[94m[TodoWrite][0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m pattern: [96mmax_ctx[0m
+Let me check what the default max_ctx is set to and understand how to increase it. The code supports `--max-ctx=N` override.</think>
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m
+[94m[Bash][0m Check target model availability $ ls -lh /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/models/Qwen3.6-27B-Q4_K_M.gguf 2>/d...
+I'll start by increasing the default max_ctx to support 8192+ token tests, then create a long context test script.
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m pattern: [96m: 4096[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_generate.cpp[0m pattern: [96mmax_ctx|4096[0m
+<think>test_generate.cpp hardcodes max_ctx=4096, while test_dflash.cpp supports --max-ctx override. I need to either:
+
+1. Modify test_generate.cpp to support --max-ctx, OR
+2. Use test_dflash.cpp for both baseline and TriAttention tests (with/without TRIATTN_ENABLED)
+
+Option 2 is cleaner since it's already the more complete test. But for baseline comparison without TriAttention, I need to either:
+- Compile without DFLASH27B_TRIATTENTION, or
+- Set TRIATTN_ENABLED=0
+
+Let me check if there's a way to disable TriAttention at runtime...
+</think>
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/src/triattention_runner.cpp[0m
+I can disable TriAttention at runtime by not setting `TRIATTN_ENABLED=1` (or setting it to 0). The build already has TriAttention compiled in, and the code checks `TRIATTN_ENABLED` env var. So I can use the same binary for both tests:
+
+- **Baseline**: No `TRIATTN_ENABLED` env var → no compression
+- **TriAttention**: `TRIATTN_ENABLED=1` → compression active
+
+Now let me create the test script. But first, I need to increase max_ctx for test_generate.cpp to support 8192+ tokens.
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_generate.cpp[0m edit: "    const int max_ctx = 4096;" → "    const int max_ctx = 16384;"
+<think>Now let me build the test binaries.
+</think>
+
+[94m[TodoWrite][0m
+Now let me create the long context test script.
+
+[94m[Bash][0m Build test binaries with TriAttention $ cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build && cmake --build . --target test_...
+Let me create the test script for long context testing.
+
+[94m[Write][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/scripts/generate_long_prompt.py[0m "#!/usr/bin/env python3
+"""Generate long context prompt (8192+ tokens) for TriAttention performance testing.
+
+Usage: python3 generate_long_prompt.py <tokenizer_path> <output_bin>
+
+Since we don't have a... (2837 chars)"
+[94m[Write][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/scripts/test_long_context_triattention.sh[0m "#!/bin/bash
+# Long context TriAttention performance test
+# This script tests TriAttention compression on 8192+ token contexts
+
+set -e
+
+# Project root
+cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1... (4394 chars)"
+<think>Let me make the script executable and run a quick test to ensure everything works. But first, let me check if the test binaries can find the model files and work correctly.
+</think>
+
+[94m[Bash][0m Make script executable $ chmod +x /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/scripts/test_long_context_triatte...
+[94m[Bash][0m Verify model and binary availability $ ls -la /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/models/draft/dflash-draft-3.6-q8_0....
+[94m[Bash][0m Find actual model files $ find /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/models/ -type f -name "*.gguf" 2>/dev...
+[94m[Bash][0m Check target model is accessible $ ls -la /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/models/Qwen3.6-27B-Q4_K_M.gguf 2>/d...
+The model files are available. Let me now run a simpler test first - just generate the long prompt and run a quick test.</think>
+[94m[Bash][0m Generate 8192 token prompt $ python3 scripts/generate_long_prompt.py /tmp/long_prompt_8192.bin 8192
+
+[91m[Error: Exit code 2
+python3: can't open file '/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build/scripts/generate_long_prompt.py': [Errno 2] No such file or directory][0m
+[94m[Bash][0m Generate 8192 token prompt from dflash $ cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash && python3 scripts/generate_long_prompt...
+<think>Good, the prompt is generated. Now let's run a baseline test with DFlash only (no TriAttention) first, then with TriAttention enabled. Let me start with a simpler test first to verify things work.
+</think>
+
+[94m[TodoWrite][0m
+[94m[Bash][0m Run DFlash baseline test (8192 context, 256 gen tokens) $ cd /mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/build && unset TRIATTN_ENABLED && ./tes...
+I see - `--max-ctx` needs to be placed before positional arguments. Let me check the argument parsing.
+
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m pattern: [96mmax-ctx|max_ctx_override[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m pattern: [96mtarget_path.*argv|draft_path.*argv|prompt_path.*argv"[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m
+I see - the argv parsing happens after the args are already processed at line 695-705. But `--max-ctx=N` is parsed at line 894. The issue is that `test_dflash` parses args in a loop that starts at line ~840, and the args `argv[1]` etc are positional. The `--max-ctx=16384` with a space between `--max-ctx` and the value is interpreted as a positional argument.
+
+Let me fix the command to use `--max-ctx=16384` as a single argument.
+
+[94m[Bash][0m Run DFlash baseline test (8192 context, 256 gen tokens) $ unset TRIATTN_ENABLED && ./test_dflash \     --max-ctx=16384 \     ../models/Qwen3.6-27B-Q4_K_M.gguf...
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m
+Let me understand the argv parsing better.
+
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m
+I see the issue. The code at line 725 checks `argv[2][0] == '-'` to detect no_draft_layout. So `--max-ctx=16384` is interpreted as a draft path. The `--max-ctx` parsing happens later in the loop at line 894.
+
+The key insight is:
+- For DFlash (qwen35) with draft model: `argv[1]=target, argv[2]=draft, argv[3]=prompt, argv[4]=n_gen, argv[5]=out, argv[6..]=flags`
+- `flags_start` is 3 (because `no_draft_layout` is false for qwen35 with draft)
+- The flag parsing loop starts at `i = flags_start = 3`, which means it tries to parse `argv[3]` (the prompt path) as flags first!
+
+Actually wait, looking at line 729: `has_positional_args = (!no_draft_layout) && (argc >= 6 && argv[3][0] != '-');` - it checks if `argv[3][0] != '-'` for has_positional_args. But the flag parsing loop at line 798 starts at `flags_start = 3` and will try to parse `argv[3]` as a flag.
+
+This means flags should come **before** the positional args for non-no_draft_layout mode. Let me check if that's the case...
+
+Actually, looking more carefully at the code flow:
+1. `flags_start = 3` for DFlash mode
+2. `has_positional_args = true` if `argv[3][0] != '-'`
+3. `prompt_path = argv[3]` if `has_positional_args`
+4. Then the loop at line 798 `for (int i = flags_start; i < argc; i++)` parses flags from `argv[3]` onwards
+
+So the issue is that the loop will try to parse `argv[3]` (prompt path) as a flag! But wait, it only parses flags if they start with `--`, and the prompt path doesn't start with `--`.
+
+
+I see the problem now. When I run `./test_dflash --max-ctx=16384 target.gguf draft.gguf prompt.bin 256 out.bin`, the argument parsing breaks down. The flag `--max-ctx=16384` is actually at `argv[1]`, which gets misinterpreted as the target path. This means the entire argument sequence gets shifted, causing the parsing logic to fail completely.
+
+The error message confirms the parsing error, showing that the flag is incorrectly being treated as a file path. I'll need to carefully review the argument order and how the parsing logic handles different input scenarios.
+
+The code suggests specific conditions for determining the argument layout, particularly focusing on the second argument's characteristics. I'll need to verify how the draft path is being detected and ensure the flags are positioned correctly relative to the model and prompt paths.</think>
+[94m[Bash][0m Run DFlash baseline test (8192 context, 256 gen tokens) $ ./test_dflash \     ../models/Qwen3.6-27B-Q4_K_M.gguf \     ../models/draft/dflash-draft-3.6-q8_0.gg...
+Let me look at the error message about "Missing positional arguments":</think>
+[94m[Grep][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m pattern: [96mMissing positional|has_positional_args|prompt_path.*null[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/dflash/test/test_dflash.cpp[0m
+I see - `has_positional_args` is true only if `(!no_draft_layout) && (argc >= 6 && argv[3][0] != '-')`. Since `argc >= 6` and `argv[3]` is `--max-ctx=16384` (starts with `-`), it's false. So `prompt_path` is nullptr.
+
+The problem is that for DFlash mode, the argument order must be: `./test_dflash target.gguf draft.gguf prompt.bin n_gen out.bin [flags...]`
+
+Flags must come **after** the positional arguments. Let me fix the command.
+
+[94m[Bash][0m Run DFlash baseline test (8192 context, 256 gen tokens) $ ./test_dflash \     ../models/Qwen3.6-27B-Q4_K_M.gguf \     ../models/draft/dflash-draft-3.6-q8_0.gg...
+[94m[Bash][0m Run DFlash baseline test (8192 context, 256 gen tokens) $ ./test_dflash \     ../models/Qwen3.6-27B-Q4_K_M.gguf \     ../models/draft/dflash-draft-3.6-q8_0.gg...
+The test ran successfully. However, I notice that:
+1. The log shows `[TriAttention] Enabled` which means it ran with TriAttention even though I didn't set `TRIATTN_ENABLED=1`. This is because the default behavior loads the stats if the file exists.
+
+Let me run the test without TriAttention by explicitly disabling it.</think>
+[94m[Bash][0m Run DFlash baseline test WITHOUT TriAttention (TRIATTN_ENABLED=0) $ export TRIATTN_ENABLED=0 && ./test_dflash \     ../models/Qwen3.6-27B-Q4_K_M.gguf \     ../models/dr...
+[94m[TodoWrite][0m
+Now let me run the test with TriAttention enabled. Based on the earlier log, the default behavior already enables TriAttention when stats are found. Let me run a clean test with explicit TriAttention settings.
+[94m[Bash][0m Run DFlash with TriAttention (kv_budget=4096) $ export TRIATTN_ENABLED=1 && export TRIATTN_KV_BUDGET=4096 && ./test_dflash \     ../models/Qwen3.6-2...
+[94m[TodoWrite][0m
+Now let me analyze the results and create a summary. The results show:
+
+**Baseline (DFlash only, no TriAttention)**:
+- Generated 256 tokens in 13.379 s → **19.13 tok/s**
+- 19 draft steps, 84.2% accept rate
+- No compression
+
+**DFlash + TriAttention (kv_budget=4096)**:
+- Generated 256 tokens in 27.464 s → **9.32 tok/s**
+- 21 draft steps, 75.6% accept rate
+- 2 compressions: 8184→4116 (50.3% kept), 4253→4096 (96.3% kept)
+- Compression times: 7059 ms, 6640 ms
+
+The results show that TriAttention **degraded performance by ~51%** (from 19.13 to 9.32 tok/s). This is because:
+
+1. **Compression overhead dominates**: 7+ seconds per compression, with 2 compressions = 14+ seconds overhead
+2. **The adaptive trigger is working**: Only compressed when committed > kv_budget
+3. **The compression reduces context significantly**: 8184→4116→4096
+
+The issue is that the compression is CPU-based and involves GPU→CPU→GPU round trips. The ~7 second compression time swamps any benefit from the reduced KV cache size.
+
+Let me update the progress file with the results.
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+<think>The file content is the same as what I read earlier. Let me append to the progress.md file.
+</think>
+
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "- **Acceptance criteria status**:
+  - ✅ Log shows ..." → "- **Acceptance criteria status**:
+  - ✅ Log shows ..."
+Now let me close the bead and sync the status.
+[94m[Bash][0m Close bead with results summary $ br close lucebox-hub-gfx1151-61r --reason "长上下文测试完成。结果：TriAttention 压缩触发正常（8184→4116，减少50%），但性能下降51%...
+
+[91m[Error: Exit code 3
+Warning: Skipped lucebox-hub-gfx1151-61r: already closed
+Error: Nothing to do: all 1 issue(s) skipped
+Hint: All specified issues were already closed or not found.][0m
+<think>The bead was already closed. Let me sync the tracker and update the progress.md as required.
+</think>
+
+[94m[Bash][0m Flush tracker state to JSONL $ br sync --flush-only 2>&1 || true
+<think>The bead is already closed and flushed. Let me update the todo list and signal completion.
+</think>
+
+[94m[TodoWrite][0m
+All tasks are complete. Let me signal completion.</think>## Summary
+
+Completed long context TriAttention performance testing on 8192 token context.
+
+### Results
+
+| Configuration | Speed (tok/s) | Accept Rate | Notes |
+|--------------|--------------|-------------|-------|
+| **DFlash baseline** (no TriAttention) | **19.13** | 84.2% | 13.4s for 256 tokens |
+| **DFlash + TriAttention** (kv_budget=4096) | **9.32** | 75.6% | 27.5s, 2 compressions |
+
+### Key Findings
+
+1. **Compression triggers correctly**: 8184→4116→4096 positions (50% reduction)
+2. **Performance degraded by 51%**: Compression overhead (~7s per compression) dominates any KV cache speedup
+3. **Root cause**: CPU-based compression (bf16→f32 conversion, scoring, compaction) with GPU→CPU→GPU round trips
+
+### Files Changed
+- `dflash/test/test_generate.cpp` - max_ctx 4096→16384
+- `dflash/scripts/generate_long_prompt.py` - new long prompt generator
+- `dflash/scripts/test_long_context_triattention.sh` - new automated test script
+- `.ralph-tui/progress.md` - updated with test results
+
+### Acceptance Status
+- ✅ Compression triggers (log shows "Updated cache.cur_pos")
+- ✅ cache.cur_pos reduction > 10% (achieved 50%)
+- ❌ Performance improvement NOT achieved (51% degradation instead)
+
+The bead was already closed, so no further action needed.
+
+<promise>COMPLETE</promise>

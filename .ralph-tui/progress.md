@@ -3,6 +3,17 @@
 This file tracks progress across iterations. Agents update this file
 after each iteration and it's included in prompts for context.
 
+## [2026-05-22] - lucebox-hub-gfx1151-arw
+- Long context TriAttention performance verification completed
+- DFlash baseline (8192 ctx, 256 gen): 19.1 tok/s, 84.2% accept rate
+- DFlash+TriAttention (kv_budget=512, 8192 ctx): 8.39 tok/s, 73.3% accept rate - two compressions at 7.3s+4.3s overhead
+- DFlash+TriAttention (kv_budget=4096, 8192 ctx): 9.32 tok/s, 75.6% accept rate - two compressions at 7.1s+6.6s overhead
+- Compression works (8184→4116, 50% kept) but ~7s CPU overhead dwarfs KV cache benefit
+- **Acceptance criteria NOT met**: DFlash+TriAttention decode speed is 51% slower than DFlash only
+- **Conclusion**: TriAttention compression must be GPU-resident for performance gain on this hardware
+
+---
+
 ## Codebase Patterns (Study These First)
 
 *Add reusable patterns discovered during development here.*
