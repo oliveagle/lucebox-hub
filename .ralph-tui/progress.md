@@ -110,3 +110,90 @@ after each iteration and it's included in prompts for context.
   - ✅ cache.cur_pos reduction >= 10% (achieved ~48.6%)
   - ⏳ Long context performance improvement pending (requires longer test runs)
 
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-61r
+
+### Task: TriAttention 压缩触发后性能未验证 - 需要长上下文测试
+
+### 问题现状
+
+之前测试都是在 4K context 长度下进行的，TriAttention 压缩确实触发了（8184→4112 positions，保持 50.2%），但性能反而下降：
+- DFlash 基线 (4K context): ~30 tok/s
+- DFlash + TriAttention: ~29 tok/s (-5%)
+
+### 实施工作
+
+1. **修改 max_ctx 默认值**: `test_generate.cpp` 中 `max_ctx` 从 4096 改为 16384，支持长上下文测试
+2. **创建长 prompt 生成脚本**: `scripts/generate_long_prompt.py` 生成 8192+ tokens 的测试 prompt
+3. **创建性能测试脚本**: `scripts/test_long_context_triattention.sh` 自动化测试流程
+4. **编译更新**: 重新编译 `test_dflash` 和 `test_generate`
+
+### 测试结果 (8192 context, 256 gen tokens)
+
+| 配置 | 速度 (tok/s) | Accept Rate | 备注 |
+|------|-------------|-------------|------|
+| DFlash 基线 (无 TriAttention) | **19.13** | 84.2% | baseline |
+| DFlash + TriAttention (kv_budget=512) | **8.39** | 73.3% | 两次压缩, 7.3s+4.3s overhead |
+| DFlash + TriAttention (kv_budget=4096) | **9.32** | 75.6% | 两次压缩, 7.1s+6.6s overhead |
+
+### 分析
+
+**核心问题：压缩 overhead 过大**
+
+压缩操作 (~7 秒) 比整个生成时间 (13-30 秒) 占比太高，导致性能严重下降：
+
+- **DFlash 基线**: 13.4s (19.1 tok/s)
+- **DFlash + TriAttention**: 27.5s (9.3 tok/s) - 51% 性能下降
+
+压缩 overhead 来源：
+1. GPU→CPU→GPU 数据传输 (bf16→f32 转换)
+2. CPU 上 scoring 计算
+3. KV cache compaction 操作
+
+### 关键发现
+
+1. **压缩确实有效**: 8184→4116 positions (50.3% 保持)
+2. **但 overhead 远超 benefit**: 7 秒压缩 vs 几毫秒每步的潜在 KV cache 加速
+3. **triattention_runner.cpp 已经优化过**: 之前的迭代已经添加了 batched GPU transfers，但仍有 ~7 秒的压缩时间
+4. **test_generate.cpp 需要同步更新**: 之前只更新了 test_dflash.cpp 的默认值
+
+### 验收标准状态
+
+| 验收标准 | 状态 | 说明 |
+|----------|------|------|
+| 日志显示压缩触发 | ✅ | `[TriAttention] Updated cache.cur_pos to 4112 (reduced from 8184)` |
+| cache.cur_pos 减少 > 10% | ✅ | 8184→4116, 减少 50% |
+| DFlash+TriAttention 解码速度 > DFlash only | ❌ | 9.3 vs 19.1 tok/s, 下降 51% |
+| 长上下文 (8192) 性能提升 >= 20% | ❌ | 性能下降而非提升 |
+
+### 根本原因
+
+TriAttention 压缩 overhead (~7 秒) 在 CPU 上执行（bf16→f32 转换、scoring、compaction），而潜在收益（KV cache 加速）在未来才能体现。在当前配置下，overhead 完全抵消了任何可能的加速。
+
+### 下一步建议
+
+1. **GPU-resident 压缩**: 将 scoring 和 compaction 移到 GPU 上执行
+2. **异步压缩**: 在后台线程中执行压缩，不阻塞主推理流程
+3. **更大的 KV budget**: 当前 kv_budget=4096 仍然触发了两次压缩，考虑设置更大的值
+
+### Files changed
+
+- `dflash/test/test_generate.cpp` (max_ctx 4096→16384)
+- `dflash/scripts/generate_long_prompt.py` (new - 长 prompt 生成)
+- `dflash/scripts/test_long_context_triattention.sh` (new - 自动化测试)
+
+### **Learnings:**
+
+- TriAttention 压缩 overhead (~7s CPU) 远超当前配置的潜在收益
+- 长上下文测试需要 `--max-ctx=16384` 参数
+- test_dflash 支持 positional args 在 flags 之前：`./test_dflash <target> <draft> <prompt> <n_gen> <output> --flags`
+- `test_generate.cpp` 的 max_ctx 默认值需要手动修改（无 env var 控制）
+
+### **Acceptance criteria status**:
+
+- ✅ Log shows "Updated cache.cur_pos to X (reduced from Y)"
+- ✅ cache.cur_pos reduction > 10% (achieved ~50%)
+- ❌ DFlash+TriAttention decode speed > DFlash only (9.3 vs 19.1 tok/s, -51%)
+- ❌ Long context (8192) performance improvement >= 20% (NOT ACHIEVED)
+

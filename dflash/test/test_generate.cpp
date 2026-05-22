@@ -184,7 +184,7 @@ int main(int argc, char ** argv) {
     }
     std::printf("[target] %s\n", dflash27b_last_error());
 
-    const int max_ctx = 4096;
+    const int max_ctx = 16384;
     TargetCache cache;
     if (!create_target_cache(w, max_ctx, /*max_verify_tokens=*/0, backend, cache)) {
         std::fprintf(stderr, "cache: %s\n", dflash27b_last_error());
