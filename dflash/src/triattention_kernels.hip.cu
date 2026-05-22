@@ -228,23 +228,227 @@ bool ggml_hip_tria_score(
     hipStream_t   stream)
 {
     (void)gqa;
-    (void)kv_start;
-    (void)d_scores_out;
-    (void)k_bf16_gpu;
-    (void)d_q_stats;
-    (void)d_omega;
-    (void)d_key_pos;
-    (void)cur_pos;
-    (void)n_full_attn;
-    (void)n_kv_heads;
-    (void)tensor_head_dim;
-    (void)fc;
-    (void)seq_len;
-    (void)stream;
 
-    std::fprintf(stderr, "[TriAttention HIP] GPU scoring not available due to header conflicts\n");
-    std::fprintf(stderr, "[TriAttention HIP] Use CPU fallback path instead\n");
-    return false;
+    if (!k_bf16_gpu || !d_q_stats || !d_omega || !d_key_pos) {
+        std::fprintf(stderr, "[TriAttention HIP] null pointer passed\n");
+        return false;
+    }
+    if (fc > TRIA_MAX_FREQ_COUNT || fc <= 0) {
+        std::fprintf(stderr, "[TriAttention HIP] fc=%d out of range [1, %d]\n",
+                     fc, TRIA_MAX_FREQ_COUNT);
+        return false;
+    }
+    if (n_kv_heads <= 0 || seq_len <= 0 || n_full_attn <= 0) {
+        std::fprintf(stderr, "[TriAttention HIP] invalid dimensions\n");
+        return false;
+    }
+
+    std::fprintf(stderr, "[TriAttention HIP] Starting GPU scoring: fc=%d seq_len=%d "
+                "n_kv_heads=%d n_full_attn=%d\n",
+                fc, seq_len, n_kv_heads, n_full_attn);
+
+    // ── Step 1: bf16 → f32 conversion on GPU ─────────────────────────
+    const size_t k_nelems = (size_t)n_kv_heads * seq_len * fc;
+
+    float * d_k_real = nullptr;
+    float * d_k_imag = nullptr;
+
+    hipError_t err = hipMalloc(&d_k_real, k_nelems * sizeof(float));
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] hipMalloc k_real failed: %s\n",
+                     hipGetErrorString(err));
+        return false;
+    }
+    err = hipMalloc(&d_k_imag, k_nelems * sizeof(float));
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] hipMalloc k_imag failed: %s\n",
+                     hipGetErrorString(err));
+        hipFree(d_k_real);
+        return false;
+    }
+
+    // Launch bf16 conversion kernel
+    dim3 conv_grid(n_kv_heads, seq_len, 1);
+    hipLaunchKernelGGL(tria_bf16_convert_kernel<256>,
+        conv_grid, dim3(256), 0, stream,
+        static_cast<const uint16_t*>(k_bf16_gpu),
+        d_k_real, d_k_imag,
+        n_kv_heads, seq_len, tensor_head_dim, fc, kv_start);
+
+    err = hipPeekAtLastError();
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] bf16 convert kernel failed: %s\n",
+                     hipGetErrorString(err));
+        hipFree(d_k_real);
+        hipFree(d_k_imag);
+        return false;
+    }
+
+    std::fprintf(stderr, "[TriAttention HIP] bf16 conversion done\n");
+
+    // ── Step 2: Allocate temp buffers for scoring ───────────────────
+
+    float * d_scores = nullptr;
+    err = hipMalloc(&d_scores, (size_t)n_full_attn * n_kv_heads * seq_len * sizeof(float));
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] hipMalloc scores failed: %s\n",
+                     hipGetErrorString(err));
+        hipFree(d_k_real);
+        hipFree(d_k_imag);
+        return false;
+    }
+
+    // Allocate offsets buffer on device
+    float * d_offsets = nullptr;
+    err = hipMalloc(&d_offsets, TRIA_N_OFFSETS * sizeof(float));
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] hipMalloc offsets failed: %s\n",
+                     hipGetErrorString(err));
+        hipFree(d_scores);
+        hipFree(d_k_real);
+        hipFree(d_k_imag);
+        return false;
+    }
+
+    // Copy offsets to device
+    float h_offsets[TRIA_N_OFFSETS];
+    for (int i = 0; i < TRIA_N_OFFSETS; i++) {
+        h_offsets[i] = (float)(1 << i);
+    }
+    err = hipMemcpyAsync(d_offsets, h_offsets, TRIA_N_OFFSETS * sizeof(float),
+                          hipMemcpyHostToDevice, stream);
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] hipMemcpy offsets failed: %s\n",
+                     hipGetErrorString(err));
+        hipFree(d_offsets);
+        hipFree(d_scores);
+        hipFree(d_k_real);
+        hipFree(d_k_imag);
+        return false;
+    }
+
+    // ── Step 3: Launch scoring kernel (template on fc) ────────────────
+    const int n_blocks = n_kv_heads * seq_len;
+    const int n_threads = 64;
+
+    // Dispatch based on fc value. Common values: 32, 64.
+    if (fc == 32) {
+        hipLaunchKernelGGL(tria_score_kernel_impl<32>,
+            dim3(n_blocks), dim3(n_threads), 0, stream,
+            d_k_real, d_k_imag, d_q_stats, d_omega, d_key_pos,
+            d_offsets, cur_pos, seq_len, n_kv_heads, n_full_attn, d_scores);
+    } else if (fc == 64) {
+        hipLaunchKernelGGL(tria_score_kernel_impl<64>,
+            dim3(n_blocks), dim3(n_threads), 0, stream,
+            d_k_real, d_k_imag, d_q_stats, d_omega, d_key_pos,
+            d_offsets, cur_pos, seq_len, n_kv_heads, n_full_attn, d_scores);
+    } else if (fc == 16) {
+        hipLaunchKernelGGL(tria_score_kernel_impl<16>,
+            dim3(n_blocks), dim3(n_threads), 0, stream,
+            d_k_real, d_k_imag, d_q_stats, d_omega, d_key_pos,
+            d_offsets, cur_pos, seq_len, n_kv_heads, n_full_attn, d_scores);
+    } else if (fc == 128) {
+        hipLaunchKernelGGL(tria_score_kernel_impl<128>,
+            dim3(n_blocks), dim3(n_threads), 0, stream,
+            d_k_real, d_k_imag, d_q_stats, d_omega, d_key_pos,
+            d_offsets, cur_pos, seq_len, n_kv_heads, n_full_attn, d_scores);
+    } else {
+        // Generic fallback: use fc=64 kernel
+        hipLaunchKernelGGL(tria_score_kernel_impl<64>,
+            dim3(n_blocks), dim3(n_threads), 0, stream,
+            d_k_real, d_k_imag, d_q_stats, d_omega, d_key_pos,
+            d_offsets, cur_pos, seq_len, n_kv_heads, n_full_attn, d_scores);
+    }
+
+    err = hipPeekAtLastError();
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] scoring kernel failed: %s\n",
+                     hipGetErrorString(err));
+        hipFree(d_offsets);
+        hipFree(d_scores);
+        hipFree(d_k_real);
+        hipFree(d_k_imag);
+        return false;
+    }
+
+    std::fprintf(stderr, "[TriAttention HIP] scoring kernel done\n");
+
+    // ── Step 4: Max-pool across KV heads ─────────────────────────────
+    dim3 pool_grid(n_full_attn, seq_len, 1);
+
+    // Allocate pooled buffer
+    float * d_pooled = nullptr;
+    err = hipMalloc(&d_pooled, (size_t)n_full_attn * seq_len * sizeof(float));
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] hipMalloc pooled failed: %s\n",
+                     hipGetErrorString(err));
+        hipFree(d_offsets);
+        hipFree(d_scores);
+        hipFree(d_k_real);
+        hipFree(d_k_imag);
+        return false;
+    }
+
+    hipLaunchKernelGGL(tria_max_pool_kernel_impl<64>,
+        pool_grid, dim3(64), 0, stream,
+        d_scores, d_pooled, n_full_attn, n_kv_heads, seq_len);
+
+    err = hipPeekAtLastError();
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] max-pool kernel failed: %s\n",
+                     hipGetErrorString(err));
+        hipFree(d_pooled);
+        hipFree(d_offsets);
+        hipFree(d_scores);
+        hipFree(d_k_real);
+        hipFree(d_k_imag);
+        return false;
+    }
+
+    // ── Step 5: Average across layers ────────────────────────────────
+    const int avg_blocks = (seq_len + 63) / 64;
+    hipLaunchKernelGGL(tria_layer_avg_kernel_impl<64>,
+        dim3(avg_blocks), dim3(64), 0, stream,
+        d_pooled, d_scores, n_full_attn, seq_len);
+
+    err = hipPeekAtLastError();
+    if (err != hipSuccess) {
+        std::fprintf(stderr, "[TriAttention HIP] layer avg kernel failed: %s\n",
+                     hipGetErrorString(err));
+        hipFree(d_pooled);
+        hipFree(d_offsets);
+        hipFree(d_scores);
+        hipFree(d_k_real);
+        hipFree(d_k_imag);
+        return false;
+    }
+
+    // ── Step 6: Copy scores to output ───────────────────────────────
+    if (d_scores_out != d_scores) {
+        size_t combined_bytes = (size_t)seq_len * sizeof(float);
+        err = hipMemcpyAsync(d_scores_out, d_scores, combined_bytes,
+                             hipMemcpyDeviceToDevice, stream);
+        if (err != hipSuccess) {
+            std::fprintf(stderr, "[TriAttention HIP] hipMemcpy combined scores failed: %s\n",
+                         hipGetErrorString(err));
+            hipFree(d_pooled);
+            hipFree(d_offsets);
+            hipFree(d_scores);
+            hipFree(d_k_real);
+            hipFree(d_k_imag);
+            return false;
+        }
+    }
+
+    // ── Cleanup temp buffers ────────────────────────────────────────
+    hipFree(d_pooled);
+    hipFree(d_offsets);
+    hipFree(d_scores);
+    hipFree(d_k_real);
+    hipFree(d_k_imag);
+
+    std::fprintf(stderr, "[TriAttention HIP] GPU scoring complete\n");
+    return true;
 }
 
 // ── Top-K selection on HIP ──────────────────────────────────────────

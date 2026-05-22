@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "sessionId": "6c64ef45-37aa-4854-8d74-860cae3adaff",
+  "sessionId": "957cf165-300f-47c4-a2b7-6893a8c8220f",
   "status": "running",
-  "startedAt": "2026-05-22T17:53:17.532Z",
-  "updatedAt": "2026-05-22T18:09:14.577Z",
+  "startedAt": "2026-05-22T18:28:49.286Z",
+  "updatedAt": "2026-05-22T18:28:49.388Z",
   "currentIteration": 0,
   "maxIterations": 50,
   "tasksCompleted": 0,
@@ -12,7 +12,7 @@
   "trackerState": {
     "plugin": "beads-rust",
     "executionScopes": [],
-    "totalTasks": 51,
+    "totalTasks": 54,
     "tasks": [
       {
         "id": "lucebox-hub-gfx1151-2qo",
@@ -29,7 +29,7 @@
       {
         "id": "lucebox-hub-gfx1151-atn",
         "title": "[P0] TriAttention + Tensor 加载性能优化 - 完整验证和加速",
-        "status": "open",
+        "status": "completed",
         "completedInSession": false
       },
       {
@@ -135,6 +135,24 @@
         "completedInSession": false
       },
       {
+        "id": "lucebox-hub-gfx1151-6ix",
+        "title": "[P0-阻塞] TriAttention GPU 性能验收 - DFlash+TriAttention 必须 > DFlash only 基线",
+        "status": "open",
+        "completedInSession": false
+      },
+      {
+        "id": "lucebox-hub-gfx1151-5iw",
+        "title": "[P0-关键] 64K 长上下文 TriAttention 性能测试 - 压缩率与解码速度验证",
+        "status": "open",
+        "completedInSession": false
+      },
+      {
+        "id": "lucebox-hub-gfx1151-vxa",
+        "title": "[P0-致命] TriAttention GPU 评分从未验证 - CPU 评分仍是性能瓶颈",
+        "status": "open",
+        "completedInSession": false
+      },
+      {
         "id": "lucebox-hub-gfx1151-z4h",
         "title": "[P0-关键] 64K 长上下文 TriAttention 性能验证 - 验证 KV cache 优势",
         "status": "open",
@@ -143,7 +161,7 @@
       {
         "id": "lucebox-hub-gfx1151-vur",
         "title": "[P0-关键] TriAttention GPU 压缩性能验收 - DFlash+TriAttention 必须 > DFlash only",
-        "status": "open",
+        "status": "completed",
         "completedInSession": false
       },
       {
@@ -325,6 +343,8 @@
   "iterations": [],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
-  "activeTaskIds": [],
+  "activeTaskIds": [
+    "lucebox-hub-gfx1151-z4h"
+  ],
   "subagentPanelVisible": false
 }

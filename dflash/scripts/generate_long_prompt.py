@@ -41,7 +41,8 @@ def main():
     # These are chosen from common token ranges to avoid special tokens
 
     # Common English word approximate token IDs (Qwen2.5/3 range)
-    text_tokens = list(range(1000, 3000))  # Safe range of regular tokens
+    # Use a larger range to support 64K tokens
+    text_tokens = list(range(1000, 5000))  # Safe range of regular tokens (4000 tokens)
 
     tokens = []
 
