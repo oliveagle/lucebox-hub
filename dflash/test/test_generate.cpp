@@ -279,7 +279,8 @@ int main(int argc, char ** argv) {
             // Get KV cache pointers
             const int n_full_attn = (int)cache.attn_k.size();
             const int n_head_kv = w.n_head_kv;
-            const int head_dim = w.n_embd_head_k;
+            const int head_dim = w.rope_dimension_count;   // TriAttention RoPE head_dim
+            const int tensor_head_dim = w.n_embd_head_k;    // Actual K tensor head_dim
             const int max_ctx_cache = cache.max_ctx;
 
             // Prepare arrays of KV cache pointers
@@ -302,7 +303,8 @@ int main(int argc, char ** argv) {
                 attn_v_ptrs.data(),
                 n_full_attn,
                 n_head_kv,
-                head_dim,
+                head_dim,            // TriAttention head_dim (64)
+                tensor_head_dim,     // Actual tensor head_dim (256)
                 max_ctx_cache,
                 0,  // kv_start (compress from beginning)
                 cur_pos + 1,  // cur_pos

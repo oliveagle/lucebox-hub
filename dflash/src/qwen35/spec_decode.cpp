@@ -230,7 +230,8 @@ bool run_target_layer_split_dflash_decode(
             TargetCache & cache = shards.front().cache;
             const int n_full_attn = (int)cache.attn_k.size();
             const int n_head_kv = shards.front().weights.n_head_kv;
-            const int head_dim = shards.front().weights.n_embd_head_k;
+            const int head_dim = shards.front().weights.rope_dimension_count;   // TriAttention RoPE head_dim
+            const int tensor_head_dim = shards.front().weights.n_embd_head_k;    // Actual K tensor head_dim
             const int max_ctx = cache.max_ctx;
 
             // Prepare arrays of KV cache pointers
@@ -243,7 +244,8 @@ bool run_target_layer_split_dflash_decode(
 
             // Calculate keep ratio from kv_budget
             const int kv_budget = g_tria_state.kv_budget;
-            const float keep_ratio = kv_budget > 0 ? (float)kv_budget / (float)std::max(committed, kv_budget) : 0.5f;
+            const float budget_ratio = kv_budget > 0 ? (float)kv_budget / (float)std::max(committed, kv_budget) : 0.5f;
+            const float keep_ratio = std::max(g_tria_state.min_keep_ratio, budget_ratio);
 
             int n_kept = 0;
             const bool ok = tria_kv_compress(
@@ -253,7 +255,8 @@ bool run_target_layer_split_dflash_decode(
                 attn_v_ptrs.data(),
                 n_full_attn,
                 n_head_kv,
-                head_dim,
+                head_dim,            // TriAttention head_dim (64)
+                tensor_head_dim,     // Actual tensor head_dim (256)
                 max_ctx,
                 0,  // kv_start (compress from beginning)
                 committed,  // cur_pos

@@ -3289,6 +3289,74 @@ int main(int argc, char ** argv) {
         n_generated  += commit_n;
         n_accept_sum += accept_n;
         n_draft_steps++;
+
+#if defined(DFLASH27B_TRIATTENTION_ENABLED)
+        // TriAttention KV compression: trigger at specified intervals
+        std::fprintf(stderr, "[DEBUG] TriAttention: g_tria_state.enabled=%d, committed=%d, last_compressed_pos=%d, should_compress=%d\n",
+                     g_tria_state.enabled, committed, g_tria_state.last_compressed_pos, g_tria_state.should_compress(committed));
+        if (g_tria_state.should_compress(committed)) {
+            auto t_c0 = std::chrono::steady_clock::now();
+
+            const int n_full_attn = (int)cache.attn_k.size();
+            const int n_head_kv = w.n_head_kv;
+            const int head_dim = w.rope_dimension_count;  // TriAttention RoPE head_dim (e.g., 64)
+            const int tensor_head_dim = w.n_embd_head_k;  // Actual K tensor head_dim (e.g., 256)
+            const int max_ctx = cache.max_ctx;
+
+            std::fprintf(stderr, "[DEBUG] TriAttention: n_full_attn=%d, n_head_kv=%d, head_dim=%d, tensor_head_dim=%d, max_ctx=%d\n",
+                         n_full_attn, n_head_kv, head_dim, tensor_head_dim, max_ctx);
+
+            std::vector<void*> attn_k_ptrs(n_full_attn);
+            std::vector<void*> attn_v_ptrs(n_full_attn);
+            for (int i = 0; i < n_full_attn; i++) {
+                attn_k_ptrs[i] = cache.attn_k[i]->data;
+                attn_v_ptrs[i] = cache.attn_v[i]->data;
+            }
+
+            const int kv_budget = g_tria_state.kv_budget;
+            const float budget_ratio = kv_budget > 0 ? (float)kv_budget / (float)std::max(committed, kv_budget) : 0.5f;
+            const float keep_ratio = std::max(g_tria_state.min_keep_ratio, budget_ratio);
+
+            std::fprintf(stderr, "[DEBUG] TriAttention: kv_budget=%d, keep_ratio=%.2f\n",
+                         kv_budget, keep_ratio);
+
+            int n_kept = 0;
+            const bool ok = tria_kv_compress(
+                g_tria_state.stats_ptr,
+                cache.tria_k_pre_rope ? cache.tria_k_pre_rope->data : nullptr,
+                attn_k_ptrs.data(),
+                attn_v_ptrs.data(),
+                n_full_attn,
+                n_head_kv,
+                head_dim,          // TriAttention head_dim (64)
+                tensor_head_dim,    // Actual tensor head_dim (256)
+                max_ctx,
+                0,
+                committed,
+                target_gpu,
+                keep_ratio,
+                &n_kept,
+                cache.kv_k_type,
+                cache.kv_v_type);
+
+            std::fprintf(stderr, "[DEBUG] TriAttention: compress ok=%d, n_kept=%d\n", ok, n_kept);
+
+            if (ok && n_kept < committed) {
+                cache.cur_pos = n_kept;
+                committed = n_kept;
+                // n_generated was (committed_prev - prefill_start), now (n_kept - prefill_start)
+                // Don't adjust n_generated - it just counts generated tokens since prefill ended
+                g_tria_state.mark_compressed(n_kept);
+                std::fprintf(stderr, "[TriAttention] Compressed KV: cur_pos %d -> %d\n",
+                             committed + (committed - n_kept), n_kept);
+            }
+
+            auto t_c1 = std::chrono::steady_clock::now();
+            const double compress_ms = std::chrono::duration<double, std::milli>(t_c1 - t_c0).count();
+            std::fprintf(stderr, "[TriAttention] Compression took %.2f ms\n", compress_ms);
+        }
+#endif
+
     }
 
     auto t_gen1 = std::chrono::steady_clock::now();

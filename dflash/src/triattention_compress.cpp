@@ -32,6 +32,7 @@
 #define gpuMemcpy      cudaMemcpy
 #define gpuMemcpyDtoH  cudaMemcpyDeviceToHost
 #define gpuMemcpyHtoD  cudaMemcpyHostToDevice
+#define gpuDeviceSynchronize cudaDeviceSynchronize
 #elif defined(GGML_USE_HIP)
 #include <hip/hip_runtime.h>
 #define HAS_GPU 1
@@ -40,6 +41,7 @@
 #define gpuMemcpy      hipMemcpy
 #define gpuMemcpyDtoH  hipMemcpyDeviceToHost
 #define gpuMemcpyHtoD  hipMemcpyHostToDevice
+#define gpuDeviceSynchronize hipDeviceSynchronize
 #else
 #define HAS_GPU 0
 #define gpuGetDevice(...)  ((void)0)
@@ -200,6 +202,7 @@ bool tria_kv_compress(
     int n_full_attn,
     int n_head_kv,
     int head_dim,
+    int tensor_head_dim,
     int max_ctx,
     int kv_start,
     int cur_pos,
@@ -209,14 +212,15 @@ bool tria_kv_compress(
     enum ggml_type k_type,
     enum ggml_type v_type)
 {
-    // Get element sizes from ggml types
-    const size_t k_bytes = head_dim * ggml_type_size(k_type) / ggml_blck_size(k_type);
-    const size_t v_bytes = head_dim * ggml_type_size(v_type) / ggml_blck_size(v_type);
+    // Get element sizes from ggml types using tensor_head_dim (the actual K/V tensor layout)
+    const size_t k_bytes = tensor_head_dim * ggml_type_size(k_type) / ggml_blck_size(k_type);
+    const size_t v_bytes = tensor_head_dim * ggml_type_size(v_type) / ggml_blck_size(v_type);
 
     std::fprintf(stderr, "[TriAttention] tria_kv_compress: n_full_attn=%d n_head_kv=%d head_dim=%d max_ctx=%d kv_start=%d cur_pos=%d seq_len=%d\n",
                 n_full_attn, n_head_kv, head_dim, max_ctx, kv_start, cur_pos, cur_pos - kv_start);
     std::fprintf(stderr, "[TriAttention] stats: num_layers=%u num_heads=%u num_kv_heads=%u head_dim=%u freq_count=%u\n",
                 stats->num_layers, stats->num_heads, stats->num_kv_heads, stats->head_dim, stats->freq_count);
+    std::fprintf(stderr, "[TriAttention] k_bytes=%zu, v_bytes=%zu, keep_ratio=%.2f\n", k_bytes, v_bytes, keep_ratio);
     std::fflush(stderr);
 
     if (!stats || cur_pos <= 0) {
@@ -233,6 +237,8 @@ bool tria_kv_compress(
     // Calculate actual keep count from ratio
     const int n_keep = std::max(1, (int)(seq_len * keep_ratio));
     const int fc = (int)stats->freq_count;
+
+    std::fprintf(stderr, "[TriAttention] n_keep=%d, fc=%d\n", n_keep, fc);
 
 #if defined(HAS_GPU) && HAS_GPU
     // Skip on HIP due to known hanging issues with hipMemcpy on gfx1151
@@ -255,37 +261,54 @@ bool tria_kv_compress(
     std::vector<float> k_real;
     std::vector<float> k_imag;
     if (k_pre_rope_gpu) {
-        // Allocate CPU buffer for pre-RoPE K: [head_dim, seq_len, n_head_kv]
-        const size_t nelems = (size_t)head_dim * seq_len * n_head_kv;
-        std::vector<uint16_t> k_bf16(nelems);
+        // The tria_k_pre_rope buffer has head_dim=tensor_head_dim (e.g., 256)
+        // But only the first 'head_dim' (e.g., 64) elements contain RoPE data
+        // We need to copy the full tensor_head_dim, then extract the RoPE portion
+
+        // Allocate CPU buffer for full pre-RoPE K: [tensor_head_dim, seq_len, n_head_kv]
+        const size_t full_nelems = (size_t)tensor_head_dim * seq_len * n_head_kv;
+        std::vector<uint16_t> k_bf16(full_nelems);
 
         // Copy from GPU (only the relevant slice)
-        // k_pre_rope_gpu is [head_dim, max_ctx, n_head_kv]
-        const size_t src_offset = (size_t)kv_start * head_dim * n_head_kv * sizeof(uint16_t);
-        const size_t copy_bytes = (size_t)head_dim * seq_len * n_head_kv * sizeof(uint16_t);
+        // k_pre_rope_gpu is [tensor_head_dim, max_ctx, n_head_kv]
+        const size_t src_offset = (size_t)kv_start * tensor_head_dim * n_head_kv * sizeof(uint16_t);
+        const size_t copy_bytes = (size_t)tensor_head_dim * seq_len * n_head_kv * sizeof(uint16_t);
+
+        std::fprintf(stderr, "[TriAttention] Reading tria_k_pre_rope: offset=%zu, bytes=%zu\n", src_offset, copy_bytes);
+
         gpuMemcpy(k_bf16.data(), (char*)k_pre_rope_gpu + src_offset, copy_bytes,
                   gpuMemcpyDtoH);
 
+        // Synchronize after GPU copy to ensure completion
+        gpuDeviceSynchronize();
+
+        std::fprintf(stderr, "[TriAttention] GPU copy done, starting conversion\n");
+
         // Convert bf16 to f32 and split into real/imag halves
-        // Layout: [head_dim, seq_len, n_head_kv] -> split into [fc, seq_len, n_head_kv] for real and imag
+        // Layout: [tensor_head_dim, seq_len, n_head_kv] -> split into [fc, seq_len, n_head_kv] for real and imag
+        // Only the first 'head_dim' elements of the tensor_head_dim contain RoPE data
         k_real.resize((size_t)fc * seq_len * n_head_kv);
         k_imag.resize((size_t)fc * seq_len * n_head_kv);
 
         for (int h = 0; h < n_head_kv; h++) {
             for (int s = 0; s < seq_len; s++) {
                 for (int f = 0; f < fc; f++) {
-                    const size_t src_idx = ((size_t)h * seq_len + s) * head_dim + f;
+                    // Read from full tensor (tensor_head_dim stride)
+                    const size_t src_idx = ((size_t)h * seq_len + s) * tensor_head_dim + f;
+                    // Real and imag are separate arrays, so same [h,s,f] indexing
                     const size_t real_idx = ((size_t)h * seq_len + s) * fc + f;
-                    const size_t imag_idx = ((size_t)h * seq_len + s) * fc + fc + f;
+                    const size_t imag_idx = ((size_t)h * seq_len + s) * fc + f;
 
-                    // Real half: elements [0, fc)
+                    // Real half: elements [0, fc) from the tensor
                     k_real[real_idx] = bf16_to_f32(k_bf16[src_idx]);
 
-                    // Imag half: elements [fc, 2*fc)
+                    // Imag half: elements [fc, 2*fc) from the tensor
                     k_imag[imag_idx] = bf16_to_f32(k_bf16[src_idx + fc]);
                 }
             }
         }
+
+        std::fprintf(stderr, "[TriAttention] Finished converting tria_k_pre_rope to real/imag\n");
     }
 
     // Restore original device
@@ -303,10 +326,14 @@ bool tria_kv_compress(
     // For each layer, we get per-position scores aggregated across KV heads
     std::vector<float> combined_scores(seq_len, 0.0f);
 
+    std::fprintf(stderr, "[TriAttention] Starting scoring loop: n_full_attn=%d\n", n_full_attn);
+
     for (int fa_layer = 0; fa_layer < n_full_attn; fa_layer++) {
         // Map FA layer index to global layer index (every 4th layer)
         const int global_layer = fa_layer * 4 + 3;  // layers 3,7,11,...
         if (global_layer >= (int)stats->num_layers) continue;
+
+        // std::fprintf(stderr, "[TriAttention] Scoring FA layer %d (global %d)\n", fa_layer, global_layer);
 
         // Score each KV head and aggregate (max pooling)
         std::vector<float> layer_scores(seq_len, 0.0f);
@@ -334,6 +361,8 @@ bool tria_kv_compress(
             combined_scores[s] += layer_scores[s];
         }
     }
+
+    std::fprintf(stderr, "[TriAttention] Finished scoring all FA layers\n");
 
     // Average scores across layers
     if (n_full_attn > 0) {
@@ -365,24 +394,33 @@ bool tria_kv_compress(
     std::fprintf(stderr, "[TriAttention] Compacting %d FA layers, %d KV heads, k_bytes=%zu, v_bytes=%zu\n",
                 n_full_attn, n_head_kv, k_bytes, v_bytes);
 
-    for (int fa_layer = 0; fa_layer < n_full_attn; fa_layer++) {
-        if (!attn_k[fa_layer] || !attn_v[fa_layer]) continue;
+    // Skip compaction if we're keeping everything (no actual compression)
+    if (actual_keep >= seq_len) {
+        std::fprintf(stderr, "[TriAttention] Skipping compaction (actual_keep=%d >= seq_len=%d)\n", actual_keep, seq_len);
+    } else {
+        for (int fa_layer = 0; fa_layer < n_full_attn; fa_layer++) {
+            if (!attn_k[fa_layer] || !attn_v[fa_layer]) continue;
 
-        for (int h = 0; h < n_head_kv; h++) {
-            // K cache compaction
-            compact_kv_head_positions(attn_k[fa_layer], h, max_ctx, kv_start,
-                                     keep_indices, actual_keep, k_bytes);
+            std::fprintf(stderr, "[TriAttention] Compacting FA layer %d\n", fa_layer);
 
-            // V cache compaction
-            compact_kv_head_positions(attn_v[fa_layer], h, max_ctx, kv_start,
-                                     keep_indices, actual_keep, v_bytes);
+            for (int h = 0; h < n_head_kv; h++) {
+                // K cache compaction
+                compact_kv_head_positions(attn_k[fa_layer], h, max_ctx, kv_start,
+                                         keep_indices, actual_keep, k_bytes);
+
+                // V cache compaction
+                compact_kv_head_positions(attn_v[fa_layer], h, max_ctx, kv_start,
+                                         keep_indices, actual_keep, v_bytes);
+            }
         }
+
+        std::fprintf(stderr, "[TriAttention] Finished compacting FA layers\n");
     }
 
     // Also compact the tria_k_pre_rope buffer to maintain consistency
-    if (k_pre_rope_gpu) {
-        std::fprintf(stderr, "[TriAttention] Compacting tria_k_pre_rope buffer\n");
-        compact_tria_k_pre_rope(k_pre_rope_gpu, head_dim, max_ctx, n_head_kv,
+    if (k_pre_rope_gpu && actual_keep < seq_len) {
+        std::fprintf(stderr, "[TriAttention] Compacting tria_k_pre_rope buffer (tensor_head_dim=%d)\n", tensor_head_dim);
+        compact_tria_k_pre_rope(k_pre_rope_gpu, tensor_head_dim, max_ctx, n_head_kv,
                                keep_indices, kv_start, actual_keep);
     }
 #endif
@@ -392,6 +430,8 @@ bool tria_kv_compress(
 
     std::fprintf(stderr, "[TriAttention] Compressed %d -> %d positions (kept %.1f%%)\n",
                 seq_len, actual_keep, 100.0f * actual_keep / seq_len);
+    std::fprintf(stderr, "[TriAttention] tria_kv_compress: about to return true\n");
+    std::fflush(stderr);
 
     return true;
 }

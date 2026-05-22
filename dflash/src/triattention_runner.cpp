@@ -64,8 +64,13 @@ void init_triattention_from_env() {
         g_tria_state.window_size = std::atoi(window_size_env);
     }
 
-    std::fprintf(stderr, "[TriAttention] Enabled: kv_budget=%d, divide_length=%d, window_size=%d\n",
-                g_tria_state.kv_budget, g_tria_state.divide_length, g_tria_state.window_size);
+    const char* min_keep_ratio_env = std::getenv("TRIATTN_MIN_KEEP_RATIO");
+    if (min_keep_ratio_env) {
+        g_tria_state.min_keep_ratio = std::atof(min_keep_ratio_env);
+    }
+
+    std::fprintf(stderr, "[TriAttention] Enabled: kv_budget=%d, divide_length=%d, window_size=%d, min_keep_ratio=%.2f\n",
+                g_tria_state.kv_budget, g_tria_state.divide_length, g_tria_state.window_size, g_tria_state.min_keep_ratio);
 #else
     std::fprintf(stderr, "[TriAttention] TriAttention not compiled in (DFLASH27B_TRIATTENTION_ENABLED not set)\n");
 #endif

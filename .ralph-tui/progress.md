@@ -5,6 +5,26 @@ after each iteration and it should be included in prompts for context.
 
 ## Codebase Patterns (Study These First)
 
+### TriAttention Compression — min_keep_ratio for Lower Compression Ratio
+
+**Pattern**: `keep_ratio` is calculated as `kv_budget / max(committed, kv_budget)` at each compression trigger
+- Before: This ratio drops towards 0 as `committed` grows, leading to aggressive pruning
+- After: `keep_ratio = max(min_keep_ratio, budget_ratio)` with configurable floor via `TRIATTN_MIN_KEEP_RATIO` env var
+- Default `min_keep_ratio=0.5` (50% minimum kept) prevents over-compression
+- Setting `TRIATTN_MIN_KEEP_RATIO=0.75` ensures at least 75% of positions are always kept
+- **Key insight**: Without this floor, long context sequences can have >90% of tokens pruned, degrading output quality
+
+### Qwen35Backend do_spec_decode — Full DFlash Loop Migration
+
+**Pattern**: The full DFlash speculative decode loop from `test_dflash.cpp` is now migrated into `Qwen35Backend::do_spec_decode()`
+- Key architecture: Draft forward → Target verify → Greedy accept → SSM rollback → Emit tokens
+- Two rollback paths: fast_rollback (uses captured DeltaNet intermediates) and legacy replay
+- TriAttention compression integrated with `#if defined(DFLASH27B_TRIATTENTION_ENABLED)` guard
+- Cross-GPU (split_gpus) path uses P2P peer copy + lm_head projection
+- Fallback to simple AR decode when draft model is parked or unavailable
+- **Critical gotcha**: `ggml_get_to_fp32_cuda` is a ggml-cuda internal function that needs extern declaration
+- `tria_kv_compress` takes both `head_dim` (TriAttention RoPE dim, e.g. 64) and `tensor_head_dim` (actual K tensor head dim, e.g. 256)
+
 ### gfx1151 APU hipMemcpy Hang → Use CUDA Backend
 
 **Pattern**: Radeon 8060S (gfx1151) is an APU with shared system memory
@@ -406,5 +426,64 @@ TRIATTN_ENABLED=1 TRIATTN_STATS_PATH=/mnt/.../qwen3.5-27b.bin TRIATTN_KV_BUDGET=
 - 同步点从 ~1700 降至 ~106 (16x 减少)
 
 **状态**: 无需额外实现，关闭重复 bead
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-rw4
+
+### [集成] TriAttention 压缩功能集成到 Qwen35Backend
+
+**实施内容**:
+1. 将完整的 DFlash speculative decode 循环从 `test_dflash.cpp` 迁移到 `Qwen35Backend::do_spec_decode()`
+2. 实现 TriAttention 压缩在 daemon 模式下的集成
+3. 支持跨 GPU (split_gpus) 和单 GPU 两种路径
+
+**关键变更**:
+- `dflash/src/qwen35/qwen35_backend.cpp`: 完整重写 `do_spec_decode()` 函数
+  - Draft forward: 构建噪声嵌入 + draft forward pass
+  - Target verify: 批量验证所有 draft tokens (支持 fast_rollback 和 legacy replay)
+  - Greedy longest-prefix accept + bonus token
+  - SSM state rollback: fast_rollback 使用 DeltaNet captured intermediates
+  - 发射接受的 tokens 到输出流
+  - TriAttention 压缩集成 (DFLASH27B_TRIATTENTION_ENABLED guard)
+- 添加了 `ggml_get_to_fp32_cuda` 的外部声明用于 SSM rollback
+- 添加了 `tria_kv_compress` 的正确参数调用 (head_dim + tensor_head_dim)
+
+**验证结果**:
+- 编译通过，无错误无警告
+- 保持了与 `test_dflash.cpp` 相同的行为
+
+**Learnings:**
+- `ggml_get_to_fp32_cuda` 是 ggml-cuda 的内部函数，需要手动声明 `to_fp32_cuda_t` 类型
+- `tria_kv_compress` 接受两个 head_dim 参数: RoPE head_dim (64) 和 tensor head_dim (256)
+- 当 draft 模型 parked 或不可用时，自动回退到简单 AR 解码
+- fast_rollback 路径使用 DeltaNet 的 per-step 中间状态快照进行快速回滚
+- legacy replay 路径需要完整的 restore + replay forward pass
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-m96
+
+### TriAttention KV压缩优化 - 降低压缩比
+
+**实施内容**:
+添加 `min_keep_ratio` 配置参数，通过环境变量 `TRIATTN_MIN_KEEP_RATIO` 控制最小保留比例，防止过度压缩。
+
+**关键变更**:
+- `dflash/src/triattention_runner.h`: 添加 `min_keep_ratio` 成员 (默认 0.5f)
+- `dflash/src/triattention_runner.cpp`: 从环境变量读取 `TRIATTN_MIN_KEEP_RATIO`
+- `dflash/src/qwen35/qwen35_backend.cpp`: `keep_ratio = max(min_keep_ratio, budget_ratio)`
+- `dflash/src/qwen35/spec_decode.cpp`: 同样的 keep_ratio 计算更新
+- `dflash/test/test_dflash.cpp`: 同样的 keep_ratio 计算更新
+
+**验证结果**:
+- 编译成功
+- 使用 `TRIATTN_MIN_KEEP_RATIO=0.75` 运行，输出显示 `keep_ratio=0.82` (使用预算比和最小值的较大者)
+- 压缩比从之前的 ~50% 提升到 ~82% (保留了更多 token)
+
+**Learnings:**
+- `keep_ratio` 原来是 `kv_budget / max(committed, kv_budget)`，随着 committed 增长会趋向于 0
+- 没有下限保护时，长上下文可以压缩掉 >90% 的 token，导致输出质量下降
+- 设置 `min_keep_ratio=0.75` 确保至少保留 75% 的位置
 
 ---

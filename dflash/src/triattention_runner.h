@@ -48,6 +48,7 @@ struct TriAttentionState {
     int kv_budget = 2048;           // Max tokens to retain
     int divide_length = 128;        // Compression trigger interval
     int window_size = 128;          // Recent tokens always preserved
+    float min_keep_ratio = 0.5f;    // Minimum keep ratio (default 50% to prevent over-compression)
 
     // Runtime state
     int last_compressed_pos = 0;    // Track when we last compressed
@@ -112,6 +113,7 @@ extern TriAttentionState g_tria_state;
 //   - TRIATTN_KV_BUDGET: max tokens to retain (default 2048)
 //   - TRIATTN_DIVIDE_LENGTH: compression interval (default 128)
 //   - TRIATTN_WINDOW_SIZE: recent tokens preserved (default 128)
+//   - TRIATTN_MIN_KEEP_RATIO: minimum keep ratio to prevent over-compression (default 0.5)
 void init_triattention_from_env();
 
 // Free TriAttention resources
@@ -141,6 +143,9 @@ void free_triattention();
 // Returns true on success. The KV cache is compacted in-place: kept positions
 // are moved to the front [kv_start..kv_start+n_kept). cur_pos should be updated
 // to kv_start + n_kept by the caller.
+//
+// head_dim: TriAttention RoPE head_dim (from stats, e.g., 64)
+// tensor_head_dim: Actual K tensor head_dim for buffer layout (e.g., 256)
 bool tria_kv_compress(
     const struct tria_stats * stats,
     void * k_pre_rope_gpu,
@@ -149,6 +154,7 @@ bool tria_kv_compress(
     int n_full_attn,
     int n_head_kv,
     int head_dim,
+    int tensor_head_dim,
     int max_ctx,
     int kv_start,
     int cur_pos,
