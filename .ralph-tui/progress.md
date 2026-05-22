@@ -568,3 +568,60 @@ TRIATTN_ENABLED=1 TRIATTN_STATS_PATH=/mnt/.../qwen3.5-27b.bin TRIATTN_KV_BUDGET=
 **文件变更**: 无需代码变更 - 所有工作已在之前的 beads 中完成
 
 ---
+
+## [2026-05-22] - lucebox-hub-gfx1151-y2s
+
+### [重复验证] gfx1151 HIP hipMemcpy 性能问题 - 已在之前解决
+
+**结论**: 此 bead 描述的 gfx1151 APU hipMemcpy 性能问题已在之前的 beads 中完整解决。
+
+**根因确认** (lucebox-hub-gfx1151-5dq):
+- gfx1151 是 APU (集成 GPU，共享系统内存)
+- H2D `hipMemcpy` 极慢: 994 MiB 需要 >12 分钟，15 GiB 模型需要 ~3 小时
+- 这是硬件架构限制，不是代码 bug
+
+**解决方案** (lucebox-hub-gfx1151-8lk):
+- 使用系统中存在的 NVIDIA GV100GL (Tesla PG503-216, sm_70, 32GB) 替代
+- 重新编译使用 CUDA 后端 (解决了 CUDA 12.5 + GCC 13 兼容性问题)
+
+**性能验证** (lucebox-hub-gfx1151-1yy):
+| 指标 | gfx1151 APU (HIP) | GV100GL (CUDA) |
+|------|-------------------|----------------|
+| 模型加载 (15 GiB) | 3+ 小时 (超时) | ~10 秒 |
+| 基线生成速度 | 不可用 | 20.4 tok/s |
+| DFlash 速度 | 不可用 | 17.2 tok/s |
+
+**文件变更**: 无需代码变更 - 问题已通过硬件切换 (CUDA 后端) 解决
+
+**Learnings:**
+- GGML 对 gfx1151 已有完整 workaround (同步 memcpy、禁用 HIP Graphs 等)
+- 但 APU 硬件架构决定了 H2D 传输性能无法满足需求
+- 优先检查系统是否已有其他可用的离散 GPU (NVIDIA/AMD)
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-2qo
+
+### [重复验证] gfx1151 HIP hipMemcpy H2D 极慢问题 - 已在之前解决
+
+**结论**: 此 bead 与 `lucebox-hub-gfx1151-y2s` 是重复的相同工作，问题已在之前的 beads 中完整解决。
+
+**根因确认** (lucebox-hub-gfx1151-5dq):
+- gfx1151 是 APU (集成 GPU，共享系统内存)
+- H2D `hipMemcpy` 极慢: 994 MiB 需要 >12 分钟，15 GiB 模型需要 ~3 小时
+- 这是硬件架构限制，不是代码 bug
+
+**解决方案** (lucebox-hub-gfx1151-8lk):
+- 使用系统中存在的 NVIDIA GV100GL (Tesla PG503-216, sm_70, 32GB) 替代
+- 重新编译使用 CUDA 后端 (解决了 CUDA 12.5 + GCC 13 兼容性问题)
+
+**性能验证** (lucebox-hub-gfx1151-1yy):
+| 指标 | gfx1151 APU (HIP) | GV100GL (CUDA) |
+|------|-------------------|----------------|
+| 模型加载 (15 GiB) | 3+ 小时 (超时) | ~10 秒 |
+| 基线生成速度 | 不可用 | 20.4 tok/s |
+| DFlash 速度 | 不可用 | 17.2 tok/s |
+
+**文件变更**: 无需代码变更 - 问题已通过硬件切换 (CUDA 后端) 解决
+
+---

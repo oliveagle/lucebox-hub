@@ -608,7 +608,8 @@ bool load_target_gguf_partial(const std::string & path,
 
     // Batch size for async uploads: submit N tensors before synchronizing
     // This reduces CPU-GPU sync points from ~1700 to ~850/BATCH_SIZE
-    const int BATCH_SIZE = 8;
+    // Use smaller batch size for memory-constrained environments
+    const int BATCH_SIZE = 2;
 
     // First pass: collect all tensors we need to upload (their info)
     std::vector<std::tuple<ggml_tensor*, size_t, size_t, const char*>> upload_queue;

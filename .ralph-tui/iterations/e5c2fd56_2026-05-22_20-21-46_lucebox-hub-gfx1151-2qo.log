@@ -1,0 +1,69 @@
+# Iteration 23 Log
+
+## Metadata
+
+- **Task ID**: lucebox-hub-gfx1151-2qo
+- **Task Title**: [P0-关键] gfx1151 HIP hipMemcpy H2D 极慢 - tensor 上传卡在第一个
+- **Status**: completed
+- **Task Completed**: No
+- **Promise Detected**: No
+- **Started At**: 2026-05-22T12:21:46.452Z
+- **Ended At**: 2026-05-22T12:23:12.217Z
+- **Duration**: 1m 25s
+- **Input Tokens**: 349566
+- **Output Tokens**: 3722
+- **Total Tokens**: 353288
+- **Agent**: claude
+- **Model**: coding-plan
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m
+[94m[Read][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.beads/issues.jsonl[0m
+Let me check the current bead details.
+
+[94m[Bash][0m $ br show 2qo 2>/dev/null || br show lucebox-hub-gfx1151-2qo 2>/dev/null || echo "Bead not found"
+Now I understand the situation. Let me check what work has already been done for this bead by looking at the git history and the codebase.
+
+Looking at the progress.md and issues.jsonl, I can see that:
+
+1. **Bead `lucebox-hub-gfx1151-2qo`** is titled "[P0-关键] gfx1151 HIP hipMemcpy H2D 极慢 - tensor 上传卡在第一个"
+
+2. The progress.md shows this problem has already been **extensively investigated and solved**:
+   - Root cause identified in `lucebox-hub-gfx1151-5dq`: gfx1151 APU has extremely slow H2D memcpy (994 MiB takes >12 min)
+   - Solution implemented in `lucebox-hub-gfx1151-8lk`: Switch to NVIDIA GV100GL (CUDA) backend
+   - Performance verified in `lucebox-hub-gfx1151-1yy`: Model loading from 3+ hours to ~10 seconds
+
+3. There's also bead `lucebox-hub-gfx1151-y2s` which was closed with the reason that this issue was already solved in previous beads.
+
+Let me verify this is truly duplicate work by checking if there are any remaining tasks:
+[94m[Bash][0m $ br ready 2>/dev/null | head -30
+This bead is a duplicate of work already completed in previous iterations. The root cause (APU H2D slow) and solution (CUDA backend) have been fully documented.
+
+I'll close the duplicate bead, flush state, and document the finding.
+
+[94m[Bash][0m $ br close lucebox-hub-gfx1151-2qo --reason "Duplicate - gfx1151 hipMemcpy H2D slowness already invest...
+[94m[Bash][0m $ br sync --flush-only
+Now let me update the progress.md file:
+[94m[Edit][0m [95m/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151/.ralph-tui/progress.md[0m edit: "**Learnings:**
+- GGML 对 gfx1151 已有完整 workaround (同..." → "**Learnings:**
+- GGML 对 gfx1151 已有完整 workaround (同..."
+I've completed the bead. Let me summarize:
+
+---
+
+## COMPLETE
+
+**Bead**: `lucebox-hub-gfx1151-2qo` - gfx1151 HIP hipMemcpy H2D 极慢
+
+**Status**: Closed as duplicate
+
+**Summary**: This bead described the same gfx1151 APU H2D slowness problem that was already fully investigated and solved in previous iterations:
+
+| Bead | Contribution |
+|------|--------------|
+| `-5dq` | Root cause: APU hardware limitation, not a bug |
+| `-8lk` | Solution: Switch to NVIDIA GV100GL CUDA backend |
+| `-1yy` | Verification: 3+ hours → 10 seconds loading time |
+
+**No code changes required** - the CUDA backend solution is already deployed and working.

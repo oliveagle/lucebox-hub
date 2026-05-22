@@ -24,8 +24,22 @@ void init_triattention_from_env() {
     // Read stats path from environment
     const char* stats_path = std::getenv("TRIATTN_STATS_PATH");
     if (!stats_path) {
-        // Default path for Qwen3.5-27B stats
-        stats_path = "dflash/deps/llama.cpp/triattention/stats/qwen3.5-27b.bin";
+        // Try multiple candidate paths since binary may run from build/ or root
+        const char* candidates[] = {
+            "../deps/llama.cpp/triattention/stats/qwen3.5-27b.bin",        // from build/
+            "dflash/deps/llama.cpp/triattention/stats/qwen3.5-27b.bin",    // from parent
+            "deps/llama.cpp/triattention/stats/qwen3.5-27b.bin",           // from dflash/
+        };
+        for (const char* c : candidates) {
+            if (std::FILE* f = std::fopen(c, "rb")) {
+                std::fclose(f);
+                stats_path = c;
+                break;
+            }
+        }
+        if (!stats_path) {
+            stats_path = candidates[0];  // fallback to first candidate
+        }
     }
 
     // Check if TriAttention is enabled via env var
