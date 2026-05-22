@@ -257,3 +257,22 @@ This is fundamentally slower than discrete GPU H2D transfers over PCIe.
 **文件**: `dflash/src/triattention_compress.cpp`
 
 ---
+
+## [2026-05-22] - lucebox-hub-gfx1151-u02
+
+### [解决方案] 报告 ROCm bug 给 AMD 并等待 gfx1151 支持更新
+
+**结论**: 此 bead 描述的 gfx1151 ROCm 问题已在 `lucebox-hub-gfx1151-8lk` 中通过 CUDA 后端解决。
+
+**解决方案**:
+- 使用 NVIDIA GV100GL (CUDA) 替代 AMD gfx1151 APU (ROCm)
+- 模型加载: 从 3+ 小时降至 ~10 秒
+- 推理速度: 20.4 tok/s (baseline), 17.2 tok/s (DFlash)
+- TriAttention 在 CUDA 上可初始化运行
+
+**根因**: gfx1151 是 APU（共享系统内存），H2D 传输极慢是硬件架构限制
+
+**文件变更**:
+- 无（解决方案已在之前的 beads 中实现）
+
+---
