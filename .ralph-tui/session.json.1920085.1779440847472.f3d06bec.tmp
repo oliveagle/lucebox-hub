@@ -3,7 +3,7 @@
   "sessionId": "e5c2fd56-9d60-4af3-950a-f399109e64a1",
   "status": "running",
   "startedAt": "2026-05-21T18:50:25.154Z",
-  "updatedAt": "2026-05-22T09:03:41.481Z",
+  "updatedAt": "2026-05-22T09:07:27.469Z",
   "currentIteration": 15,
   "maxIterations": 50,
   "tasksCompleted": 11,
@@ -264,8 +264,7 @@
     "lucebox-hub-gfx1151-8pw",
     "lucebox-hub-gfx1151-8lk",
     "lucebox-hub-gfx1151-vwq",
-    "lucebox-hub-gfx1151-912",
-    "lucebox-hub-gfx1151-h9y"
+    "lucebox-hub-gfx1151-912"
   ],
   "subagentPanelVisible": false
 }

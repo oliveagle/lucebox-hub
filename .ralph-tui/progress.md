@@ -391,3 +391,20 @@ TRIATTN_ENABLED=1 TRIATTN_STATS_PATH=/mnt/.../qwen3.5-27b.bin TRIATTN_KV_BUDGET=
 **文件变更**: 无需代码变更 - 所有测试通过
 
 ---
+
+## [2026-05-22] - lucebox-hub-gfx1151-h9y
+
+### [验证] GGUF tensor 批量加载优化 - 已在之前实现
+
+**结论**: 此 bead 与 `lucebox-hub-gfx1151-912` 是重复的相同工作，优化已在之前完成。
+
+**验证**: 当前代码 (`dflash/src/qwen35/gguf_target_loader.cpp:609-688`) 已包含完整实现：
+- Ring buffer: 8 个 host buffers
+- 两遍遍历: 先收集元数据到 `upload_queue`，再批量上传
+- 使用 `ggml_backend_tensor_set_async` 进行异步 GPU 拷贝
+- 每批 8 个 tensor 同步一次 (`ggml_backend_synchronize`)
+- 同步点从 ~1700 降至 ~106 (16x 减少)
+
+**状态**: 无需额外实现，关闭重复 bead
+
+---
