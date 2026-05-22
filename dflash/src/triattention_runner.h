@@ -81,10 +81,13 @@ struct TriAttentionState {
     }
 
     // Check if compression should trigger at the given position.
-    // Returns true if (cur_pos - last_compressed_pos) >= divide_length.
-    bool should_compress(int cur_pos) const {
+    // Only compress when (1) divide_length has passed AND (2) committed tokens
+    // exceed kv_budget. Avoids compressing when cache is already small.
+    bool should_compress(int cur_pos, int committed) const {
         if (!enabled) return false;
-        return (cur_pos - last_compressed_pos) >= divide_length;
+        if (cur_pos - last_compressed_pos < divide_length) return false;
+        if (committed <= kv_budget) return false;  // No need to compress when under budget
+        return true;
     }
 
     // Mark compression as done at this position.

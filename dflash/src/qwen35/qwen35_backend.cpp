@@ -875,7 +875,8 @@ bool Qwen35Backend::do_spec_decode(int committed, int n_gen,
 
 #if defined(DFLASH27B_TRIATTENTION_ENABLED)
         // TriAttention KV compression: trigger at specified intervals
-        if (g_tria_state.should_compress(committed)) {
+        // Only compress when committed tokens exceed kv_budget
+        if (g_tria_state.should_compress(committed, committed)) {
             auto t_c0 = std::chrono::steady_clock::now();
 
             const int n_full_attn = (int)cache_.attn_k.size();

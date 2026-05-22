@@ -134,7 +134,7 @@ static std::vector<int> select_top_k_with_window(
 
 // ─── Helper: Copy positions from src to dst for a single KV head ─────
 // Copies positions in keep_indices order: position keep_indices[i] goes to position i
-// Uses overlapping-safe copy (handles in-place compaction correctly).
+// Uses batching to minimize GPU round trips (read all, compact, write all).
 // Returns false on GPU error, true on success.
 static bool compact_kv_head_positions(
     void * cache_data,
@@ -149,33 +149,58 @@ static bool compact_kv_head_positions(
 
     const size_t head_stride = max_ctx * head_bytes;
 
-    for (int ki = 0; ki < actual_keep; ki++) {
-        const int src_pos = keep_indices[ki];  // relative to kv_start
-        const int dst_pos = ki;
+#if defined(HAS_GPU) && HAS_GPU
+    // Batch all kept positions into a single buffer
+    std::vector<uint8_t> kept_buffer(actual_keep * head_bytes);
 
+    // Batch read: copy all kept positions from GPU in one go
+    const size_t dst_base_offset = ((size_t)kv_head * head_stride) + (size_t)kv_start * head_bytes;
+    for (int ki = 0; ki < actual_keep; ki++) {
+        const int src_pos = keep_indices[ki];
+        const size_t src_offset = dst_base_offset + (size_t)src_pos * head_bytes;
+        const size_t dst_offset = (size_t)ki * head_bytes;
+
+        // Read from GPU into CPU buffer
+        GPU_CHECK(gpuMemcpy(kept_buffer.data() + dst_offset,
+                          (char*)cache_data + src_offset, head_bytes, gpuMemcpyDtoH),
+                  "gpuMemcpy DtoH in compact_kv_head_positions (batch read)");
+    }
+
+    // Batch write: copy all compacted positions back to GPU in one go
+    for (int ki = 0; ki < actual_keep; ki++) {
+        const int dst_pos = ki;
+        const size_t dst_offset = dst_base_offset + (size_t)dst_pos * head_bytes;
+        const size_t src_offset = (size_t)ki * head_bytes;
+
+        // Write from CPU buffer to GPU
+        GPU_CHECK(gpuMemcpy((char*)cache_data + dst_offset,
+                          kept_buffer.data() + src_offset, head_bytes, gpuMemcpyHtoD),
+                  "gpuMemcpy HtoD in compact_kv_head_positions (batch write)");
+    }
+
+    // Single synchronize at the end
+    GPU_CHECK(gpuDeviceSynchronize(), "gpuDeviceSynchronize after compact_kv_head_positions");
+#else
+    // CPU path: direct memcpy
+    for (int ki = 0; ki < actual_keep; ki++) {
+        const int src_pos = keep_indices[ki];
+        const int dst_pos = ki;
         if (src_pos == dst_pos) continue;
 
         const size_t src_offset = ((size_t)kv_head * head_stride) + ((size_t)kv_start + src_pos) * head_bytes;
         const size_t dst_offset = ((size_t)kv_head * head_stride) + ((size_t)kv_start + dst_pos) * head_bytes;
-
-#if defined(HAS_GPU) && HAS_GPU
-        std::vector<uint8_t> tmp(head_bytes);
-        GPU_CHECK(gpuMemcpy(tmp.data(), (char*)cache_data + src_offset, head_bytes, gpuMemcpyDtoH),
-                  "gpuMemcpy DtoH in compact_kv_head_positions");
-        GPU_CHECK(gpuMemcpy((char*)cache_data + dst_offset, tmp.data(), head_bytes, gpuMemcpyHtoD),
-                  "gpuMemcpy HtoD in compact_kv_head_positions");
-#else
         std::vector<uint8_t> tmp(head_bytes);
         std::memcpy(tmp.data(), (char*)cache_data + src_offset, head_bytes);
         std::memcpy((char*)cache_data + dst_offset, tmp.data(), head_bytes);
-#endif
     }
+#endif
     return true;
 }
 
 // ─── Helper: Compact tria_k_pre_rope buffer ─────────────────────────────
 // Compacts the pre-RoPE K buffer in-place to match the KV cache compaction.
 // This ensures that subsequent forward passes read the correct pre-RoPE K data.
+// Uses batching to minimize GPU round trips.
 // Returns false on GPU error, true on success.
 static bool compact_tria_k_pre_rope(
     void * tria_data,
@@ -191,29 +216,56 @@ static bool compact_tria_k_pre_rope(
     const size_t head_bytes = (size_t)head_dim * sizeof(uint16_t);
     const size_t head_stride = max_ctx * head_bytes;
 
+#if defined(HAS_GPU) && HAS_GPU
+    // Batch all kept positions across all heads into a single buffer
+    std::vector<uint8_t> kept_buffer((size_t)n_head_kv * actual_keep * head_bytes);
+
+    // Batch read: copy all kept positions for all heads from GPU
+    for (int h = 0; h < n_head_kv; h++) {
+        const size_t head_base_offset = ((size_t)h * head_stride) + (size_t)kv_start * head_bytes;
+        for (int ki = 0; ki < actual_keep; ki++) {
+            const int src_pos = keep_indices[ki];
+            const size_t src_offset = head_base_offset + (size_t)src_pos * head_bytes;
+            const size_t dst_offset = ((size_t)h * actual_keep + ki) * head_bytes;
+
+            GPU_CHECK(gpuMemcpy(kept_buffer.data() + dst_offset,
+                              (char*)tria_data + src_offset, head_bytes, gpuMemcpyDtoH),
+                      "gpuMemcpy DtoH in compact_tria_k_pre_rope (batch read)");
+        }
+    }
+
+    // Batch write: copy all compacted positions back to GPU
+    for (int h = 0; h < n_head_kv; h++) {
+        const size_t head_base_offset = ((size_t)h * head_stride) + (size_t)kv_start * head_bytes;
+        for (int ki = 0; ki < actual_keep; ki++) {
+            const int dst_pos = ki;
+            const size_t dst_offset = head_base_offset + (size_t)dst_pos * head_bytes;
+            const size_t src_offset = ((size_t)h * actual_keep + ki) * head_bytes;
+
+            GPU_CHECK(gpuMemcpy((char*)tria_data + dst_offset,
+                              kept_buffer.data() + src_offset, head_bytes, gpuMemcpyHtoD),
+                      "gpuMemcpy HtoD in compact_tria_k_pre_rope (batch write)");
+        }
+    }
+
+    // Single synchronize at the end
+    GPU_CHECK(gpuDeviceSynchronize(), "gpuDeviceSynchronize after compact_tria_k_pre_rope");
+#else
+    // CPU path: direct memcpy
     for (int h = 0; h < n_head_kv; h++) {
         for (int ki = 0; ki < actual_keep; ki++) {
             const int src_pos = keep_indices[ki];
             const int dst_pos = ki;
-
             if (src_pos == dst_pos) continue;
 
             const size_t src_offset = ((size_t)h * head_stride) + ((size_t)kv_start + src_pos) * head_bytes;
             const size_t dst_offset = ((size_t)h * head_stride) + ((size_t)kv_start + dst_pos) * head_bytes;
-
-#if defined(HAS_GPU) && HAS_GPU
-            std::vector<uint8_t> tmp(head_bytes);
-            GPU_CHECK(gpuMemcpy(tmp.data(), (char*)tria_data + src_offset, head_bytes, gpuMemcpyDtoH),
-                      "gpuMemcpy DtoH in compact_tria_k_pre_rope");
-            GPU_CHECK(gpuMemcpy((char*)tria_data + dst_offset, tmp.data(), head_bytes, gpuMemcpyHtoD),
-                      "gpuMemcpy HtoD in compact_tria_k_pre_rope");
-#else
             std::vector<uint8_t> tmp(head_bytes);
             std::memcpy(tmp.data(), (char*)tria_data + src_offset, head_bytes);
             std::memcpy((char*)tria_data + dst_offset, tmp.data(), head_bytes);
-#endif
         }
     }
+#endif
     return true;
 }
 

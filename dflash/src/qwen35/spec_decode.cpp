@@ -223,7 +223,8 @@ bool run_target_layer_split_dflash_decode(
 
 #if defined(DFLASH27B_TRIATTENTION_ENABLED)
         // TriAttention KV compression: trigger at specified intervals
-        if (g_tria_state.should_compress(committed)) {
+        // Only compress when committed tokens exceed kv_budget
+        if (g_tria_state.should_compress(committed, committed)) {
             auto t_c0 = std::chrono::steady_clock::now();
 
             // Get KV cache pointers from the first shard
