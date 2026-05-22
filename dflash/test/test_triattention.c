@@ -15,7 +15,7 @@
 /* Include TriAttention C library */
 #include "../deps/llama.cpp/triattention/triattention.h"
 
-#define STATS_PATH_DEFAULT "../deps/llama.cpp/triattention/stats/qwen3.5-27b.bin"
+#define STATS_PATH_DEFAULT "../deps/llama.cpp/triattention/stats/qwen3.6-27b.bin"
 
 int main(int argc, char **argv) {
     const char *stats_path = STATS_PATH_DEFAULT;

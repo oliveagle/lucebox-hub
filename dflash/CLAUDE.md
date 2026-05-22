@@ -47,13 +47,13 @@ with open('/tmp/test_prompt.bin', 'wb') as f:
 
 ```bash
 export TRIATTN_ENABLED=1
-export TRIATTN_STATS_PATH=deps/llama.cpp/triattention/stats/qwen3.5-27b.bin
+export TRIATTN_STATS_PATH=deps/llama.cpp/triattention/stats/qwen3.6-27b.bin
 export TRIATTN_KV_BUDGET=2048
 export TRIATTN_DIVIDE_LENGTH=128
 export TRIATTN_WINDOW_SIZE=128
 ```
 
-Stats 文件路径: `dflash/deps/llama.cpp/triattention/stats/qwen3.5-27b.bin`
+Stats 文件路径: `dflash/deps/llama.cpp/triattention/stats/qwen3.6-27b.bin`
 
 ## GPU 信息
 

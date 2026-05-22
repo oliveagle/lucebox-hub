@@ -26,9 +26,9 @@ void init_triattention_from_env() {
     if (!stats_path) {
         // Try multiple candidate paths since binary may run from build/ or root
         const char* candidates[] = {
-            "../deps/llama.cpp/triattention/stats/qwen3.5-27b.bin",        // from build/
-            "dflash/deps/llama.cpp/triattention/stats/qwen3.5-27b.bin",    // from parent
-            "deps/llama.cpp/triattention/stats/qwen3.5-27b.bin",           // from dflash/
+            "../deps/llama.cpp/triattention/stats/qwen3.6-27b.bin",        // from build/
+            "dflash/deps/llama.cpp/triattention/stats/qwen3.6-27b.bin",    // from parent
+            "deps/llama.cpp/triattention/stats/qwen3.6-27b.bin",           // from dflash/
         };
         for (const char* c : candidates) {
             if (std::FILE* f = std::fopen(c, "rb")) {
