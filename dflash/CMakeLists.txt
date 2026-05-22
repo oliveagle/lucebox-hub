@@ -267,6 +267,10 @@ add_library(dflash27b STATIC
 if(DFLASH27B_TRIATTENTION)
     target_compile_definitions(dflash27b PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
     target_link_libraries(dflash27b PRIVATE triattention)
+    # TODO: Add GPU kernel source files for TriAttention scoring.
+    # The kernel files (triattention_kernels.cu, triattention_kernels.hip.cu)
+    # are created but not yet integrated due to build errors.
+    # They provide the infrastructure for future GPU-based scoring optimization.
 endif()
 
 # TriAttention also needs to be defined on test executables so that

@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "sessionId": "9e8e10bc-2658-40d3-8c2e-5a76ab36e7b3",
+  "sessionId": "d39e688b-3248-4e4f-9537-cc249886aeee",
   "status": "running",
-  "startedAt": "2026-05-22T13:54:59.250Z",
-  "updatedAt": "2026-05-22T15:22:35.776Z",
-  "currentIteration": 5,
+  "startedAt": "2026-05-22T15:45:53.386Z",
+  "updatedAt": "2026-05-22T16:16:50.889Z",
+  "currentIteration": 0,
   "maxIterations": 50,
-  "tasksCompleted": 5,
+  "tasksCompleted": 0,
   "isPaused": false,
   "agentPlugin": "claude",
   "trackerState": {
     "plugin": "beads-rust",
     "executionScopes": [],
-    "totalTasks": 40,
+    "totalTasks": 48,
     "tasks": [
       {
         "id": "lucebox-hub-gfx1151-2qo",
@@ -35,7 +35,7 @@
       {
         "id": "lucebox-hub-gfx1151-tsy",
         "title": "[修复] test_dflash 缺少 TriAttention 初始化调用",
-        "status": "open",
+        "status": "completed",
         "completedInSession": false
       },
       {
@@ -135,22 +135,70 @@
         "completedInSession": false
       },
       {
+        "id": "lucebox-hub-gfx1151-m7j",
+        "title": "[P0-致命] TriAttention CPU 瓶颈 - GPU→CPU→GPU round trip 拖慢性能",
+        "status": "open",
+        "completedInSession": false
+      },
+      {
+        "id": "lucebox-hub-gfx1151-arw",
+        "title": "[P0-关键] TriAttention 长上下文性能验证 - kv_budget=512 时 3005→1545 压缩成功",
+        "status": "completed",
+        "completedInSession": false
+      },
+      {
+        "id": "lucebox-hub-gfx1151-61r",
+        "title": "[P0-阻塞] TriAttention 压缩触发后性能未验证 - 需要长上下文测试",
+        "status": "completed",
+        "completedInSession": false
+      },
+      {
+        "id": "lucebox-hub-gfx1151-io4",
+        "title": "[P0-致命] TriAttention 压缩从未触发 - 日志中没有 'Updated cache.cur_pos'",
+        "status": "completed",
+        "completedInSession": false
+      },
+      {
+        "id": "lucebox-hub-gfx1151-pos",
+        "title": "[P0-关键] 验证 TriAttention 在长上下文场景的性能优势",
+        "status": "completed",
+        "completedInSession": false
+      },
+      {
+        "id": "lucebox-hub-gfx1151-0s1",
+        "title": "[P0-关键] TriAttention + DFlash 性能下降诊断 - 为什么 29.05 < 30.49 tok/s",
+        "status": "completed",
+        "completedInSession": false
+      },
+      {
+        "id": "lucebox-hub-gfx1151-pi4",
+        "title": "[P0-阻塞] TriAttention stats 文件不匹配 - 无法验证压缩功能",
+        "status": "completed",
+        "completedInSession": false
+      },
+      {
+        "id": "lucebox-hub-gfx1151-mvu",
+        "title": "[P0-关键] 生成 Qwen3.6-27B TriAttention stats 文件",
+        "status": "completed",
+        "completedInSession": false
+      },
+      {
         "id": "lucebox-hub-gfx1151-vzb",
         "title": "[P0-关键] TriAttention 性能回归 - DFlash+TriAttention 反而更慢",
-        "status": "open",
+        "status": "completed",
         "completedInSession": false
       },
       {
         "id": "lucebox-hub-gfx1151-wuj",
         "title": "[P0-关键] TriAttention 验收测试失败 - stats 文件 head_dim 不匹配",
         "status": "completed",
-        "completedInSession": true
+        "completedInSession": false
       },
       {
         "id": "lucebox-hub-gfx1151-uem",
         "title": "[P0-关键] Tensor 批量异步加载 - 替换 ggml_backend_tensor_set 为 async",
         "status": "completed",
-        "completedInSession": true
+        "completedInSession": false
       },
       {
         "id": "lucebox-hub-gfx1151-b7z",
@@ -256,62 +304,9 @@
       }
     ]
   },
-  "iterations": [
-    {
-      "iteration": 1,
-      "status": "completed",
-      "taskId": "lucebox-hub-gfx1151-uem",
-      "taskTitle": "[P0-关键] Tensor 批量异步加载 - 替换 ggml_backend_tensor_set 为 async",
-      "taskCompleted": true,
-      "durationMs": 82423,
-      "startedAt": "2026-05-22T13:54:59.325Z",
-      "endedAt": "2026-05-22T13:56:21.748Z"
-    },
-    {
-      "iteration": 2,
-      "status": "completed",
-      "taskId": "lucebox-hub-gfx1151-wuj",
-      "taskTitle": "[P0-关键] TriAttention 验收测试失败 - stats 文件 head_dim 不匹配",
-      "taskCompleted": true,
-      "durationMs": 1782090,
-      "startedAt": "2026-05-22T13:56:22.893Z",
-      "endedAt": "2026-05-22T14:26:04.983Z"
-    },
-    {
-      "iteration": 3,
-      "status": "completed",
-      "taskId": "lucebox-hub-gfx1151-0s1",
-      "taskTitle": "[P0-关键] TriAttention + DFlash 性能下降诊断 - 为什么 29.05 < 30.49 tok/s",
-      "taskCompleted": true,
-      "durationMs": 620948,
-      "startedAt": "2026-05-22T14:26:06.166Z",
-      "endedAt": "2026-05-22T14:36:27.114Z"
-    },
-    {
-      "iteration": 4,
-      "status": "completed",
-      "taskId": "lucebox-hub-gfx1151-io4",
-      "taskTitle": "[P0-致命] TriAttention 压缩从未触发 - 日志中没有 'Updated cache.cur_pos'",
-      "taskCompleted": true,
-      "durationMs": 1744309,
-      "startedAt": "2026-05-22T14:36:28.279Z",
-      "endedAt": "2026-05-22T15:05:32.588Z"
-    },
-    {
-      "iteration": 5,
-      "status": "completed",
-      "taskId": "lucebox-hub-gfx1151-61r",
-      "taskTitle": "[P0-阻塞] TriAttention 压缩触发后性能未验证 - 需要长上下文测试",
-      "taskCompleted": true,
-      "durationMs": 1020425,
-      "startedAt": "2026-05-22T15:05:34.058Z",
-      "endedAt": "2026-05-22T15:22:34.483Z"
-    }
-  ],
+  "iterations": [],
   "skippedTaskIds": [],
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
-  "activeTaskIds": [
-    "lucebox-hub-gfx1151-arw"
-  ],
+  "activeTaskIds": [],
   "subagentPanelVisible": false
 }

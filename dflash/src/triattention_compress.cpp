@@ -33,6 +33,8 @@
 #define gpuMemcpy      cudaMemcpy
 #define gpuMemcpyDtoH  cudaMemcpyDeviceToHost
 #define gpuMemcpyHtoD  cudaMemcpyHostToDevice
+#define gpuMalloc      cudaMalloc
+#define gpuFree        cudaFree
 #define gpuDeviceSynchronize cudaDeviceSynchronize
 #define gpuGetErrorString cudaGetErrorString
 #elif defined(GGML_USE_HIP)
@@ -44,6 +46,8 @@
 #define gpuMemcpy      hipMemcpy
 #define gpuMemcpyDtoH  hipMemcpyDeviceToHost
 #define gpuMemcpyHtoD  hipMemcpyHostToDevice
+#define gpuMalloc      hipMalloc
+#define gpuFree        hipFree
 #define gpuDeviceSynchronize hipDeviceSynchronize
 #define gpuGetErrorString hipGetErrorString
 #else
@@ -53,6 +57,8 @@
 #define gpuMemcpy(...)     ((void)0)
 #define gpuMemcpyDtoH(...) ((void)0)
 #define gpuMemcpyHtoD(...) ((void)0)
+#define gpuMalloc(...)     ((void*)(0))
+#define gpuFree(...)       ((void)0)
 #endif
 
 namespace dflash27b {
@@ -318,6 +324,15 @@ bool tria_kv_compress(
     std::fprintf(stderr, "[TriAttention] n_keep=%d, fc=%d\n", n_keep, fc);
 
 #if defined(HAS_GPU) && HAS_GPU
+    // ─── GPU + CPU PATH: Optimized implementation ───────────────────────
+    // 1. GPU: Copy bf16 from GPU to CPU (large transfer)
+    // 2. CPU: bf16→f32 conversion (triple loop, slow but manageable)
+    // 3. CPU: tria_score_kv_head scoring (main bottleneck)
+    // 4. CPU: top-K selection with window preservation
+    // 5. CPU + GPU: KV cache compaction (batched reads/writes)
+    //
+    // TODO: Add pure GPU path for bf16→f32 and scoring to avoid DtoH bottleneck
+
     // Get current GPU device
     int current_device = 0;
     GPU_CHECK(gpuGetDevice(&current_device), "gpuGetDevice");
