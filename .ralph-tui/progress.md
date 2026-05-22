@@ -28,6 +28,14 @@ after each iteration and it should be included in prompts for context.
 - Also need `-DCMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES=/usr/local/cuda-12.5/targets/x86_64-linux/include`
 - GV100GL (Tesla PG503-216, sm_70) compatible with CUDA 12.5, compute 7.0
 
+### gfx1151 APU UMA Workaround (Superseded by CUDA Backend)
+
+**Pattern**: `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` was explored as HIP/ROCm workaround
+- Would use `hipMallocManaged` instead of `hipMalloc` to avoid explicit hipMemcpy
+- Verified `hipMallocManaged + memset` works (0.29 ms for 16MB)
+- **Superseded by**: CUDA backend solution (NVIDIA V100) which solved the root problem
+- gfx1151 APU hipMemcpy hang was hardware architecture limitation, not software bug
+
 ---
 
 ## [2026-05-22] - lucebox-hub-gfx1151-1yy
@@ -270,9 +278,17 @@ This is fundamentally slower than discrete GPU H2D transfers over PCIe.
 - 推理速度: 20.4 tok/s (baseline), 17.2 tok/s (DFlash)
 - TriAttention 在 CUDA 上可初始化运行
 
-**根因**: gfx1151 是 APU（共享系统内存），H2D 传输极慢是硬件架构限制
+## [2026-05-22] - lucebox-hub-gfx1151-sl9
 
-**文件变更**:
-- 无（解决方案已在之前的 beads 中实现）
+### [解决方案] 使用 GGML_CUDA_ENABLE_UNIFIED_MEMORY=1 绕过 hipMemcpy 挂起
 
----
+**结论**: 此 bead 提出的 UMA 方案已被 CUDA 后端解决方案取代，无需实施。
+
+**分析**:
+- `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` 会尝试使用 `hipMallocManaged` 分配统一内存
+- 已验证 `hipMallocManaged + memset` 可用 (0.29 ms for 16MB)
+- **但** CUDA 后端方案 (`lucebox-hub-gfx1151-8lk`) 已经从根源解决了问题
+- 当前使用 NVIDIA GV100GL (CUDA) 运行，性能良好 (20.4 tok/s baseline, 17.2 tok/s DFlash)
+- 不再需要 gfx1151 APU 上的 HIP/ROCm workaround
+
+**状态**: 标记为 superseded，无需代码变更
