@@ -1,7 +1,7 @@
 {
-  "pid": 1920085,
-  "sessionId": "e5c2fd56-9d60-4af3-950a-f399109e64a1",
-  "acquiredAt": "2026-05-21T18:50:25.042Z",
+  "pid": 18898,
+  "sessionId": "3f860711-06b5-4173-baee-5a038f705593",
+  "acquiredAt": "2026-05-22T13:24:44.858Z",
   "cwd": "/mnt/eaget-4tb/data/llm_server/lucebox-hub-gfx1151",
   "hostname": "oleNucBoxEVOX2"
 }

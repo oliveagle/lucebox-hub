@@ -597,19 +597,9 @@ bool load_target_gguf_partial(const std::string & path,
         if (sz > max_tensor_size) max_tensor_size = sz;
     }
 
-    // Allocate reusable host buffer (use regular malloc, not mmap)
-    void *host_buf = malloc(max_tensor_size);
-    if (!host_buf) {
-        set_last_error("Failed to allocate host buffer for tensor upload");
-        gguf_free(gctx);
-        return false;
-    }
-    std::fprintf(stderr, "[loader] allocated host buffer: %zu bytes\n", max_tensor_size);
-
     // Batch size for async uploads: submit N tensors before synchronizing
-    // This reduces CPU-GPU sync points from ~1700 to ~850/BATCH_SIZE
-    // Use smaller batch size for memory-constrained environments
-    const int BATCH_SIZE = 2;
+    // This reduces CPU-GPU sync points and improves throughput via queued HIP copies.
+    const int BATCH_SIZE = 16;
 
     // First pass: collect all tensors we need to upload (their info)
     std::vector<std::tuple<ggml_tensor*, size_t, size_t, const char*>> upload_queue;
@@ -639,7 +629,10 @@ bool load_target_gguf_partial(const std::string & path,
     std::fprintf(stderr, "[loader] starting batch tensor upload: %zu tensors to upload\n", upload_queue.size());
     std::fflush(stderr);
 
-    // Allocate ring buffer: BATCH_SIZE host buffers for async copy safety
+    // Allocate ring buffer: BATCH_SIZE host buffers for async copy safety.
+    // Each buffer holds one tensor's data; the buffer stays valid until
+    // ggml_backend_synchronize() is called (HIP may still be reading it).
+    // We skip token_embd.weight (stays on CPU for embedder lookup).
     std::vector<void*> host_buffers;
     host_buffers.reserve(BATCH_SIZE);
     for (int i = 0; i < BATCH_SIZE; i++) {
@@ -647,28 +640,26 @@ bool load_target_gguf_partial(const std::string & path,
         if (!buf) {
             set_last_error("Failed to allocate host buffer for tensor upload");
             for (int j = 0; j < i; j++) free(host_buffers[j]);
-            free(host_buf);
             gguf_free(gctx);
             return false;
         }
         host_buffers.push_back(buf);
     }
-    std::fprintf(stderr, "[loader] allocated ring buffer: %d x %zu bytes\n", BATCH_SIZE, max_tensor_size);
-    free(host_buf); // Old single buffer no longer needed
-    host_buf = nullptr;
+    std::fprintf(stderr, "[loader] allocated ring buffer: %d x %zu bytes (%.2f MiB)\n",
+                 BATCH_SIZE, max_tensor_size, (BATCH_SIZE * max_tensor_size) / (1024.0 * 1024.0));
 
-    // Second pass: upload in batches
+    // Second pass: upload in batches using async HIP copies
     const size_t num_tensors = upload_queue.size();
     for (size_t batch_start = 0; batch_start < num_tensors; batch_start += BATCH_SIZE) {
         const size_t batch_end = std::min(batch_start + BATCH_SIZE, num_tensors);
 
-        // First, copy all mmap data to ring buffers (synchronous, fast CPU memcpy)
+        // Step 1: copy all mmap data to ring buffers (synchronous, fast CPU memcpy)
         for (size_t i = batch_start; i < batch_end; i++) {
             auto [t, off, sz, tname] = upload_queue[i];
             memcpy(host_buffers[i - batch_start], (const uint8_t *)mm.addr + off, sz);
         }
 
-        // Then, submit all async GPU copies (each buffer stays valid until sync)
+        // Step 2: submit all async GPU copies
         for (size_t i = batch_start; i < batch_end; i++) {
             auto [t, off, sz, tname] = upload_queue[i];
             tensor_count++;
@@ -677,11 +668,12 @@ bool load_target_gguf_partial(const std::string & path,
                              tensor_count, num_tensors, tname, sz / (1024.0 * 1024.0));
                 std::fflush(stderr);
             }
-            ggml_backend_tensor_set(backend, t, host_buffers[i - batch_start], 0, sz);
+            ggml_backend_tensor_set_async(backend, t, host_buffers[i - batch_start], 0, sz);
             total += sz;
         }
 
-        // Synchronize after each batch: all async copies complete before next batch
+        // Step 3: synchronize after each batch
+        // All async copies complete before ring buffers are reused
         ggml_backend_synchronize(backend);
     }
 
