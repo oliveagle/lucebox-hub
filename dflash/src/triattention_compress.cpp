@@ -27,21 +27,25 @@
 #if defined(GGML_USE_CUDA) && !defined(GGML_USE_HIP)
 #include <cuda_runtime.h>
 #define HAS_GPU 1
+#define GPU_SUCCESS cudaSuccess
 #define gpuGetDevice   cudaGetDevice
 #define gpuSetDevice   cudaSetDevice
 #define gpuMemcpy      cudaMemcpy
 #define gpuMemcpyDtoH  cudaMemcpyDeviceToHost
 #define gpuMemcpyHtoD  cudaMemcpyHostToDevice
 #define gpuDeviceSynchronize cudaDeviceSynchronize
+#define gpuGetErrorString cudaGetErrorString
 #elif defined(GGML_USE_HIP)
 #include <hip/hip_runtime.h>
 #define HAS_GPU 1
+#define GPU_SUCCESS hipSuccess
 #define gpuGetDevice   hipGetDevice
 #define gpuSetDevice   hipSetDevice
 #define gpuMemcpy      hipMemcpy
 #define gpuMemcpyDtoH  hipMemcpyDeviceToHost
 #define gpuMemcpyHtoD  hipMemcpyHostToDevice
 #define gpuDeviceSynchronize hipDeviceSynchronize
+#define gpuGetErrorString hipGetErrorString
 #else
 #define HAS_GPU 0
 #define gpuGetDevice(...)  ((void)0)
@@ -52,6 +56,19 @@
 #endif
 
 namespace dflash27b {
+
+#if defined(HAS_GPU) && HAS_GPU
+// Helper macro to check GPU API call results
+#define GPU_CHECK(call, msg) do { \
+    auto err = (call); \
+    if (err != GPU_SUCCESS) { \
+        std::fprintf(stderr, "[TriAttention] GPU error: %s: %s\n", (msg), gpuGetErrorString(err)); \
+        return false; \
+    } \
+} while(0)
+#else
+#define GPU_CHECK(call, msg) ((void)0)
+#endif
 
 // ── bf16 to f32 conversion ──────────────────────────────────────────────
 
@@ -118,7 +135,8 @@ static std::vector<int> select_top_k_with_window(
 // ─── Helper: Copy positions from src to dst for a single KV head ─────
 // Copies positions in keep_indices order: position keep_indices[i] goes to position i
 // Uses overlapping-safe copy (handles in-place compaction correctly).
-static void compact_kv_head_positions(
+// Returns false on GPU error, true on success.
+static bool compact_kv_head_positions(
     void * cache_data,
     int kv_head,
     int max_ctx,
@@ -127,7 +145,7 @@ static void compact_kv_head_positions(
     int actual_keep,
     size_t head_bytes)
 {
-    if (!cache_data || actual_keep == 0) return;
+    if (!cache_data || actual_keep == 0) return true;
 
     const size_t head_stride = max_ctx * head_bytes;
 
@@ -142,20 +160,24 @@ static void compact_kv_head_positions(
 
 #if defined(HAS_GPU) && HAS_GPU
         std::vector<uint8_t> tmp(head_bytes);
-        gpuMemcpy(tmp.data(), (char*)cache_data + src_offset, head_bytes, gpuMemcpyDtoH);
-        gpuMemcpy((char*)cache_data + dst_offset, tmp.data(), head_bytes, gpuMemcpyHtoD);
+        GPU_CHECK(gpuMemcpy(tmp.data(), (char*)cache_data + src_offset, head_bytes, gpuMemcpyDtoH),
+                  "gpuMemcpy DtoH in compact_kv_head_positions");
+        GPU_CHECK(gpuMemcpy((char*)cache_data + dst_offset, tmp.data(), head_bytes, gpuMemcpyHtoD),
+                  "gpuMemcpy HtoD in compact_kv_head_positions");
 #else
         std::vector<uint8_t> tmp(head_bytes);
         std::memcpy(tmp.data(), (char*)cache_data + src_offset, head_bytes);
         std::memcpy((char*)cache_data + dst_offset, tmp.data(), head_bytes);
 #endif
     }
+    return true;
 }
 
 // ─── Helper: Compact tria_k_pre_rope buffer ─────────────────────────────
 // Compacts the pre-RoPE K buffer in-place to match the KV cache compaction.
 // This ensures that subsequent forward passes read the correct pre-RoPE K data.
-static void compact_tria_k_pre_rope(
+// Returns false on GPU error, true on success.
+static bool compact_tria_k_pre_rope(
     void * tria_data,
     int head_dim,
     int max_ctx,
@@ -164,7 +186,7 @@ static void compact_tria_k_pre_rope(
     int kv_start,
     int actual_keep)
 {
-    if (!tria_data || actual_keep == 0) return;
+    if (!tria_data || actual_keep == 0) return true;
 
     const size_t head_bytes = (size_t)head_dim * sizeof(uint16_t);
     const size_t head_stride = max_ctx * head_bytes;
@@ -181,8 +203,10 @@ static void compact_tria_k_pre_rope(
 
 #if defined(HAS_GPU) && HAS_GPU
             std::vector<uint8_t> tmp(head_bytes);
-            gpuMemcpy(tmp.data(), (char*)tria_data + src_offset, head_bytes, gpuMemcpyDtoH);
-            gpuMemcpy((char*)tria_data + dst_offset, tmp.data(), head_bytes, gpuMemcpyHtoD);
+            GPU_CHECK(gpuMemcpy(tmp.data(), (char*)tria_data + src_offset, head_bytes, gpuMemcpyDtoH),
+                      "gpuMemcpy DtoH in compact_tria_k_pre_rope");
+            GPU_CHECK(gpuMemcpy((char*)tria_data + dst_offset, tmp.data(), head_bytes, gpuMemcpyHtoD),
+                      "gpuMemcpy HtoD in compact_tria_k_pre_rope");
 #else
             std::vector<uint8_t> tmp(head_bytes);
             std::memcpy(tmp.data(), (char*)tria_data + src_offset, head_bytes);
@@ -190,6 +214,7 @@ static void compact_tria_k_pre_rope(
 #endif
         }
     }
+    return true;
 }
 
 // ── Main KV compression function ────────────────────────────────────────
@@ -241,20 +266,13 @@ bool tria_kv_compress(
     std::fprintf(stderr, "[TriAttention] n_keep=%d, fc=%d\n", n_keep, fc);
 
 #if defined(HAS_GPU) && HAS_GPU
-    // Skip on HIP due to known hanging issues with hipMemcpy on gfx1151
-#if defined(GGML_USE_HIP)
-    std::fprintf(stderr, "[TriAttention] Disabled on HIP due to known hanging issues on gfx1151, skipping compression\n");
-    if (n_kept_out) *n_kept_out = cur_pos;
-    return true;
-#endif
-
     // Get current GPU device
     int current_device = 0;
-    gpuGetDevice(&current_device);
+    GPU_CHECK(gpuGetDevice(&current_device), "gpuGetDevice");
 
     // Set to requested GPU if different
     if (gpu_id >= 0 && gpu_id != current_device) {
-        gpuSetDevice(gpu_id);
+        GPU_CHECK(gpuSetDevice(gpu_id), "gpuSetDevice");
     }
 
     // Read pre-RoPE K from GPU if buffer is provided
@@ -276,11 +294,11 @@ bool tria_kv_compress(
 
         std::fprintf(stderr, "[TriAttention] Reading tria_k_pre_rope: offset=%zu, bytes=%zu\n", src_offset, copy_bytes);
 
-        gpuMemcpy(k_bf16.data(), (char*)k_pre_rope_gpu + src_offset, copy_bytes,
-                  gpuMemcpyDtoH);
+        GPU_CHECK(gpuMemcpy(k_bf16.data(), (char*)k_pre_rope_gpu + src_offset, copy_bytes, gpuMemcpyDtoH),
+                  "gpuMemcpy DtoH (reading tria_k_pre_rope)");
 
         // Synchronize after GPU copy to ensure completion
-        gpuDeviceSynchronize();
+        GPU_CHECK(gpuDeviceSynchronize(), "gpuDeviceSynchronize after reading tria_k_pre_rope");
 
         std::fprintf(stderr, "[TriAttention] GPU copy done, starting conversion\n");
 
@@ -313,7 +331,7 @@ bool tria_kv_compress(
 
     // Restore original device
     if (gpu_id >= 0 && gpu_id != current_device) {
-        gpuSetDevice(current_device);
+        GPU_CHECK(gpuSetDevice(current_device), "gpuSetDevice (restore)");
     }
 
     // Build key_pos array: positions [kv_start, kv_start+1, ..., cur_pos-1]
@@ -388,7 +406,7 @@ bool tria_kv_compress(
 #if defined(HAS_GPU) && HAS_GPU
     // Set device for compression operations
     if (gpu_id >= 0) {
-        gpuSetDevice(gpu_id);
+        GPU_CHECK(gpuSetDevice(gpu_id), "gpuSetDevice (compaction)");
     }
 
     std::fprintf(stderr, "[TriAttention] Compacting %d FA layers, %d KV heads, k_bytes=%zu, v_bytes=%zu\n",
@@ -405,12 +423,16 @@ bool tria_kv_compress(
 
             for (int h = 0; h < n_head_kv; h++) {
                 // K cache compaction
-                compact_kv_head_positions(attn_k[fa_layer], h, max_ctx, kv_start,
-                                         keep_indices, actual_keep, k_bytes);
+                if (!compact_kv_head_positions(attn_k[fa_layer], h, max_ctx, kv_start,
+                                              keep_indices, actual_keep, k_bytes)) {
+                    return false;
+                }
 
                 // V cache compaction
-                compact_kv_head_positions(attn_v[fa_layer], h, max_ctx, kv_start,
-                                         keep_indices, actual_keep, v_bytes);
+                if (!compact_kv_head_positions(attn_v[fa_layer], h, max_ctx, kv_start,
+                                              keep_indices, actual_keep, v_bytes)) {
+                    return false;
+                }
             }
         }
 
@@ -420,8 +442,10 @@ bool tria_kv_compress(
     // Also compact the tria_k_pre_rope buffer to maintain consistency
     if (k_pre_rope_gpu && actual_keep < seq_len) {
         std::fprintf(stderr, "[TriAttention] Compacting tria_k_pre_rope buffer (tensor_head_dim=%d)\n", tensor_head_dim);
-        compact_tria_k_pre_rope(k_pre_rope_gpu, tensor_head_dim, max_ctx, n_head_kv,
-                               keep_indices, kv_start, actual_keep);
+        if (!compact_tria_k_pre_rope(k_pre_rope_gpu, tensor_head_dim, max_ctx, n_head_kv,
+                                    keep_indices, kv_start, actual_keep)) {
+            return false;
+        }
     }
 #endif
 

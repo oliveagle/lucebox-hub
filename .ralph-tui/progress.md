@@ -71,6 +71,16 @@ after each iteration and it should be included in prompts for context.
   - Ring buffer ensures each tensor has dedicated host buffer until batch sync
 - **Expected improvement**: Reduces CPU-GPU sync points from ~1700 to ~850/8 ≈ 106 (16x reduction)
 
+### GPU API Return Value Checking — GPU_CHECK Macro Pattern
+
+**Pattern**: Unified error checking for all CUDA/HIP API calls using a macro
+- Define `GPU_SUCCESS` as `cudaSuccess` or `hipSuccess` based on backend
+- Define `gpuGetErrorString` as `cudaGetErrorString` or `hipGetErrorString`
+- Use `GPU_CHECK(call, msg)` macro that prints error and returns false on failure
+- Changed helper functions `compact_kv_head_positions` and `compact_tria_k_pre_rope` to return `bool` instead of `void`
+- All `gpuMemcpy`, `gpuGetDevice`, `gpuSetDevice`, `gpuDeviceSynchronize` calls now check return values
+- **Key gotcha**: Helper functions must return `bool` to use `GPU_CHECK` macro which calls `return false` on error
+
 ---
 
 ## [2026-05-22] - lucebox-hub-gfx1151-1yy
@@ -502,5 +512,30 @@ TRIATTN_ENABLED=1 TRIATTN_STATS_PATH=/mnt/.../qwen3.5-27b.bin TRIATTN_KV_BUDGET=
 - `keep_ratio` 原来是 `kv_budget / max(committed, kv_budget)`，随着 committed 增长会趋向于 0
 - 没有下限保护时，长上下文可以压缩掉 >90% 的 token，导致输出质量下降
 - 设置 `min_keep_ratio=0.75` 确保至少保留 75% 的位置
+
+---
+
+## [2026-05-22] - lucebox-hub-gfx1151-xmq
+
+### [修复] HIP/CUDA memcpy 返回值未检查警告
+
+**实施内容**:
+统一处理所有 CUDA/HIP API 调用的返回值检查，消除未检查返回值的警告。
+
+**关键变更**:
+- `dflash/src/triattention_compress.cpp`:
+  1. 添加 `GPU_SUCCESS` 宏（cudaSuccess/hipSuccess）和 `gpuGetErrorString` 宏
+  2. 添加 `GPU_CHECK(call, msg)` 统一错误检查宏，打印错误信息并返回 false
+  3. `compact_kv_head_positions` 函数改为返回 `bool`，所有 gpuMemcpy 调用使用 GPU_CHECK
+  4. `compact_tria_k_pre_rope` 函数改为返回 `bool`，所有 gpuMemcpy 调用使用 GPU_CHECK
+  5. 所有 gpuGetDevice, gpuSetDevice, gpuDeviceSynchronize 调用使用 GPU_CHECK
+
+**验证结果**:
+- 编译通过，无警告
+
+**Learnings:**
+- 在 GPU 编程中，`cudaMemcpy`/`hipMemcpy` 的返回值应该始终检查
+- 使用统一的错误检查宏比手动写 if 语句更简洁且不易出错
+- helper 函数如果需要使用 return-false-on-error 模式，必须声明为返回 bool
 
 ---
