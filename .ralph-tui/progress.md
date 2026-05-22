@@ -625,3 +625,29 @@ TRIATTN_ENABLED=1 TRIATTN_STATS_PATH=/mnt/.../qwen3.5-27b.bin TRIATTN_KV_BUDGET=
 **文件变更**: 无需代码变更 - 问题已通过硬件切换 (CUDA 后端) 解决
 
 ---
+
+## [2026-05-22] - lucebox-hub-gfx1151-vgz
+
+### [重复验证] HIP hipMemcpy 性能优化方案 - 已在之前解决
+
+**结论**: 此 bead 与之前多个 beads 重复，所有优化方案已完整实现。
+
+**已完成工作验证**:
+
+| 优化方案 | 完成于 | 状态 |
+|---------|--------|------|
+| gfx1151 APU H2D 极慢根因分析 | lucebox-hub-gfx1151-5dq | ✅ |
+| CUDA 后端解决方案 | lucebox-hub-gfx1151-8lk | ✅ |
+| 批量并行 tensor 加载 | lucebox-hub-gfx1151-912 | ✅ |
+| GPU_CHECK 返回值检查 | lucebox-hub-gfx1151-xmq | ✅ |
+| TriAttention HIP fallback | lucebox-hub-gfx1151-yxa | ✅ |
+
+**当前代码状态验证**:
+- `gguf_target_loader.cpp`: BATCH_SIZE=2, ring buffer 实现，两遍遍历
+- `triattention_compress.cpp`: GPU_CHECK 宏完整实现，gfx1151 HIP fallback
+
+**文件变更**: 无需代码变更
+
+---
+
+

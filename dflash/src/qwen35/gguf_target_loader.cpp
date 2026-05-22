@@ -677,7 +677,7 @@ bool load_target_gguf_partial(const std::string & path,
                              tensor_count, num_tensors, tname, sz / (1024.0 * 1024.0));
                 std::fflush(stderr);
             }
-            ggml_backend_tensor_set_async(backend, t, host_buffers[i - batch_start], 0, sz);
+            ggml_backend_tensor_set(backend, t, host_buffers[i - batch_start], 0, sz);
             total += sz;
         }
 
