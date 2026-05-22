@@ -260,6 +260,7 @@ add_library(dflash27b STATIC
     src/common/peer_access.cpp
     src/triattention_runner.cpp
     src/triattention_compress.cpp
+    src/triattention_gpu.cpp
 )
 
 # ─── TriAttention KV Compression (optional) ─────────────────────────────
@@ -267,10 +268,15 @@ add_library(dflash27b STATIC
 if(DFLASH27B_TRIATTENTION)
     target_compile_definitions(dflash27b PRIVATE DFLASH27B_TRIATTENTION_ENABLED=1)
     target_link_libraries(dflash27b PRIVATE triattention)
-    # TODO: Add GPU kernel source files for TriAttention scoring.
-    # The kernel files (triattention_kernels.cu, triattention_kernels.hip.cu)
-    # are created but not yet integrated due to build errors.
-    # They provide the infrastructure for future GPU-based scoring optimization.
+    # Add TriAttention GPU kernel sources
+    if(DFLASH27B_GPU_BACKEND STREQUAL "cuda")
+        target_sources(dflash27b PRIVATE src/triattention_kernels.cu)
+        set_source_files_properties(src/triattention_kernels.cu PROPERTIES LANGUAGE CUDA)
+        target_include_directories(dflash27b PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    elseif(DFLASH27B_GPU_BACKEND STREQUAL "hip")
+        target_sources(dflash27b PRIVATE src/triattention_kernels.hip.cu)
+        set_source_files_properties(src/triattention_kernels.hip.cu PROPERTIES LANGUAGE HIP)
+    endif()
 endif()
 
 # TriAttention also needs to be defined on test executables so that

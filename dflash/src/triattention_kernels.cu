@@ -492,57 +492,55 @@ bool ggml_cuda_tria_score(
 // ── Top-K selection on GPU ─────────────────────────────────────────────
 //
 // Uses thrust to sort positions by score, then takes top K.
+// Note: For simplicity, we copy scores to CPU for top-K selection and window
+// preservation. This is a small D2H transfer (seq_len floats) compared to the
+// full K/V cache. A full-GPU implementation with window preservation would
+// require more complex kernels.
 
 bool ggml_cuda_tria_topk(
     const float * d_scores,   /* [seq_len] combined scores */
     int           seq_len,
     int           k,
-    int         * d_topk_out, /* [k] output positions */
-    int         * d_count_out, /* [1] actual count written */
+    int         * h_topk_out, /* [k] output positions on host */
+    int         * h_count_out, /* [1] actual count written on host */
     cudaStream_t  stream)
 {
-    if (!d_scores || !d_topk_out || k <= 0) {
+    if (!d_scores || !h_topk_out || k <= 0) {
         std::fprintf(stderr, "[TriAttention CUDA] tria_topk: invalid args\n");
         return false;
     }
 
     k = std::min(k, seq_len);
 
-    // Allocate score-position pairs on GPU.
-    using Pair = thrust::pair<float, int>;
-    thrust::device_vector<Pair> pairs(seq_len);
-
-    // Fill with (score, position).
-    thrust::device_vector<float> scores_vec(seq_len);
-    cudaMemcpy(scores_vec.data().get(), d_scores, seq_len * sizeof(float),
-               cudaMemcpyDeviceToDevice);
-
-    // Create position indices.
-    thrust::device_vector<int> indices(seq_len);
-    thrust::sequence(indices.begin(), indices.end(), 0);
-
-    // Pair scores with indices.
-    thrust::transform(
-        thrust::make_zip_iterator(thrust::make_tuple(scores_vec.begin(), indices.begin())),
-        thrust::make_zip_iterator(thrust::make_tuple(scores_vec.begin(), indices.begin())) + seq_len,
-        pairs.begin(),
-        thrust::make_pair<float, int>());
-
-    // Sort descending by score.
-    thrust::sort(pairs.begin(), pairs.end(),
-                [](const Pair& a, const Pair& b) { return a.first > b.first; });
-
-    // Copy top K positions to output.
-    thrust::device_vector<int> topk_vec(k);
-    for (int i = 0; i < k; i++) {
-        topk_vec[i] = pairs[i].second;
+    // For simplicity, copy scores to CPU and run top-K there.
+    // This avoids complex thrust integration and allows window preservation.
+    std::vector<float> h_scores(seq_len);
+    cudaError_t err = cudaMemcpyAsync(h_scores.data(), d_scores, seq_len * sizeof(float),
+                                      cudaMemcpyDeviceToHost, stream);
+    if (err != cudaSuccess) {
+        std::fprintf(stderr, "[TriAttention CUDA] cudaMemcpy scores DtoH failed: %s\n",
+                     cudaGetErrorString(err));
+        return false;
     }
-    cudaMemcpy(d_topk_out, topk_vec.data().get(), k * sizeof(int),
-              cudaMemcpyDeviceToHost);
+    cudaStreamSynchronize(stream);
 
-    if (d_count_out) {
-        int h_count = k;
-        cudaMemcpy(d_count_out, &h_count, sizeof(int), cudaMemcpyHostToDevice);
+    // Create indexed array on CPU
+    std::vector<std::pair<float, int>> indexed(seq_len);
+    for (int i = 0; i < seq_len; i++) {
+        indexed[i] = {h_scores[i], i};
+    }
+
+    // Partial sort descending by score
+    std::partial_sort(indexed.begin(), indexed.begin() + k, indexed.end(),
+                      [](const auto & a, const auto & b) { return a.first > b.first; });
+
+    // Copy top-K positions to output
+    for (int i = 0; i < k; i++) {
+        h_topk_out[i] = indexed[i].second;
+    }
+
+    if (h_count_out) {
+        *h_count_out = k;
     }
 
     std::fprintf(stderr, "[TriAttention CUDA] Top-K done: k=%d\n", k);
@@ -569,16 +567,24 @@ __global__ void tria_compact_kv_kernel_impl(
     const size_t src_offset = ((size_t)kv_head * head_stride) + ((size_t)kv_start + src_pos) * head_bytes;
     const size_t dst_offset = ((size_t)kv_head * head_stride) + ((size_t)kv_start + dst_pos) * head_bytes;
 
-    // Copy one element at a time.
-    // Note: head_bytes can be large (e.g., 128 bytes for q8_0).
-    // For better performance, use vectorized loads/stores.
-    char * dst = static_cast<char*>(cache_data) + dst_offset;
-    const char * src = static_cast<const char*>(cache_data) + src_offset;
+    // Copy element-by-element. For ggml types, head_bytes <= 128 (q8_0 at dim 256).
+    // Use 4-byte word copies for efficiency.
+    uint32_t * dst = static_cast<uint32_t *>(static_cast<char*>(cache_data) + dst_offset);
+    const uint32_t * src = static_cast<const uint32_t *>(static_cast<const char*>(cache_data) + src_offset);
 
-    if (dst_pos < actual_keep) {
-        for (size_t b = 0; b < head_bytes; b += 4) {
-            // Copy 4 bytes at a time.
-            // This is a simplified approach. For production, use vectorized stores.
+    const int words = head_bytes / 4;
+    const int tid = threadIdx.x;
+    for (int w = tid; w < words; w += blockDim.x) {
+        dst[w] = src[w];
+    }
+
+    // Handle remaining bytes if head_bytes is not multiple of 4.
+    const int rem = words * 4;
+    if (rem < (int)head_bytes) {
+        char * dst_c = static_cast<char*>(static_cast<void*>(dst));
+        const char * src_c = static_cast<const char*>(static_cast<const void*>(src));
+        for (int b = rem; b < (int)head_bytes; b++) {
+            dst_c[b] = src_c[b];
         }
     }
 }
@@ -594,8 +600,11 @@ bool ggml_cuda_tria_compact_kv(
     int          seq_len,
     cudaStream_t  stream)
 {
-    const int n_blocks = (actual_keep + 255) / 256;
-    tria_compact_kv_kernel_impl<<<n_blocks, 256, 0, stream>>>(
+    if (actual_keep <= 0) return true;
+
+    const int threads_per_block = 256;
+    const int n_blocks = (actual_keep + threads_per_block - 1) / threads_per_block;
+    tria_compact_kv_kernel_impl<<<n_blocks, threads_per_block, 0, stream>>>(
         cache_data, keep_indices, actual_keep,
         kv_head, max_ctx, kv_start, head_bytes, seq_len);
 
@@ -608,6 +617,41 @@ bool ggml_cuda_tria_compact_kv(
     return true;
 }
 
+// ── GPU bf16 buffer compaction kernel ───────────────────────────────────
+
+__global__ void tria_compact_tria_bf16_kernel_impl(
+    void       * tria_data,
+    const int  * keep_indices,
+    int          actual_keep,
+    int          tensor_head_dim,
+    int          max_ctx,
+    int          n_kv_heads,
+    int          kv_start)
+{
+    // Each block handles one KV head.
+    const int head = blockIdx.x;
+    if (head >= n_kv_heads) return;
+
+    // Each thread handles one (dst_pos, element) pair.
+    const int dst_pos = blockIdx.y;
+    if (dst_pos >= actual_keep) return;
+
+    const int src_pos = keep_indices[dst_pos];
+    const int tid = threadIdx.x;
+
+    const size_t head_stride = (size_t)max_ctx * tensor_head_dim * sizeof(uint16_t);
+    const size_t src_offset = ((size_t)head * head_stride) + ((size_t)kv_start + src_pos) * tensor_head_dim * sizeof(uint16_t);
+    const size_t dst_offset = ((size_t)head * head_stride) + ((size_t)kv_start + dst_pos) * tensor_head_dim * sizeof(uint16_t);
+
+    // Copy tensor_head_dim uint16_t elements.
+    const uint16_t * src = static_cast<const uint16_t *>(static_cast<const char*>(tria_data) + src_offset);
+    uint16_t * dst = static_cast<uint16_t *>(static_cast<char*>(tria_data) + dst_offset);
+
+    for (int e = tid; e < tensor_head_dim; e += blockDim.x) {
+        dst[e] = src[e];
+    }
+}
+
 bool ggml_cuda_tria_compact_tria_bf16(
     void       * tria_data,
     const int  * keep_indices,
@@ -618,17 +662,22 @@ bool ggml_cuda_tria_compact_tria_bf16(
     int          kv_start,
     cudaStream_t  stream)
 {
-    // Not implemented. Uses CPU-based compaction for now.
-    (void)tria_data;
-    (void)keep_indices;
-    (void)actual_keep;
-    (void)tensor_head_dim;
-    (void)max_ctx;
-    (void)n_kv_heads;
-    (void)kv_start;
-    (void)stream;
-    std::fprintf(stderr, "[TriAttention CUDA] tria_compact_tria_bf16: not yet implemented\n");
-    return false;
+    if (actual_keep <= 0) return true;
+    if (!tria_data) return true;
+
+    const int threads_per_block = 256;
+    dim3 grid(n_kv_heads, actual_keep);
+    tria_compact_tria_bf16_kernel_impl<<<grid, threads_per_block, 0, stream>>>(
+        tria_data, keep_indices, actual_keep,
+        tensor_head_dim, max_ctx, n_kv_heads, kv_start);
+
+    cudaError_t err = cudaPeekAtLastError();
+    if (err != cudaSuccess) {
+        std::fprintf(stderr, "[TriAttention CUDA] compact_tria_bf16 kernel failed: %s\n",
+                     cudaGetErrorString(err));
+        return false;
+    }
+    return true;
 }
 
 }  // namespace triattention

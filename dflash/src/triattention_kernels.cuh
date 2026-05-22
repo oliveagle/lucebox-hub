@@ -8,23 +8,19 @@
 
 #pragma once
 
-#if defined(GGML_USE_CUDA) || defined(GGML_USE_HIP)
-
-#include <stdint.h>
-#include <stddef.h>
-
-#if defined(GGML_USE_CUDA)
+#if defined(GGML_USE_HIP)
+// HIP: Use native HIP types (even when GGML_USE_CUDA is also defined for ggml compat)
+#include <hip/hip_runtime_api.h>
+namespace dflash27b {
+namespace triattention {
+using gpuStream_t = hipStream_t;
+}  // namespace triattention
+}  // namespace dflash27b
+#elif defined(GGML_USE_CUDA)
 #include <cuda_runtime.h>
 namespace dflash27b {
 namespace triattention {
 using gpuStream_t = cudaStream_t;
-}  // namespace triattention
-}  // namespace dflash27b
-#elif defined(GGML_USE_HIP)
-#include <hip/hip_runtime.h>
-namespace dflash27b {
-namespace triattention {
-using gpuStream_t = hipStream_t;
 }  // namespace triattention
 }  // namespace dflash27b
 #endif
@@ -79,23 +75,8 @@ namespace triattention {
 //
 // Returns true on success, false on error.
 
-#if defined(GGML_USE_CUDA)
-bool ggml_cuda_tria_score(
-    const void * k_bf16_gpu,
-    const float * d_q_stats,
-    const float * d_omega,
-    const int   * d_key_pos,
-    int           cur_pos,
-    int           n_full_attn,
-    int           n_kv_heads,
-    int           tensor_head_dim,
-    int           fc,
-    int           seq_len,
-    int           kv_start,
-    float       * d_scores_out,
-    int           gqa,
-    cudaStream_t  stream);
-#elif defined(GGML_USE_HIP)
+// Prioritize HIP over CUDA (both may be defined for ggml compatibility)
+#if defined(GGML_USE_HIP)
 bool ggml_hip_tria_score(
     const void * k_bf16_gpu,
     const float * d_q_stats,
@@ -111,38 +92,56 @@ bool ggml_hip_tria_score(
     float       * d_scores_out,
     int           gqa,
     hipStream_t   stream);
+#elif defined(GGML_USE_CUDA)
+bool ggml_cuda_tria_score(
+    const void * k_bf16_gpu,
+    const float * d_q_stats,
+    const float * d_omega,
+    const int   * d_key_pos,
+    int           cur_pos,
+    int           n_full_attn,
+    int           n_kv_heads,
+    int           tensor_head_dim,
+    int           fc,
+    int           seq_len,
+    int           kv_start,
+    float       * d_scores_out,
+    int           gqa,
+    cudaStream_t  stream);
 #endif
 
 // ── Top-K selection on GPU ─────────────────────────────────────────────
 //
 // Selects top-K positions by score using GPU-based sorting.
+// Note: Returns positions on host for window preservation logic.
 //
 // Parameters:
 //   d_scores - GPU array [seq_len] of combined scores
 //   seq_len - sequence length
 //   k - number of positions to select
-//   d_topk_out - GPU output array [k] for selected positions
-//   d_count_out - GPU output [1] for actual count
+//   h_topk_out - host output array [k] for selected positions
+//   h_count_out - host output [1] for actual count
 //   stream - GPU stream
 //
 // Returns true on success, false on error.
 
-#if defined(GGML_USE_CUDA)
-bool ggml_cuda_tria_topk(
-    const float * d_scores,
-    int           seq_len,
-    int           k,
-    int         * d_topk_out,
-    int         * d_count_out,
-    cudaStream_t  stream);
-#elif defined(GGML_USE_HIP)
+// Prioritize HIP over CUDA (both may be defined for ggml compatibility)
+#if defined(GGML_USE_HIP)
 bool ggml_hip_tria_topk(
     const float * d_scores,
     int           seq_len,
     int           k,
-    int         * d_topk_out,
-    int         * d_count_out,
+    int         * h_topk_out,
+    int         * h_count_out,
     hipStream_t   stream);
+#elif defined(GGML_USE_CUDA)
+bool ggml_cuda_tria_topk(
+    const float * d_scores,
+    int           seq_len,
+    int           k,
+    int         * h_topk_out,
+    int         * h_count_out,
+    cudaStream_t  stream);
 #endif
 
 // ── GPU KV compaction kernel ───────────────────────────────────────────
@@ -161,18 +160,8 @@ bool ggml_hip_tria_topk(
 //
 // Returns true on success, false on error.
 
-#if defined(GGML_USE_CUDA)
-bool ggml_cuda_tria_compact_kv(
-    void       * cache_data,
-    const int  * keep_indices,
-    int          actual_keep,
-    int          kv_head,
-    int          max_ctx,
-    int          kv_start,
-    size_t       head_bytes,
-    int          seq_len,
-    cudaStream_t  stream);
-#elif defined(GGML_USE_HIP)
+// Prioritize HIP over CUDA (both may be defined for ggml compatibility)
+#if defined(GGML_USE_HIP)
 bool ggml_hip_tria_compact_kv(
     void       * cache_data,
     const int  * keep_indices,
@@ -183,6 +172,17 @@ bool ggml_hip_tria_compact_kv(
     size_t       head_bytes,
     int          seq_len,
     hipStream_t   stream);
+#elif defined(GGML_USE_CUDA)
+bool ggml_cuda_tria_compact_kv(
+    void       * cache_data,
+    const int  * keep_indices,
+    int          actual_keep,
+    int          kv_head,
+    int          max_ctx,
+    int          kv_start,
+    size_t       head_bytes,
+    int          seq_len,
+    cudaStream_t  stream);
 #endif
 
 // ── GPU KV compaction for tria_k_pre_rope buffer (bf16) ───────────────────
@@ -201,17 +201,8 @@ bool ggml_hip_tria_compact_kv(
 //
 // Returns true on success, false on error.
 
-#if defined(GGML_USE_CUDA)
-bool ggml_cuda_tria_compact_tria_bf16(
-    void       * tria_data,
-    const int  * keep_indices,
-    int          actual_keep,
-    int          tensor_head_dim,
-    int          max_ctx,
-    int          n_kv_heads,
-    int          kv_start,
-    cudaStream_t  stream);
-#elif defined(GGML_USE_HIP)
+// Prioritize HIP over CUDA (both may be defined for ggml compatibility)
+#if defined(GGML_USE_HIP)
 bool ggml_hip_tria_compact_tria_bf16(
     void       * tria_data,
     const int  * keep_indices,
@@ -221,9 +212,17 @@ bool ggml_hip_tria_compact_tria_bf16(
     int          n_kv_heads,
     int          kv_start,
     hipStream_t   stream);
+#elif defined(GGML_USE_CUDA)
+bool ggml_cuda_tria_compact_tria_bf16(
+    void       * tria_data,
+    const int  * keep_indices,
+    int          actual_keep,
+    int          tensor_head_dim,
+    int          max_ctx,
+    int          n_kv_heads,
+    int          kv_start,
+    cudaStream_t  stream);
 #endif
 
 }  // namespace triattention
 }  // namespace dflash27b
-
-#endif // GGML_USE_CUDA || GGML_USE_HIP

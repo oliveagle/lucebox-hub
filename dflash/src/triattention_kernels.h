@@ -3,22 +3,20 @@
 // This header defines the __device__ scoring function used by both CUDA and
 // HIP translation units. It is included by the per-backend *.cu files and
 // NOT compiled directly.
-//
-// Algorithm (eq 6-13 from TriAttention paper):
-//   1. For each key position s, compute per-band phase amp and ka
-//   2. Accumulate trig_sum over 17 geometric offsets (1,2,4,...,2^16)
-//   3. Add norm extra term: max(0, E[||q||] - ||E[q]||) * ||k||
-//
-// Key design decisions:
-//   - Operates on float32 (bf16→f32 conversion happens via __half intrinsics
-//     where supported, or inline cast on HIP).
-//   - One thread per (kv_head, position) pair. Each thread processes all fc.
-//   - Shared memory holds per-call constant data (q_means, omega, offsets).
-//   - Scores written to GPU global memory for downstream top-K on GPU.
 
 #pragma once
 
 #include <stdint.h>
+
+#if defined(__CUDACC__) || defined(__HIP__)
+#if defined(__HIP__)
+// HIP headers provide __shfl_xor, __syncthreads, etc.
+#include <hip/hip_runtime.h>
+#else
+// CUDA headers for device code
+#include <cuda_runtime.h>
+#endif
+#endif
 
 // ── Algorithm constants ────────────────────────────────────────────────
 
