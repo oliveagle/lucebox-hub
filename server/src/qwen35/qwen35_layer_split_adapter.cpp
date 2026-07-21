@@ -143,7 +143,7 @@ void Qwen35LayerSplitAdapter::kvflash_read_config() {
 
         int owned_full = 0;
         for (int il = shard.layer_begin; il < shard.layer_end; ++il) {
-            if (((il + 1) % shard.weights.full_attention_interval) == 0) {
+            if (((il + 1) % shard.weights.full_attention_interval) == 0 || (shard.weights.n_layer % shard.weights.full_attention_interval > 0 && il >= shard.weights.n_layer - shard.weights.n_layer % shard.weights.full_attention_interval)) {
                 ++owned_full;
             }
         }

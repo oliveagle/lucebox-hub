@@ -334,7 +334,7 @@ bool load_target_gguf_partial(const std::string & path,
     const uint32_t n_headkv= get_u32_or(gctx, key("attention.head_count_kv").c_str(), 0);
     const uint32_t kl      = get_u32_or(gctx, key("attention.key_length").c_str(), 0);
     const uint32_t vl      = get_u32_or(gctx, key("attention.value_length").c_str(), 0);
-    const uint32_t fai     = get_u32_or(gctx, key("full_attention_interval").c_str(), 0);
+    uint32_t fai     = get_u32_or(gctx, key("full_attention_interval").c_str(), 0);
     const uint32_t ssm_conv  = get_u32_or(gctx, key("ssm.conv_kernel").c_str(), 0);
     const uint32_t ssm_inner = get_u32_or(gctx, key("ssm.inner_size").c_str(), 0);
     const uint32_t ssm_state = get_u32_or(gctx, key("ssm.state_size").c_str(), 0);
@@ -378,10 +378,7 @@ bool load_target_gguf_partial(const std::string & path,
         gguf_free(gctx); return false;
     }
     if (n_layer % fai != 0) {
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "block_count=%u not divisible by full_attention_interval=%u", n_layer, fai);
-        set_last_error(buf);
-        gguf_free(gctx); return false;
+        fprintf(stderr, "[dflash] n_layer=%u not divisible by fai=%u; extra %u layer(s) will be treated as full-attn\n", n_layer, fai, n_layer % fai);
     }
 
     // rope dimension_sections (array of 4 uint32)
@@ -573,7 +570,8 @@ bool load_target_gguf_partial(const std::string & path,
         // Sanity: each layer must be EITHER full-attn OR deltanet, not both, not neither.
         const bool has_attn = L.wq && L.wk && L.wv && L.wo && L.q_norm && L.k_norm;
         const bool has_ssm  = L.wqkv && L.wqkv_gate && L.ssm_conv1d && L.ssm_out;
-        const bool is_full_attn_layer = (((il + 1) % out.full_attention_interval) == 0);
+        const int _rem_ = n_layer % out.full_attention_interval;
+        const bool is_full_attn_layer = (((il + 1) % out.full_attention_interval) == 0) || (_rem_ > 0 && il >= (int)n_layer - _rem_);
         if (is_full_attn_layer && !has_attn) {
             char b[128];
             std::snprintf(b, sizeof(b), "layer %d expected full-attn, missing tensors", il);

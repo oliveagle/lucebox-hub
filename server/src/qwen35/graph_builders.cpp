@@ -29,7 +29,7 @@ bool build_layer_step(
     if (kvflash) with_mask = true;
     step_graph_free(sg);
 
-    const bool is_attn = (((layer_idx + 1) % w.full_attention_interval) == 0);
+    const bool is_attn = (((layer_idx + 1) % w.full_attention_interval) == 0) || (w.n_layer % w.full_attention_interval > 0 && layer_idx >= w.n_layer - w.n_layer % w.full_attention_interval);
 
     ggml_init_params ip{};
     ip.mem_size   = 512 * 1024 * 1024;
@@ -129,7 +129,7 @@ bool build_layer_prefn_step(
     ggml_set_name(sg.inp_embed, "inp_embed");
     ggml_set_input(sg.inp_embed);
 
-    const bool is_attn = (((layer_idx + 1) % w.full_attention_interval) == 0);
+    const bool is_attn = (((layer_idx + 1) % w.full_attention_interval) == 0) || (w.n_layer % w.full_attention_interval > 0 && layer_idx >= w.n_layer - w.n_layer % w.full_attention_interval);
     if (is_attn) {
         sg.positions = ggml_new_tensor_1d(sg.ctx, GGML_TYPE_I32, 4 * n_tokens);
         ggml_set_name(sg.positions, "positions");
@@ -218,7 +218,7 @@ bool build_hybrid_full_layer_step(
     ggml_set_name(sg.inp_embed, "inp_embed");
     ggml_set_input(sg.inp_embed);
 
-    const bool is_attn = (((layer_idx + 1) % w.full_attention_interval) == 0);
+    const bool is_attn = (((layer_idx + 1) % w.full_attention_interval) == 0) || (w.n_layer % w.full_attention_interval > 0 && layer_idx >= w.n_layer - w.n_layer % w.full_attention_interval);
     if (is_attn) {
         sg.positions = ggml_new_tensor_1d(sg.ctx, GGML_TYPE_I32, 4 * n_tokens);
         ggml_set_name(sg.positions, "positions");

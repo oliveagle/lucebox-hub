@@ -242,7 +242,7 @@ bool run_qwen35_layer_split_forward(
             current_shard = shard;
         }
 
-        const bool is_attn = (((il + 1) % embed_source.full_attention_interval) == 0);
+        const bool is_attn = (((il + 1) % embed_source.full_attention_interval) == 0 || (embed_source.n_layer % embed_source.full_attention_interval > 0 && il >= embed_source.n_layer - embed_source.n_layer % embed_source.full_attention_interval));
         const int capture_idx = target_capture_index(embed_source.capture_layer_ids,
                                                      embed_source.n_capture_layers, il);
         for (int start = 0; start < n_tokens_total; start += ubatch) {
@@ -401,7 +401,7 @@ bool run_qwen35_layer_split_layers_from_activation(
             current_shard = shard;
         }
 
-        const bool is_attn = (((il + 1) % shard->weights.full_attention_interval) == 0);
+        const bool is_attn = (((il + 1) % shard->weights.full_attention_interval) == 0 || (shard->weights.n_layer % shard->weights.full_attention_interval > 0 && il >= shard->weights.n_layer - shard->weights.n_layer % shard->weights.full_attention_interval));
         const int capture_idx = target_capture_index(shard->weights.capture_layer_ids,
                                                      shard->weights.n_capture_layers, il);
         for (int start = 0; start < n_tokens_total; start += ubatch) {
